@@ -1,0 +1,44 @@
+# ===== 环境变量与密钥（绝对不能上传）=====
+.env
+.env.*
+*.env
+*.key
+*.pem
+secrets.json
+config.local.*
+
+# ===== 依赖目录（体积巨大，可随时重装）=====
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+
+# ===== 本地数据库文件 =====
+*.db
+*.sqlite
+*.sqlite3
+*.mdb
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# ===== 编辑器/系统垃圾 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Python 虚拟环境与打包产物 =====
+*.egg-info/
+.pytest_cache/
+
+# ===== AI 工作目录（本地记忆/技能/会话记录，不上传）=====
+.workbuddy/
