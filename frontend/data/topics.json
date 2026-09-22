@@ -1,0 +1,82 @@
+[
+  {
+    "topicId": "T1",
+    "group": "会议上",
+    "name": "项目进度被追问",
+    "summary": "\"What's the status? Why the delay?\"——你要解释清楚进度和原因",
+    "durationLabel": "3–5 分钟",
+    "opening": "We're a bit behind. So, what's the status?",
+    "followUps": ["具体哪一步没做完", "原因是什么", "什么时候能好"],
+    "anchor": "说了进度却给不出原因或时间点；开始讲与本项目无关的事"
+  },
+  {
+    "topicId": "T2",
+    "group": "会议上",
+    "name": "对方案提反对意见",
+    "summary": "\"I'm not sure I agree, because…\"——不同意，但要说得出理由",
+    "durationLabel": "3–5 分钟",
+    "opening": "I'm thinking we go with the first option. Thoughts?",
+    "followUps": ["你不同意哪里", "你的理由", "有没有替代方案"],
+    "anchor": "只表态不给理由；理由与方案本身无关（如谈办公室氛围）"
+  },
+  {
+    "topicId": "T3",
+    "group": "会议上",
+    "name": "被问到没准备过的问题",
+    "summary": "\"So, what do you think?\"——最典型的即兴点名",
+    "durationLabel": "3–5 分钟",
+    "opening": "So, what do you think?",
+    "followUps": ["你的观点", "你凭什么这么想", "举个例子"],
+    "anchor": "全程复述别人的话、没有自己的立场；答非所问"
+  },
+  {
+    "topicId": "T4",
+    "group": "会议上",
+    "name": "会后被留下补充说明",
+    "summary": "\"Can you walk me through it?\"——把刚才那件事讲清楚",
+    "durationLabel": "3–5 分钟",
+    "opening": "Can you walk me through it?",
+    "followUps": ["从头讲的顺序", "关键节点", "你当时怎么决定的"],
+    "anchor": "讲一半直接跳到结论；把话题带到别的项目"
+  },
+  {
+    "topicId": "T5",
+    "group": "会议上",
+    "name": "代表团队表态",
+    "summary": "\"Would your team be able to…\"——要先给结论，再给条件",
+    "durationLabel": "3–5 分钟",
+    "opening": "Would your team be able to take this on?",
+    "followUps": ["先给结论（能 / 不能）", "条件是什么", "需要谁配合"],
+    "anchor": "只给结论不给条件；把话题转成\"我个人的看法\""
+  },
+  {
+    "topicId": "T6",
+    "group": "同事间",
+    "name": "第一次见面自我介绍",
+    "summary": "\"So, tell me about yourself.\"——被同事问起，你得当场讲清自己",
+    "durationLabel": "3–5 分钟",
+    "opening": "Nice to meet you. So, tell me about yourself.",
+    "followUps": ["你现在做什么", "之前在哪", "为什么来这边"],
+    "anchor": "只报职位名不展开；背简历式罗列而与对话无关"
+  },
+  {
+    "topicId": "T7",
+    "group": "同事间",
+    "name": "聊童年",
+    "summary": "\"Where did you grow up?\"——被问到成长经历，以及一件具体的事",
+    "durationLabel": "3–5 分钟",
+    "opening": "Where did you grow up?",
+    "followUps": ["在哪长大", "那地方什么样", "一件具体的小事"],
+    "anchor": "只回答地名就停住；扯到与成长经历无关的话题"
+  },
+  {
+    "topicId": "T8",
+    "group": "同事间",
+    "name": "周末与假期安排",
+    "summary": "\"Any plans for the weekend?\"——最日常的即兴闲聊，也最容易被\"然后呢\"卡住",
+    "durationLabel": "3–5 分钟",
+    "opening": "Any plans for the weekend?",
+    "followUps": ["打算做什么", "和谁 / 为什么", "最近一次类似的经历"],
+    "anchor": "只答\"没什么计划\"就停住；把话题转回工作项目"
+  }
+]

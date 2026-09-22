@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>错误记录 · 口语对话实战器</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <h1>错误记录</h1>
+      <a class="navlink" href="topics.html">← 回到主题列表</a>
+    </div>
+    <p class="lede">这里汇总你历次练习里的问题条目，按时间倒序排列（PRD.md §6.5）。</p>
+
+    <!-- 收藏区 -->
+    <h2 class="section-title group-a">收藏区</h2>
+    <div class="empty">
+      <div class="big">还没有收藏任何条目</div>
+      <div class="small">在会话结果页对某一条点「收藏」，它就会出现在这里。</div>
+    </div>
+
+    <!-- 全部条目 -->
+    <h2 class="section-title group-b">全部条目</h2>
+    <div class="empty">
+      <div class="big">还没有任何记录</div>
+      <div class="small">
+        完成一次练习之后，这里会按时间倒序列出你的问题条目。<br>
+        （骨架版说明：本地存储尚未接入，所以现在这里必然是空的。）
+      </div>
+    </div>
+
+    <!-- 展开一条记录后应该看到什么，先写成静态说明，等人真的点开时再实现 -->
+    <div class="card" style="margin-top:24px">
+      <h2>展开一条记录后应该看到什么</h2>
+      <p class="hint">骨架版先把这个结构写下来，实现时照着填（口径见 PRD.md §6.5）。</p>
+      <ul style="margin:12px 0 0 20px;font-size:14px;color:#57606a">
+        <li>条目本身：类型（偏题 / 逻辑错误）· 出现在第几轮 · 原句</li>
+        <li>提醒：偏题说明偏离了主题哪一点；逻辑错误说明哪里不成立</li>
+        <li>纠正：<b>只有逻辑错误条目有</b>，偏题条目没有这一格（PRD.md §9.2 B7）</li>
+        <li>所属那次会话：主题名 · 时间 · 对话时长 · 当次错误次数与精彩句子条数</li>
+        <li>收藏状态与备注内容</li>
+      </ul>
+    </div>
+
+    <footer class="page-foot">
+      口语对话实战器 · Day 7 骨架版（P4 错误记录页）
+    </footer>
+
+  </div>
+</body>
+</html>

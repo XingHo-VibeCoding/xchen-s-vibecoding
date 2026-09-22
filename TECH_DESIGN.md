@@ -152,13 +152,13 @@
 
 ```
 vibecoding/                        ← 仓库根目录（当前工作区）
-├── index.html                     ← 【Day 2 已有】P1 主题列表页（首页）
 ├── PRD.md                         ← 【Day 4 已有】产品需求文档
 ├── research.md                    ← 【Day 3 已有】需求研究
 ├── TECH_DESIGN.md                 ← 【Day 5 新增】本文档
 ├── AGENTS.md                      ← 【已有】协作规则
+├── README.md                      ← 【Day 7 新增】运行说明（怎么把页面跑起来）
 │
-├── frontend/                      ← 【Day 6 起新增】前端，可单独部署
+├── frontend/                      ← 【Day 7 起新增】前端，可单独部署
 │   ├── pages/
 │   │   ├── topics.html            ← P1 主题列表页（含昵称输入）
 │   │   ├── dialogue.html          ← P2 对话页
@@ -204,7 +204,9 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 | 2 | **`storage.js` 是 localStorage 的唯一出口** | 将来若升级到云端数据库（路线丙），只需改这一个文件，4 个页面不用动 |
 | 3 | **密钥只在 `backend/.env` 出现，前端永不出现** | 这是选路线乙的全部意义所在（[3.3](#t3)） |
 
-> **说明**：完整目录里 `frontend/`、`backend/`、`docs/` 都是**计划中**的结构，Day 5 不创建（今日不写代码）。已存在的四个文件（`index.html`、`PRD.md`、`research.md`、`AGENTS.md`）保持原位不动。
+> **说明（Day 5 原文）**：完整目录里 `frontend/`、`backend/`、`docs/` 都是**计划中**的结构，Day 5 不创建（今日不写代码）。
+>
+> **说明（Day 7 修订）**：根目录原有的 `index.html`（Day 2 占位页）**已于 Day 7 移除**——它的角色（P1 首页）已由 `frontend/pages/topics.html` 承接，两处并存会造成"两个首页"。入口统一为 `frontend/pages/topics.html`。被删文件仍可在 Git 历史里找回（commit `9a82f2c`）。`backend/` 与 `docs/` 仍未创建，`frontend/` 已按本表结构落地。
 
 ---
 

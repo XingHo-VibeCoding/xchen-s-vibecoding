@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>对话 · 口语对话实战器</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <h1>口语对话实战器</h1>
+      <a class="navlink" href="topics.html">← 回到主题列表</a>
+    </div>
+
+    <!-- 顶部常驻信息：主题名 / 轮次 / 对话时长（PRD.md §7.3 P2 要求） -->
+    <div class="card">
+      <div class="dialogue-head">
+        <div>
+          <div class="hint">当前主题</div>
+          <div class="topic-name" id="topic-name">（未选择主题）</div>
+        </div>
+        <div class="counter">
+          <span>第 <b id="turn-count">0</b> 轮</span>
+          <span>对话时长 <b id="duration">00:00</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 对话区：用户转写 + AI 回应 -->
+    <div class="stage" id="stage">
+      这里会显示你说的话和 AI 的回应<br>
+      （骨架版：录音、转写与 AI 调用尚未接入）
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="btn-talk" disabled>开始说话</button>
+      <button id="btn-done" disabled>说完了</button>
+      <button class="link" id="btn-end">结束对话 →</button>
+    </div>
+
+    <p class="placeholder-note">
+      骨架版说明：「开始说话 / 说完了」两个按钮暂不可用，要等录音与转写接入后启用（第 2 步）。
+      「结束对话」现在可以点，会进入结果页（PRD.md §6.2 要求：结束对话后直接进入会话结果页）。
+    </p>
+
+    <footer class="page-foot">
+      口语对话实战器 · Day 7 骨架版（P2 对话页）
+    </footer>
+
+  </div>
+
+  <script>
+    // P2 骨架版逻辑：只做两件事 —— ① 从地址栏取主题编号并在顶部显示主题名
+    //                                   ② 让「结束对话」跳到结果页
+    // 轮次与时长今天固定为 0 / 00:00，计时等第 2 步接上。
+
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var topicId = params.get('topic');
+      var nameEl = document.getElementById('topic-name');
+
+      if (topicId) {
+        fetch('../../data/topics.json')
+          .then(function (res) { return res.json(); })
+          .then(function (topics) {
+            var hit = topics.filter(function (t) { return t.topicId === topicId; })[0];
+            nameEl.textContent = hit
+              ? hit.name + '（' + topicId + '）'
+              : topicId + '（主题数据里没有这个编号）';
+          })
+          .catch(function () {
+            nameEl.textContent = topicId + '（主题数据没能加载）';
+          });
+      }
+
+      // 结束对话 → 结果页，并把主题编号带过去
+      document.getElementById('btn-end').addEventListener('click', function () {
+        location.href = 'result.html' + (topicId ? '?topic=' + encodeURIComponent(topicId) : '');
+      });
+    })();
+  </script>
+</body>
+</html>

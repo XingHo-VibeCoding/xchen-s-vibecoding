@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>主题列表 · 口语对话实战器</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <h1>口语对话实战器</h1>
+      <a class="navlink" href="records.html">查看错误记录 →</a>
+    </div>
+    <p class="lede">选一个主题开始练习。AI 会扮演你的同事或上司，当场问你，不迁就你。</p>
+
+    <div class="card">
+      <h2>怎么称呼你</h2>
+      <p class="hint">填了之后，练习记录里就用这个名字称呼你。不填也能用，页面会用「你」称呼。</p>
+      <div class="field" style="margin-top:12px">
+        <label for="nickname">昵称</label>
+        <input id="nickname" type="text" placeholder="例如：小陈" autocomplete="off">
+      </div>
+      <!-- 骨架版说明：输入框只是摆在这里，昵称的保存要等 localStorage 逻辑接上（见 TECH_DESIGN.md §5.7） -->
+      <p class="placeholder-note">骨架版说明：输入框尚未接入本地存储，刷新后不会保留。</p>
+    </div>
+
+    <div id="topic-groups">
+      <p class="lede">正在读取主题数据…</p>
+    </div>
+
+    <footer class="page-foot">
+      口语对话实战器 · Day 7 骨架版（P1 主题列表页）
+    </footer>
+
+  </div>
+
+  <script src="../js/pages/topics.js"></script>
+</body>
+</html>

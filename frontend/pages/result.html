@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>会话结果 · 口语对话实战器</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <h1>会话结果</h1>
+      <div>
+        <a class="navlink" href="topics.html">回到主题列表</a>
+        &nbsp;·&nbsp;
+        <a class="navlink" href="records.html">查看错误记录 →</a>
+      </div>
+    </div>
+    <p class="lede" id="topic-line">本次练习主题：（未选择主题）</p>
+
+    <!-- 四个字段：昵称 / 对话时长 / 错误次数 / 精彩句子呈现次数（PRD.md §7.3 P3 要求） -->
+    <div class="card">
+      <h2>本次数据</h2>
+      <p class="hint">口径见 PRD.md 第八节。骨架版数值尚未接入统计，先按 0 占位。</p>
+      <div class="field-grid" style="margin-top:14px">
+        <div class="cell">
+          <div class="label">昵称</div>
+          <div class="value" id="f-nickname">你</div>
+        </div>
+        <div class="cell">
+          <div class="label">对话时长</div>
+          <div class="value" id="f-duration">00:00</div>
+        </div>
+        <div class="cell">
+          <div class="label">错误次数</div>
+          <div class="value" id="f-errors">0</div>
+        </div>
+        <div class="cell">
+          <div class="label">精彩句子呈现次数</div>
+          <div class="value" id="f-good">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 问题清单：偏题（只提醒）与逻辑错误（提醒 + 纠正）两类
+         注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2） -->
+    <div class="card">
+      <h2>问题清单</h2>
+      <p class="hint">偏题只提醒、逻辑错误给纠正（PRD.md §6.2）。骨架版尚未接入判断，先显示空状态。</p>
+      <div class="empty" style="margin-top:14px;border-style:solid">
+        <div class="big">本次没有发现偏题或逻辑错误</div>
+        <div class="small">这句话在真正跑起来之后，只有判断结果确实为空时才会出现（PRD.md §9.2 B10）。</div>
+      </div>
+    </div>
+
+    <!-- 精彩句子区 -->
+    <div class="card">
+      <h2>这次说得好的</h2>
+      <p class="hint">这里的条数就是「精彩句子呈现次数」这个字段的值（PRD.md §8.2）。</p>
+      <div class="empty" style="margin-top:14px;border-style:solid">
+        <div class="big">本次还没有标记出精彩句子</div>
+        <div class="small">骨架版尚未接入判断。</div>
+      </div>
+    </div>
+
+    <footer class="page-foot">
+      口语对话实战器 · Day 7 骨架版（P3 会话结果页）
+    </footer>
+
+  </div>
+
+  <script>
+    // P3 骨架版逻辑：只做一件事 —— 从地址栏取主题编号，在标题下方显示主题名。
+    // 收藏、备注今天不接（属第 4 步已有计划的后续），localStorage 也不碰。
+
+    (function () {
+      var topicId = new URLSearchParams(location.search).get('topic');
+      var line = document.getElementById('topic-line');
+      if (!topicId) return;
+
+      fetch('../../data/topics.json')
+        .then(function (res) { return res.json(); })
+        .then(function (topics) {
+          var hit = topics.filter(function (t) { return t.topicId === topicId; })[0];
+          line.textContent = '本次练习主题：' + (hit ? hit.name + '（' + topicId + '）' : topicId);
+        })
+        .catch(function () {
+          line.textContent = '本次练习主题：' + topicId + '（主题数据没能加载）';
+        });
+    })();
+  </script>
+</body>
+</html>
