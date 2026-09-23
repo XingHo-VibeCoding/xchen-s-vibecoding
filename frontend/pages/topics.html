@@ -9,33 +9,81 @@
 <body>
   <div class="wrap">
 
+    <!-- 页头（全宽）：项目名 + 去错误记录入口（PRD.md §7.3 P1 必现信息） -->
     <div class="topbar">
       <h1>口语对话实战器</h1>
       <a class="navlink" href="records.html">查看错误记录 →</a>
     </div>
-    <p class="lede">选一个主题开始练习。AI 会扮演你的同事或上司，当场问你，不迁就你。</p>
+    <p class="lede">
+      选一个主题开始练习。AI 会扮演你的同事或上司，当场问你，不迁就你——
+      说含糊了它追问，说到一半停住它不替你补完。
+    </p>
 
-    <div class="card">
-      <h2>怎么称呼你</h2>
-      <p class="hint">填了之后，练习记录里就用这个名字称呼你。不填也能用，页面会用「你」称呼。</p>
-      <div class="field" style="margin-top:12px">
-        <label for="nickname">昵称</label>
-        <input id="nickname" type="text" placeholder="例如：小陈" autocomplete="off">
+    <!-- 主视图：桌面横排（区块 1 与区块 3 并排成一行，区块 2 通栏在下面），窄屏纵向堆叠 -->
+    <div class="layout">
+
+      <!-- 这一层只用于归类，不生成盒子（样式里是 display: contents）：
+           三个区块直接参与外层栅格，窄屏靠 order 排成 1 → 2 → 3，编号小标与视觉顺序始终一致。 -->
+      <div class="col-side">
+
+        <!-- ============ 区块 1｜开始之前：怎么称呼你 ============ -->
+        <!-- 出处：PRD.md §7.3 P1「昵称输入（首次进入时）」、§8.1 字段① -->
+        <section class="card blk-identity">
+          <p class="eyebrow">01 · 开始之前</p>
+          <h2>怎么称呼你</h2>
+          <p class="hint">填了之后，练习记录里就用这个名字称呼你。不填也能用，页面会用「你」称呼。</p>
+          <div class="field" style="margin-top:12px">
+            <label for="nickname">昵称</label>
+            <input id="nickname" type="text" placeholder="例如：小陈" autocomplete="off">
+          </div>
+          <p class="placeholder-note">
+            输入框已就位，但保存要等 localStorage 逻辑接上（见 TECH_DESIGN.md §5.7）——今天只做页面渲染。
+          </p>
+        </section>
+
+        <!-- ============ 区块 3｜你的卡点概览 ============ -->
+        <!-- 出处：PRD.md §4.1 H3「它在盯着我的弱点」、§8.3 错误次数口径、§7.3 P1 记录页入口 -->
+        <section class="card blk-overview">
+          <p class="eyebrow">03 · 你的卡点</p>
+          <h2>你被卡住的地方</h2>
+          <div class="blk-body" id="overview-body" aria-live="polite"></div>
+        </section>
+
       </div>
-      <!-- 骨架版说明：输入框只是摆在这里，昵称的保存要等 localStorage 逻辑接上（见 TECH_DESIGN.md §5.7） -->
-      <p class="placeholder-note">骨架版说明：输入框尚未接入本地存储，刷新后不会保留。</p>
-    </div>
 
-    <div id="topic-groups">
-      <p class="lede">正在读取主题数据…</p>
+      <!-- ============ 区块 2｜选一个主题（页面主内容，通栏铺满整行） ============ -->
+      <!-- 出处：PRD.md §6.3 主题清单、§9.2 B12 / B13 -->
+      <section class="blk-topics">
+        <div class="blk-head">
+          <div>
+            <p class="eyebrow">02 · 选一个主题</p>
+            <h2>职场即兴英语对话</h2>
+          </div>
+          <p class="blk-note">8 个主题都属于这一个场景</p>
+        </div>
+
+        <!-- 四种状态（加载中 / 成功 / 空 / 错误）都由 topics.js 渲染在这里 -->
+        <div class="topics-body" id="topics-body" aria-live="polite">
+          <noscript>
+            <div class="empty">
+              <div class="big">这个页面需要 JavaScript 才能显示主题</div>
+              <div class="small">请在浏览器里允许本页运行脚本，然后刷新。</div>
+            </div>
+          </noscript>
+        </div>
+      </section>
+
     </div>
 
     <footer class="page-foot">
-      口语对话实战器 · Day 7 骨架版（P1 主题列表页）
+      口语对话实战器 · Day 8 主视图（P1 主题列表页）· 当前数据为本地假数据（mock）
     </footer>
 
   </div>
 
+  <!-- 加载顺序有讲究：组件在前、页面逻辑在后 —— topics.js 要用 Components.topicCard。
+       组件是可复用的，别的页面想用同一张卡片，加同一行即可（TECH_DESIGN.md §4.1）。 -->
+  <script src="../js/components/topic-card.js"></script>
   <script src="../js/pages/topics.js"></script>
 </body>
 </html>

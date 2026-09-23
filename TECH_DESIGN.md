@@ -168,6 +168,8 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │   │   ├── speech.js              ← 录音与转写、AI 语音播放
 │   │   ├── api.js                 ← 统一封装对后端的请求（唯一出口）
 │   │   ├── storage.js            ← localStorage 读写（唯一出口）
+│   │   ├── components/            ← 【Day 8 新增】跨页面复用的 UI 组件
+│   │   │   └── topic-card.js      ← 主题卡片（P1 在用；P4 按主题分组时可直接复用）
 │   │   └── pages/                 ← 每个页面各自的逻辑
 │   │       ├── topics.js
 │   │       ├── dialogue.js
@@ -207,6 +209,10 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 > **说明（Day 5 原文）**：完整目录里 `frontend/`、`backend/`、`docs/` 都是**计划中**的结构，Day 5 不创建（今日不写代码）。
 >
 > **说明（Day 7 修订）**：根目录原有的 `index.html`（Day 2 占位页）**已于 Day 7 移除**——它的角色（P1 首页）已由 `frontend/pages/topics.html` 承接，两处并存会造成"两个首页"。入口统一为 `frontend/pages/topics.html`。被删文件仍可在 Git 历史里找回（commit `9a82f2c`）。`backend/` 与 `docs/` 仍未创建，`frontend/` 已按本表结构落地。
+>
+> **说明（Day 8 修订）**：本表原未规划 `frontend/js/components/`，Day 8 余力加练新增该目录，用于存放**跨页面复用的 UI 组件**（当前只有 `topic-card.js` 一个）。**加它的理由**：主题卡片的呈现方式集中在一处，P1 与将来的 P4 用同一个组件，避免同一种卡片在两个页面各写一遍 —— 这与 [4.2](#t4) 三条规矩同一思路（唯一出口）。
+>
+> 组件以经典 `<script>` 加载、挂在全局 `window.Components` 下：本页项目未引入打包工具与 ES 模块（沿用 [3.3](#t3) 的取舍原则：能用浏览器原生能力解决的先不引入外部依赖）。**因此加载顺序有意义** —— 组件在前、页面逻辑在后；`frontend/pages/topics.html` 里两行 `<script>` 的顺序不能对调。
 
 ---
 

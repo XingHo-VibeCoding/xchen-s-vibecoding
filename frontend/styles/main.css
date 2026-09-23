@@ -599,3 +599,283 @@ footer.page-foot {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================
+   Day 8 新增：P1 主视图（三区块 + 四种状态）
+   数据目前来自本地假数据（data/topics.json、data/mock-sessions.json），
+   第 3 周换成真实接口与 localStorage 时，这一节样式不用改。
+   ============================================================ */
+
+/* ---------- 页面主布局：桌面横排，窄屏纵向堆叠 ---------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* 手机 / 窄屏：单列纵向堆叠 */
+  gap: var(--space-4);
+}
+
+/* 每一栏都允许被压缩，防止内容把栅格撑宽、在手机上出现横向滚动 */
+.layout > * {
+  min-width: 0;
+}
+
+.layout .card {
+  margin-bottom: 0;                        /* 栏内间距交给 gap 管 */
+}
+
+/* 分组容器只用于归类、不生成盒子：三个区块直接参与外层栅格，
+   窄屏顺序由 order 排成 1 → 2 → 3，和区块小标上的编号一致。 */
+.col-side {
+  display: contents;
+}
+
+.blk-identity { order: 1; }
+.blk-topics   { order: 2; }
+.blk-overview { order: 3; }
+
+@media (min-width: 900px) {
+  /* 桌面横排：上面一行是区块 1 与区块 3 并排（各占一半宽），
+     区块 2 通栏铺在下面。这样两列不会再一高一矮 —— 而是只剩一条纵向阅读线。 */
+  .layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "identity overview"
+      "topics   topics";
+    align-items: stretch;
+    gap: var(--space-5);
+  }
+
+  .blk-identity { grid-area: identity; }
+  .blk-overview { grid-area: overview; }
+  .blk-topics   { grid-area: topics; }
+
+  /* 区块 2 通栏后，原有的 `auto-fill / minmax(280px, 1fr)` 自己就会排成 3 列
+     （组 A 5 张 → 3 + 2，组 B 3 张铺满一排）；窗口窄到 ~1000px 以下它会自动退成 2 列，
+     所以这里不用再写死列数。 */
+
+  /* 区块 3 的三条统计在宽卡片里横着排，避免右半边拖出一大片空白 */
+  .blk-overview .stat-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-5);
+  }
+
+  .blk-overview .stat-list li {
+    display: block;
+    padding: 0 0 0 var(--space-4);
+    border-bottom: none;
+    border-left: 2px solid var(--border-soft);
+  }
+
+  .blk-overview .stat-list li:last-child {
+    padding-bottom: 0;
+  }
+
+  /* 每条统计改成上下两行（标签在上、数值在下）：
+     三列本来就窄，横着放会把「5 条」拆成两行，竖排后三列的数值能对在同一条基线上 */
+  .blk-overview .stat-list .k {
+    display: block;
+  }
+
+  .blk-overview .stat-list .v {
+    display: block;
+    text-align: left;
+    margin-top: var(--space-1);
+  }
+
+  /* 横排后每条只剩三分之一宽，「偏题 3 · 逻辑错误 2」允许折行，否则会横向溢出 */
+  .blk-overview .stat-list .sub {
+    white-space: normal;
+  }
+}
+
+/* ---------- 区块小标（等宽字体编号，与卡片上的 TOPIC N 同一套语言） ---------- */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: var(--space-2);
+}
+
+.blk-overview .eyebrow {
+  color: var(--teal);
+}
+
+/* 区块 2 是主内容，自己不是卡片，头部单独排 */
+.blk-topics > .blk-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.blk-topics > .blk-head h2 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.blk-topics .blk-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* 区块 2 里的第一个分组标题不要再顶出一段间距 */
+.topics-body > .section-title:first-child {
+  margin-top: 0;
+}
+
+/* ---------- 四种状态：加载中 / 成功 / 空 / 错误 ---------- */
+
+/* 加载中：占位卡片 + 流光条 */
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.skeleton-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+.skeleton-card .bar {
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    90deg,
+    var(--border-soft) 0%,
+    var(--bg-tint) 50%,
+    var(--border-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-card .bar + .bar {
+  margin-top: var(--space-3);
+}
+
+.skeleton-card .bar.w40 { width: 40%; }
+.skeleton-card .bar.w70 { width: 70%; }
+.skeleton-card .bar.w100 { width: 100%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.state-hint,
+.mock-note {
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* 错误态：复用 .empty 的框，只换强调色；不给报错堆栈（TECH_DESIGN.md §8.2 E9） */
+.state-error {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.state-error .big {
+  color: var(--accent);
+}
+
+/* ---------- 区块 3：卡点概览 ---------- */
+
+.stat-list {
+  list-style: none;
+  margin-top: var(--space-4);
+}
+
+.stat-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.stat-list li:last-child {
+  border-bottom: none;
+  padding-bottom: var(--space-2);
+}
+
+.stat-list .k {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.stat-list .v {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 第二个数字（累计问题条目）用暖色，避免三个数字一样重 */
+.stat-list li:nth-child(2) .v {
+  color: var(--accent);
+}
+
+/* 数值下面的小字拆分（偏题 · 逻辑错误），口径见 PRD.md §8.3 */
+.stat-list .sub {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 概览区底部的「查看错误记录」入口 */
+.navlink.block {
+  display: block;
+  text-align: center;
+  margin-top: var(--space-4);
+}
+
+/* ---------- 主题卡片上的「上次在这里卡过」标记（PRD.md §6.3） ---------- */
+
+.topic .meta {
+  flex-wrap: wrap;   /* 多一枚标记时允许换行，窄卡片不横向溢出 */
+}
+
+.topic .stuck {
+  display: inline-block;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.topic .name,
+.topic .summary {
+  overflow-wrap: break-word;   /* 长英文串不撑破卡片 */
+}
+
+/* ---------- 小屏补充适配 ---------- */
+
+@media (max-width: 640px) {
+  .skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .blk-topics > .blk-head {
+    align-items: flex-start;
+  }
+}

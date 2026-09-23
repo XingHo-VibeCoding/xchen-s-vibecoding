@@ -1,0 +1,28 @@
+{
+  "_readme": "P1 首页的本地假数据（Day 8 · mock）。第 3 周接上 /api/analyze 与 localStorage 后，这份文件由真实数据替代（见 TECH_DESIGN.md §5.7）。字段口径对齐 PRD.md §8.3：错误次数 = 偏题条数 + 逻辑错误条数。",
+  "sessionCount": 3,
+  "favoriteCount": 2,
+  "practicedTopics": [
+    {
+      "topicId": "T1",
+      "issueCount": 2,
+      "offTopicCount": 1,
+      "logicErrorCount": 1,
+      "lastPracticedAt": "2026-09-22T20:15:00+08:00"
+    },
+    {
+      "topicId": "T3",
+      "issueCount": 1,
+      "offTopicCount": 1,
+      "logicErrorCount": 0,
+      "lastPracticedAt": "2026-09-21T19:40:00+08:00"
+    },
+    {
+      "topicId": "T6",
+      "issueCount": 2,
+      "offTopicCount": 1,
+      "logicErrorCount": 1,
+      "lastPracticedAt": "2026-09-20T21:05:00+08:00"
+    }
+  ]
+}
