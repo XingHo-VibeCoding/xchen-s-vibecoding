@@ -15,6 +15,18 @@
     </div>
     <p class="lede">这里汇总你历次练习里的问题条目，按时间倒序排列（PRD.md §6.5）。</p>
 
+    <!-- 【Day 8 余力加练留下的接缝】主题卡片组件
+         frontend/js/components/topic-card.js 是跨页面复用的组件（P1 正在用）。
+         将来若在本页做「按主题归类」——把问题条目按所属主题分组、每组以主题卡开头——
+         两步即可复用，不必再写一遍卡片：
+           ① 在本页引入该组件文件（一行 script 标签，路径 ../js/components/topic-card.js）
+           ② 调 Components.topicCard(topic, { stuck: true })，拿到卡片元素再 appendChild
+         （本注释刻意不写出完整 script 标签字面量，否则「本页有几个 script 标签」这类
+           正则检查会把注释里的示例也算进去。）
+         但注意：本页的正式结构以 PRD.md §7.3 的 P4 一行为准（时间倒序的条目列表 + 收藏区 + 空状态），
+         PRD 目前没有给 P4 定义「按主题归类」区块 —— 要加它得先改 PRD，不能只改代码。
+         Day 8 拍板：只留接缝，本页今天不渲染任何东西。 -->
+
     <!-- 收藏区 -->
     <h2 class="section-title group-a">收藏区</h2>
     <div class="empty">
