@@ -36,9 +36,10 @@
             <label for="nickname">昵称</label>
             <input id="nickname" type="text" placeholder="例如：小陈" autocomplete="off">
           </div>
-          <p class="placeholder-note">
-            输入框已就位，但保存要等 localStorage 逻辑接上（见 TECH_DESIGN.md §5.7）——今天只做页面渲染。
-          </p>
+          <!-- 开发期提示（不再渲染给用户看）：输入框已就位，但保存要等
+               localStorage 逻辑接上（见 TECH_DESIGN.md §5.7）——今天只做页面渲染。
+               Day 10：原为 .placeholder-note 段落，会把内部文档编号显示给终端用户，
+               现改为 HTML 注释；该类已随之删除。 -->
         </section>
 
         <!-- ============ 区块 3｜你的卡点概览 ============ -->
