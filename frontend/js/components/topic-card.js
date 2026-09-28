@@ -21,11 +21,13 @@
      container.appendChild(card);
 
    契约（入参）
-     topic   对象，来自 data/topics.json，用到 4 个字段：
+     topic   对象，来自 data/topics.json，用到 5 个字段：
                topicId       "T1"        主题编号，卡片角标与跳转参数都用它
                name          "项目进度…"  主题名（中文）
+               role          "项目负责人" 用户在对话里扮演的职场角色（Day 10 加练新增）
                summary       "…"         英文一句话说明
                durationLabel "5 分钟"     预计时长
+             role 允许缺失：缺失时不渲染角色行（老数据也能正常出卡片）。
      options 可选：
                stuck  布尔，true 时卡片上出现「上次在这里卡过」（PRD.md §6.3）
                href   字符串，覆盖跳转目标；默认 dialogue.html?topic=<topicId>
@@ -57,6 +59,12 @@
 
     a.appendChild(el('div', 'no', 'TOPIC ' + topic.topicId.replace('T', '')));
     a.appendChild(el('div', 'name', topic.name));
+    // 职场角色（Day 10 加练新增）：告诉用户"这一轮你扮演谁"。
+    // 位置在主题名与说明之间 —— 形成「名称 → 我是谁 → 具体场景」的阅读顺序。
+    // 字段口径见 PRD.md §8.4；缺失时不渲染这一行，不让卡片出现空标签。
+    if (topic.role) {
+      a.appendChild(el('div', 'role', '你的角色：' + topic.role));
+    }
     a.appendChild(el('div', 'summary', topic.summary));
 
     var meta = el('div', 'meta');

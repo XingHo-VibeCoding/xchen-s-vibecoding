@@ -423,6 +423,23 @@ body::before {
   margin-bottom: var(--space-2);
 }
 
+/* 职场角色（Day 10 加练新增）：告诉用户这一轮扮演谁。
+   刻意不做成 .tag 那样的胶囊底色 —— 它紧挨着主题名，再上一块底色会
+   和名称抢注意力；改用「小一号 + 主色文字 + 左侧短竖线」轻量区分。 */
+.topic .role {
+  font-size: var(--text-xs);
+  color: var(--primary-dark);
+  line-height: 1.5;
+  margin-bottom: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--primary);
+}
+
+.topic-list.group-b .topic .role {
+  color: var(--teal);
+  border-left-color: var(--teal);
+}
+
 /* 英文说明走衬线体 + 加深字号，是卡片上最醒目的英文信息 */
 .topic .summary {
   font-family: var(--font-en);
@@ -471,6 +488,17 @@ body::before {
   font-size: var(--text-xl);
   font-weight: 600;
   line-height: 1.4;
+}
+
+/* 对话页顶部的职场角色（Day 10 加练新增）。
+   与主题卡上的 .topic .role 同一视觉语言（主色浅底 + 左侧短竖线），
+   但这里是通栏卡片内部，字号沿用 --text-sm 便于与主题名形成层级。 */
+.dialogue-head .topic-role {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--primary-dark);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--primary);
 }
 
 .counter {

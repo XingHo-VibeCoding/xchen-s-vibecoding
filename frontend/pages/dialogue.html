@@ -22,6 +22,9 @@
         <div>
           <div class="hint">当前主题</div>
           <div class="topic-name" id="topic-name">（未选择主题）</div>
+          <!-- 职场角色（Day 10 加练新增，PRD.md §7.3 P2）：告诉用户这一轮扮演谁。
+               由下面的脚本从 topics.json 的 role 字段填充；取不到时整行隐藏。 -->
+          <div class="topic-role" id="topic-role" hidden></div>
         </div>
         <div class="counter">
           <span class="counter-item">
@@ -38,7 +41,7 @@
     <!-- 对话区：用户转写 + AI 回应 -->
     <div class="stage" id="stage">
       这里会显示你说的话和 AI 的回应<br>
-      （骨架版：录音、转写与 AI 调用尚未接入）
+      （语音录音、文字转写与 AI 回应尚未接入）
     </div>
 
     <!-- 语音状态区：三态切换（未录音 / 正在录音 / 已暂停）
@@ -101,6 +104,7 @@
       var params = new URLSearchParams(location.search);
       var topicId = params.get('topic');
       var nameEl = document.getElementById('topic-name');
+      var roleEl = document.getElementById('topic-role');
 
       // ---------- 元素 ----------
       var el = {
@@ -247,7 +251,7 @@
         location.href = 'result.html?' + q.join('&');
       });
 
-      // ---------- 主题名 ----------
+      // ---------- 主题名与职场角色 ----------
       if (topicId) {
         fetch('../../data/topics.json')
           .then(function (res) { return res.json(); })
@@ -256,6 +260,11 @@
             nameEl.textContent = hit
               ? hit.name + '（' + topicId + '）'
               : topicId + '（主题数据里没有这个编号）';
+            // 职场角色：拿到才显示，拿不到保持隐藏（不留空行）
+            if (hit && hit.role) {
+              roleEl.textContent = '你的角色：' + hit.role;
+              roleEl.hidden = false;
+            }
           })
           .catch(function () {
             nameEl.textContent = topicId + '（主题数据没能加载）';
