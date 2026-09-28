@@ -14,7 +14,9 @@
       <a class="navlink" href="topics.html">← 回到主题列表</a>
     </div>
 
-    <!-- 顶部常驻信息：主题名 / 轮次 / 对话时长（PRD.md §7.3 P2 要求） -->
+    <!-- 顶部常驻信息：主题名 / 轮次 / 对话时长（PRD.md §7.3 P2 要求）
+         轮次不是固定数字：未开始时显示「准备开始」（#turn-state），
+         开始后切换成「第 N 轮」（#turn-count）。两者只有一个是可见的。 -->
     <div class="card">
       <div class="dialogue-head">
         <div>
@@ -22,8 +24,13 @@
           <div class="topic-name" id="topic-name">（未选择主题）</div>
         </div>
         <div class="counter">
-          <span>第 <b id="turn-count">0</b> 轮</span>
-          <span>对话时长 <b id="duration">00:00</b></span>
+          <span class="counter-item">
+            <span id="turn-state">准备开始</span>
+            <span id="turn-rounds" hidden>第 <b class="counter-inline" id="turn-count">1</b> 轮</span>
+          </span>
+          <span class="counter-item">
+            对话时长 <b id="duration">00:00</b>
+          </span>
         </div>
       </div>
     </div>
@@ -34,34 +41,213 @@
       （骨架版：录音、转写与 AI 调用尚未接入）
     </div>
 
+    <!-- 语音状态区：三态切换（未录音 / 正在录音 / 已暂停）
+         由 dialogue.js 统一管理 state + 文案，HTML 只提供挂载点。
+         说明：真正的录音与转写属第 2 步，这里先只做界面态与计时。 -->
+    <div class="recorder" id="recorder" data-state="idle">
+      <div class="rec-status">
+        <span class="rec-label" id="rec-label">未录音</span>
+      </div>
+      <div class="rec-live" id="rec-live" hidden>
+        <span class="rec-dot" aria-hidden="true"></span>
+        <span class="rec-text" id="rec-text">正在听……</span>
+        <span class="rec-timer" id="rec-timer">00:00</span>
+      </div>
+      <p class="rec-hint" id="rec-hint">点「开始说话」进入对话状态，计时会从第一次发言开始走。</p>
+    </div>
+
+    <!-- 按钮：开始说话（录音中变成 暂停 / 已暂停变成 继续）+ 结束对话
+         「说完了」已按 Day 10 决定删去；「结束对话」兼任录音中的「结束本次对话」。 -->
     <div class="actions">
-      <button class="primary" id="btn-talk" disabled>开始说话</button>
-      <button id="btn-done" disabled>说完了</button>
+      <button class="primary" id="btn-talk">🎙 开始说话</button>
+      <button id="btn-pause" hidden>暂停</button>
       <button class="link" id="btn-end">结束对话 →</button>
     </div>
 
-    <!-- 开发期提示（不再渲染给用户看）：「开始说话 / 说完了」两个按钮暂不可用，
-         要等录音与转写接入后启用（第 2 步）。「结束对话」现在可以点，会进入结果页
-         （PRD.md §6.2 要求：结束对话后直接进入会话结果页）。
+    <!-- 开发期提示（不再渲染给用户看）：
+         「开始说话」按下后只切换界面态与计时，不接真实录音（属第 2 步）。
+         「结束对话」会把轮次与时长带到结果页（result.html）。
          Day 10：原为 .placeholder-note 段落，会把内部文档编号显示给终端用户，
          现改为 HTML 注释；该类已随之删除。 -->
 
     <footer class="page-foot">
-      口语对话实战器 · Day 7 骨架版（P2 对话页）
+      口语对话实战器 · 对话练习页
     </footer>
 
   </div>
 
+  <!-- 加载顺序有讲究：storage 在前、页面逻辑在后 —— 下面那段脚本要用 window.Storage。
+       （TECH_DESIGN.md §4.2 规矩 2：storage.js 是 localStorage 的唯一出口） -->
+  <script src="../js/storage.js"></script>
   <script>
-    // P2 骨架版逻辑：只做两件事 —— ① 从地址栏取主题编号并在顶部显示主题名
-    //                                   ② 让「结束对话」跳到结果页
-    // 轮次与时长今天固定为 0 / 00:00，计时等第 2 步接上。
+    // P2 对话页逻辑（Day 10 升级）：
+    //   ① 从地址栏取主题编号并在顶部显示主题名
+    //   ② 语音区三态切换：idle（未录音）/ recording（录音中）/ paused（已暂停）
+    //   ③ 真计时：从第一次点「开始说话」起算，暂停时停住，继续后累计
+    //   ④ 「结束对话」= 本轮说完：把该主题的练习次数 +1 存进 localStorage
+    //      （跨页面记忆），再把轮次与时长带到结果页
+    //
+    // 口径说明（以 PRD.md / TECH_DESIGN.md 为准）：
+    //   - 「第 N 轮」的含义：这是**该主题第几次练习**，不是一场对话里的第几个回合。
+    //     一场内的回合数另有其名（TECH_DESIGN §5.3 的 sessions.turnCount）。
+    //     两者是不同东西，所以用独立键 vibecoding.practiceCount 计数（§5.7）。
+    //   - 轮次只在点「结束对话」时 +1（= 这一轮真的说完了）；
+    //     暂停 / 继续不计轮次，中途点「回到主题列表」也不算完成。
+    //   - 时长：PRD §8.2 定义「墙钟时间，从第一次发言起算」，故在第一次
+    //     点「开始说话」时起表；暂停期间不计入。
+    //   - 真实录音与转写属第 2 步，本页只做界面态与计时，不采集音频。
 
     (function () {
       var params = new URLSearchParams(location.search);
       var topicId = params.get('topic');
       var nameEl = document.getElementById('topic-name');
 
+      // ---------- 元素 ----------
+      var el = {
+        turnState: document.getElementById('turn-state'),
+        turnRounds: document.getElementById('turn-rounds'),
+        turnCount: document.getElementById('turn-count'),
+        duration: document.getElementById('duration'),
+        recorder: document.getElementById('recorder'),
+        recLabel: document.getElementById('rec-label'),
+        recLive: document.getElementById('rec-live'),
+        recText: document.getElementById('rec-text'),
+        recTimer: document.getElementById('rec-timer'),
+        recHint: document.getElementById('rec-hint'),
+        btnTalk: document.getElementById('btn-talk'),
+        btnPause: document.getElementById('btn-pause'),
+        btnEnd: document.getElementById('btn-end')
+      };
+
+      // ---------- 状态 ----------
+      var state = 'idle';   // idle | recording | paused
+      /* rounds 的起点不是 0 而是「该主题已完成的次数」：
+         进来时若之前练过 1 次，本轮就是第 2 轮，显示「第 2 轮」；
+         没练过则保持 0 → 由 render() 显示「准备开始」。 */
+      var rounds = (window.Storage && topicId)
+        ? window.Storage.practiceCount(topicId)
+        : 0;
+      var roundsAtEntry = rounds;   // 记为进入时的值，用来判断"这一轮是否已完成"
+      var elapsed = 0;      // 累计秒数（不含暂停时段）
+      var timerId = null;
+      var tickStart = 0;    // 本轮计时起点（毫秒）
+
+      function fmt(sec) {
+        var m = Math.floor(sec / 60), s = sec % 60;
+        return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      // ---------- 计时 ----------
+      function startTimer() {
+        tickStart = Date.now();
+        if (timerId) return;
+        timerId = setInterval(function () {
+          var now = elapsed + Math.floor((Date.now() - tickStart) / 1000);
+          el.duration.textContent = fmt(now);
+          el.recTimer.textContent = fmt(now);
+        }, 250);
+      }
+
+      function stopTimer() {
+        if (!timerId) return;
+        elapsed += Math.floor((Date.now() - tickStart) / 1000);
+        clearInterval(timerId);
+        timerId = null;
+        el.duration.textContent = fmt(elapsed);
+        el.recTimer.textContent = fmt(elapsed);
+      }
+
+      // ---------- 状态渲染 ----------
+      // 三态的文案与显隐集中在这里，避免散落在各个事件里。
+      var VIEW = {
+        idle: {
+          label: '未录音',
+          live: false,
+          hint: '点「开始说话」进入对话状态，计时会从第一次发言开始走。',
+          talk: { text: '🎙 开始说话', show: true },
+          pause: { show: false }
+        },
+        recording: {
+          label: '正在录音',
+          live: true,
+          text: '正在听……',
+          hint: '点击「暂停」可停表，或「结束对话」收尾。',
+          talk: { show: false },
+          pause: { text: '暂停', show: true }
+        },
+        paused: {
+          label: '已暂停',
+          live: true,
+          text: '已暂停',
+          hint: '点「继续」接着计时，或「结束对话」收尾。',
+          talk: { show: false },
+          pause: { text: '继续', show: true }
+        }
+      };
+
+      function render() {
+        var v = VIEW[state];
+        el.recorder.setAttribute('data-state', state);
+        el.recLabel.textContent = v.label;
+        el.recLive.hidden = !v.live;
+        if (v.text) el.recText.textContent = v.text;
+        el.recHint.textContent = v.hint;
+
+        el.btnTalk.hidden = !v.talk.show;
+        if (v.talk.text) el.btnTalk.textContent = v.talk.text;
+        el.btnPause.hidden = !v.pause.show;
+        if (v.pause.text) el.btnPause.textContent = v.pause.text;
+
+        // 轮次：未开始（idle）显示「准备开始」；一旦开始进入对话就显示「第 N 轮」。
+        // 注意两件事：
+        //   1. 不能用 rounds > 0 判断「有没有开始」—— rounds 是「这个主题练过几次」，
+        //      第一次练习时它就是 0。有没有开始看 state。
+        //   2. 显示值是 rounds + 1：rounds 表示「已完成过几次」，
+        //      正在进行的这一次是第 rounds+1 轮（所以第一次练就是「第 1 轮」）。
+        var started = state !== 'idle';
+        el.turnState.hidden = started;
+        el.turnRounds.hidden = !started;
+        el.turnCount.textContent = String(rounds + 1);
+        el.recTimer.textContent = fmt(elapsed);
+      }
+
+      // ---------- 事件 ----------
+      // 开始说话：本轮正式起步，起表。
+      // 轮次不在这里 +1 —— 轮次表示「这个主题练过几次」，由「结束对话」完成一轮时才累加。
+      el.btnTalk.addEventListener('click', function () {
+        state = 'recording';
+        render();
+        startTimer();
+      });
+
+      // 暂停 / 继续：只切换计时，不改轮次
+      el.btnPause.addEventListener('click', function () {
+        if (state === 'recording') {
+          state = 'paused';
+          stopTimer();
+        } else if (state === 'paused') {
+          state = 'recording';
+          startTimer();
+        }
+        render();
+      });
+
+      // 结束对话 → 完成这一轮练习。
+      // 只有真的走过这一轮（点过「开始说话」）才把该主题的练习次数 +1，
+      // 一进页面就直接点结束不算练过，避免次数虚高。
+      el.btnEnd.addEventListener('click', function () {
+        stopTimer();
+        if (window.Storage && topicId && state !== 'idle') {
+          rounds = window.Storage.bumpPracticeCount(topicId);
+        }
+        var q = [];
+        if (topicId) q.push('topic=' + encodeURIComponent(topicId));
+        q.push('turns=' + rounds);
+        q.push('dur=' + elapsed);
+        location.href = 'result.html?' + q.join('&');
+      });
+
+      // ---------- 主题名 ----------
       if (topicId) {
         fetch('../../data/topics.json')
           .then(function (res) { return res.json(); })
@@ -76,10 +262,7 @@
           });
       }
 
-      // 结束对话 → 结果页，并把主题编号带过去
-      document.getElementById('btn-end').addEventListener('click', function () {
-        location.href = 'result.html' + (topicId ? '?topic=' + encodeURIComponent(topicId) : '');
-      });
+      render();
     })();
   </script>
 </body>

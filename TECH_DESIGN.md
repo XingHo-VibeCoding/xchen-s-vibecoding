@@ -328,7 +328,13 @@ sessions（会话）
 | `vibecoding.sessions` | `sessions` 数组 | **点"结束对话"时**（关键：不是中途写，避免半截数据） |
 | `vibecoding.issues` | `issues` 数组 | 会话结束后拿到判断结果时 |
 | `vibecoding.goodSentences` | `goodSentences` 数组 | 同上 |
+| `vibecoding.practiceCount` | `{ "T1": 2, "T5": 1 }`，某主题**已练完的轮数** | 点"结束对话"完成一轮时 +1 |
 | `vibecoding.schemaVersion` | 数字，当前 `1` | 首次运行时写入 |
+
+> **`practiceCount` 与 `sessions.turnCount` 不是一回事**（Day 10 新增，别把两个"轮"混用）：
+> - `sessions.turnCount`（见 [5.3](#t5)）是**一场对话内**的轮数，一轮 = 用户一次发言 + AI 一次回应；
+> - `practiceCount` 是**跨场次**的累计，指"这个主题你练过几次"。对话页顶栏显示的「第 N 轮」用的是后者。
+> - 对话页显示值是 `practiceCount + 1`（`practiceCount` 记的是"已完成过几次"，正在进行的这一次是下一次）。
 
 > **主题的"上次在这里卡过"标记**（PRD §6.3）**不单独存**：它由 `issues` 里是否出现过该 `topicId` 实时算出，避免两处状态不同步。
 

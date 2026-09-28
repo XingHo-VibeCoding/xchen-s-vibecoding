@@ -19,10 +19,12 @@
     </div>
     <p class="lede" id="topic-line">本次练习主题：（未选择主题）</p>
 
-    <!-- 四个字段：昵称 / 对话时长 / 错误次数 / 精彩句子呈现次数（PRD.md §7.3 P3 要求） -->
+    <!-- 四个字段：昵称 / 对话时长 / 错误次数 / 精彩句子呈现次数（PRD.md §7.3 P3 要求）
+         Day 10：对话时长改为读取对话页传来的真实秒数（?dur= ），
+         未传参时仍显示 00:00；错误次数与精彩句子的统计尚未接入，保持 0。 -->
     <div class="card">
       <h2>本次数据</h2>
-      <p class="hint">口径见 PRD.md 第八节。骨架版数值尚未接入统计，先按 0 占位。</p>
+      <p class="hint">口径见 PRD.md 第八节。错误次数与精彩句子尚未接入统计，先按 0 显示。</p>
       <div class="field-grid">
         <div class="cell">
           <div class="label">昵称</div>
@@ -65,18 +67,33 @@
     </div>
 
     <footer class="page-foot">
-      口语对话实战器 · Day 7 骨架版（P3 会话结果页）
+      口语对话实战器 · 会话结果页
     </footer>
 
   </div>
 
   <script>
-    // P3 骨架版逻辑：只做一件事 —— 从地址栏取主题编号，在标题下方显示主题名。
-    // 收藏、备注今天不接（属第 4 步已有计划的后续），localStorage 也不碰。
+    // P3 结果页逻辑：
+    //   ① 从地址栏取主题编号，在标题下方显示主题名
+    //   ② Day 10 新增：读取对话页传来的对话时长（?dur=秒数）并渲染成 mm:ss
+    // 错误次数、精彩句子、收藏与备注仍未接入（属后续步骤），localStorage 不碰。
 
     (function () {
-      var topicId = new URLSearchParams(location.search).get('topic');
+      var params = new URLSearchParams(location.search);
+      var topicId = params.get('topic');
       var line = document.getElementById('topic-line');
+
+      // ---------- 对话时长（秒 → mm:ss） ----------
+      var durRaw = params.get('dur');
+      if (durRaw !== null) {
+        var secs = parseInt(durRaw, 10);
+        if (!isNaN(secs) && secs >= 0) {
+          var m = Math.floor(secs / 60), s = secs % 60;
+          document.getElementById('f-duration').textContent =
+            (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+        }
+      }
+
       if (!topicId) return;
 
       fetch('../../data/topics.json')
