@@ -82,8 +82,14 @@
 
   </div>
 
-  <!-- 加载顺序有讲究：组件在前、页面逻辑在后 —— topics.js 要用 Components.topicCard。
-       组件是可复用的，别的页面想用同一张卡片，加同一行即可（TECH_DESIGN.md §4.1）。 -->
+  <!-- 加载顺序有讲究，三层从下往上依赖，顺序不能换：
+         ① storage.js   —— localStorage 的唯一出口（TECH_DESIGN.md §4.2 规矩 2）
+         ② interact.js  —— 会反馈的按钮组件，topic-card.js 要用它造星标
+         ③ topic-card.js—— 主题卡片组件，topics.js 要用它造卡片
+         ④ topics.js    —— 本页逻辑，最后加载
+       任何一步提前都会拿到 undefined（组件是可复用的，别的页面要加同一行）。 -->
+  <script src="../js/storage.js"></script>
+  <script src="../js/components/interact.js"></script>
   <script src="../js/components/topic-card.js"></script>
   <script src="../js/pages/topics.js"></script>
 </body>

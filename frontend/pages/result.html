@@ -46,23 +46,28 @@
     </div>
 
     <!-- 问题清单：偏题（只提醒）与逻辑错误（提醒 + 纠正）两类
-         注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2） -->
+         注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2）
+         Day 11：改为由 data/mock-items.json 的手写条目渲染，条目上带收藏按钮（线 2-B）。
+         真正的判断功能（AI 读用户原话生成条目）仍属第 3 周，本页的条目是假数据。 -->
     <div class="card">
       <h2>问题清单</h2>
-      <p class="hint">偏题只提醒、逻辑错误给纠正。判断功能尚未接入，这里先显示空状态。</p>
-      <div class="empty empty-solid">
-        <div class="big">本次没有发现偏题或逻辑错误</div>
-        <div class="small">这句话只有判断结果确实为空时才会出现。</div>
+      <p class="hint">偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。</p>
+      <div class="item-list" id="issue-list" aria-live="polite">
+        <div class="empty empty-solid">
+          <div class="big">正在读取条目…</div>
+        </div>
       </div>
+      <div class="mock-bar" id="issue-mock"></div>
     </div>
 
     <!-- 精彩句子区 -->
     <div class="card">
       <h2>这次说得好的</h2>
       <p class="hint">这里的条数就是「精彩句子呈现次数」这个字段的值。</p>
-      <div class="empty empty-solid">
-        <div class="big">本次还没有标记出精彩句子</div>
-        <div class="small">判断功能尚未接入。</div>
+      <div class="item-list" id="good-list" aria-live="polite">
+        <div class="empty empty-solid">
+          <div class="big">正在读取条目…</div>
+        </div>
       </div>
     </div>
 
@@ -72,11 +77,25 @@
 
   </div>
 
+  <!-- 加载顺序（同 topics.html）：storage → interact → item-card → 页面逻辑 -->
+  <script src="../js/storage.js"></script>
+  <script src="../js/components/interact.js"></script>
+  <script src="../js/components/item-card.js"></script>
   <script>
     // P3 结果页逻辑：
     //   ① 从地址栏取主题编号，在标题下方显示主题名
-    //   ② Day 10 新增：读取对话页传来的对话时长（?dur=秒数）并渲染成 mm:ss
-    // 错误次数、精彩句子、收藏与备注仍未接入（属后续步骤），localStorage 不碰。
+    //   ② Day 10：读取对话页传来的对话时长（?dur=秒数）并渲染成 mm:ss
+    //   ③ Day 11：渲染问题清单与精彩句子（数据来自 data/mock-items.json 的假条目），
+    //      并为每一条挂上收藏按钮（线 2-B）
+    //
+    // 口径以 PRD.md §6.2 / §6.4 为准：
+    //   - 偏题条目**没有纠正那一格**，逻辑错误条目才有 —— 这是设计（§6.2 第 343 行）
+    //   - 收藏对象就是这两类条目 + 精彩句子（§6.4 第 466 行）
+    //   - 收藏状态存 localStorage（Storage.toggleFavorite）。Day 11 的清单要求
+    //     「先使用前端临时状态，不接数据库」，但 PRD 的 A3 要求刷新后仍在，
+    //     两者只能靠 Storage 兜住；第 3 周接库后这两个键迁走。
+    //
+    // 错误提示怎么演示：见下面 FAIL_MODE 的注释。
 
     (function () {
       var params = new URLSearchParams(location.search);
@@ -94,17 +113,129 @@
         }
       }
 
-      if (!topicId) return;
+      if (topicId) {
+        fetch('../../data/topics.json')
+          .then(function (res) { return res.json(); })
+          .then(function (topics) {
+            var hit = topics.filter(function (t) { return t.topicId === topicId; })[0];
+            line.textContent = '本次练习主题：' + (hit ? hit.name + '（' + topicId + '）' : topicId);
+          })
+          .catch(function () {
+            line.textContent = '本次练习主题：' + topicId + '（主题数据没能加载）';
+          });
+      }
 
-      fetch('../../data/topics.json')
-        .then(function (res) { return res.json(); })
-        .then(function (topics) {
-          var hit = topics.filter(function (t) { return t.topicId === topicId; })[0];
-          line.textContent = '本次练习主题：' + (hit ? hit.name + '（' + topicId + '）' : topicId);
-        })
-        .catch(function () {
-          line.textContent = '本次练习主题：' + topicId + '（主题数据没能加载）';
-        });
+      /* ============================================================
+         收藏：失败路径怎么演示
+
+         今天没有后端，所以「失败」得自己造一个。两种触发方式：
+           ?favfail=1      收藏必定失败 —— 演示与截图时用这个，可控
+           不带参数时      约 1/6 概率失败 —— 这样正常点击也能偶尔撞见错误提示，
+                          不至于「这条提示永远看不到 = 验收不了」
+         为什么要有随机失败：Day 11 的清单要求「发生错误时显示可理解的提示」，
+         若失败路径永远走不到，这条要求就没有可观察的证据。
+         （这是为达成清单要求加的演示开关，第 3 周接上真实请求后整段删掉。）
+         ============================================================ */
+      var FAIL_MODE = params.get('favfail') === '1';
+      var FAV_DELAY_MS = 320;      // 与 topics.js 的 PIN_DELAY_MS 同值，交互手感一致
+
+      function handleFavorite(next, api, item) {
+        if (!window.Storage) {
+          api.reject('这个浏览器不允许本地保存，收藏暂时用不了。');
+          return;
+        }
+
+        setTimeout(function () {
+          if (FAIL_MODE || (!FAIL_MODE && Math.random() < 1 / 6)) {
+            api.reject('没能保存收藏，请再试一次。');
+            return;
+          }
+
+          var ok = window.Storage.toggleFavorite(item.itemId, {
+            type: item.type,
+            topicId: topicId || ''
+          });
+
+          if (ok !== next) {
+            api.reject('没能保存收藏，可能是浏览器不允许本地存储。');
+            return;
+          }
+          api.resolve();
+          /* 通知同页其他按钮照存储校正一次。
+             本页多条条目各有一个按钮，将来若同一 itemId 出现两处（如加「收藏区」），
+             这一句保证它们不会各说各话。组件侧的机制见 interact.js 的 sync()。 */
+          document.dispatchEvent(new CustomEvent('ic-sync'));
+        }, FAV_DELAY_MS);
+      }
+
+      /* ---------- 渲染条目 ---------- */
+      function render() {
+        fetch('../../data/mock-items.json', { cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
+          .then(function (data) {
+            var all = data.items || [];
+            var issues = all.filter(function (it) { return it.type !== 'good'; });
+            var goods = all.filter(function (it) { return it.type === 'good'; });
+
+            var issueList = document.getElementById('issue-list');
+            var goodList = document.getElementById('good-list');
+
+            if (issues.length) {
+              var f1 = document.createDocumentFragment();
+              issues.forEach(function (it) {
+                f1.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
+              });
+              issueList.replaceChildren(f1);
+            } else {
+              // 真正的空态：判断结果确实为空时才出现（PRD.md §6.2 第 323 行）
+              var e1 = document.createElement('div');
+              e1.className = 'empty empty-solid';
+              e1.appendChild(Object.assign(document.createElement('div'), {
+                className: 'big', textContent: '本次没有发现偏题或逻辑错误'
+              }));
+              issueList.replaceChildren(e1);
+            }
+
+            if (goods.length) {
+              var f2 = document.createDocumentFragment();
+              goods.forEach(function (it) {
+                f2.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
+              });
+              goodList.replaceChildren(f2);
+            } else {
+              var e2 = document.createElement('div');
+              e2.className = 'empty empty-solid';
+              e2.appendChild(Object.assign(document.createElement('div'), {
+                className: 'big', textContent: '本次还没有标记出精彩句子'
+              }));
+              goodList.replaceChildren(e2);
+            }
+
+            // 数据来源提示条（Day 11 临时，接真数据后删）
+            document.getElementById('issue-mock').textContent =
+              '以上 ' + issues.length + ' 条是本地假条目（data/mock-items.json），' +
+              '不是你真练出来的。判断功能接入后会换成你的原话。';
+          })
+          .catch(function (err) {
+            var box = document.getElementById('issue-list');
+            var e = document.createElement('div');
+            e.className = 'empty state-error';
+            e.appendChild(Object.assign(document.createElement('div'), {
+              className: 'big', textContent: '条目没能加载'
+            }));
+            e.appendChild(Object.assign(document.createElement('div'), {
+              className: 'small',
+              textContent: '（' + (err && err.message ? err.message : '') + '）' +
+                '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'
+            }));
+            box.replaceChildren(e);
+          });
+      }
+
+      render();
     })();
   </script>
 </body>

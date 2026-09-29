@@ -29,20 +29,21 @@
 
     <!-- 收藏区 -->
     <h2 class="section-title group-a">收藏区</h2>
-    <div class="empty">
-      <div class="big">还没有收藏任何条目</div>
-      <div class="small">在会话结果页对某一条点「收藏」，它就会出现在这里。</div>
+    <div class="item-list" id="fav-list" aria-live="polite">
+      <div class="empty">
+        <div class="big">正在读取收藏…</div>
+      </div>
     </div>
 
     <!-- 全部条目 -->
     <h2 class="section-title group-b">全部条目</h2>
-    <div class="empty">
-      <div class="big">还没有任何记录</div>
-      <div class="small">
-        完成一次练习之后，这里会按时间倒序列出你的问题条目。<br>
-        （练习记录功能尚未接入，所以现在这里必然是空的。）
+    <div class="item-list" id="all-list" aria-live="polite">
+      <div class="empty">
+        <div class="big">正在读取记录…</div>
       </div>
     </div>
+
+    <div class="mock-bar" id="rec-mock"></div>
 
     <!-- 展开一条记录后应该看到什么，先写成静态说明，等人真的点开时再实现 -->
     <div class="card card-spaced">
@@ -62,5 +63,192 @@
     </footer>
 
   </div>
+
+  <!-- 加载顺序（同 topics.html / result.html）：
+       storage → interact → item-card → 页面逻辑 -->
+  <script src="../js/storage.js"></script>
+  <script src="../js/components/interact.js"></script>
+  <script src="../js/components/item-card.js"></script>
+  <script>
+    // P4 错误记录页逻辑（Day 11）：
+    //   ① 按时间倒序列出历次会话的条目（数据来自 data/mock-items.json 的假条目）
+    //   ② 收藏区：只列已收藏的条目，**按收藏时间倒序**（PRD.md §6.4 第 468 行）
+    //   ③ 两处都能收藏 / 取消收藏，并且**改一处两处同时更新**
+    //
+    // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
+    //   收藏状态只有一份，存在 localStorage（Storage 的 favoriteItems 键）。
+    //   本页渲染时**从这一份状态现场算出两个列表**，而不是各存一份 ——
+    //   在结果页收藏的条目，打开本页时自然就在收藏区里，不需要任何同步机制。
+    //   这也是为什么取消收藏后能立刻从收藏区消失：重算一遍即可。
+    //
+    // 本页与结果页的区别（由 mock 数据的结构决定）：
+    //   结果页 = 本次会话的 items
+    //   本页   = 历次会话（sessions 数组）里的所有条目，跨会话混排
+
+    (function () {
+      var FAV_DELAY_MS = 320;
+
+      /* 本页没有 ?favfail 这种演示开关，失败只来自真实原因（浏览器不允许本地存储）。
+         为什么不做随机失败：本页是「回看」场景，用户在检查自己的收藏是否还在，
+         这时随机报错会造成「我的收藏丢了」的误解 —— 演示用的随机失败只放在
+         结果页（写入的那一刻），回看页保持诚实。 */
+      function handleFavorite(next, api, item) {
+        if (!window.Storage) {
+          api.reject('这个浏览器不允许本地保存，收藏暂时用不了。');
+          return;
+        }
+        setTimeout(function () {
+          var ok = window.Storage.toggleFavorite(item.itemId, {
+            type: item.type,
+            topicId: item.topicId || ''
+          });
+          if (ok !== next) {
+            api.reject('没能保存收藏，可能是浏览器不允许本地存储。');
+            return;
+          }
+          api.resolve();
+          /* 先通知同页按钮校正，再重算两个列表。
+             顺序不能反：本页同一个 itemId 会在「收藏区」和「全部条目」各出现一次，
+             若不先通知，重渲染前那一瞬两块会显示不一致的状态。 */
+          document.dispatchEvent(new CustomEvent('ic-sync'));
+          // 收藏状态变了 → 两个列表都要重算（收藏区可能多一条、也可能少一条）
+          render();
+        }, FAV_DELAY_MS);
+      }
+
+      // 把 mock 数据摊平成「历次会话的所有条目，按时间倒序」，
+      // 并给每条补上所属会话信息（本页每条要显示所属主题与时间，PRD §7.3 P4）
+      function flatten(data) {
+        var rows = [];
+        var sessions = (data.sessions || []).slice();
+
+        // 第一段 session（当前那次）+ sessions 数组，合成一张会话表
+        if (data.session) {
+          sessions.push({
+            sessionId: data.session.sessionId,
+            topicId: data.session.topicId,
+            topicName: data.session.topicName,
+            at: data.session.at,
+            durationSec: data.session.durationSec,
+            items: data.items || []
+          });
+        }
+
+        sessions.forEach(function (s) {
+          (s.items || []).forEach(function (it) {
+            rows.push({
+              item: it,
+              sessionId: s.sessionId,
+              topicName: s.topicName,
+              topicId: s.topicId,
+              at: s.at
+            });
+          });
+        });
+
+        // 时间倒序：最近的在最上面（PRD.md §6.5 第 487 行）
+        rows.sort(function (a, b) {
+          return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0);
+        });
+        return rows;
+      }
+
+      // 会话时间显示成「9 月 28 日 20:15」这种，不显示秒
+      function fmtTime(iso) {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return iso || '';
+        var hh = d.getHours(), mm = d.getMinutes();
+        return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 ' +
+          (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+      }
+
+      /* 渲染一条「记录」：条目本身 + 一行「所属主题 · 时间」。
+         与结果页的区别就在这行归属信息 —— 记录页跨会话，不标归属用户会不知道
+         这条是哪次说的（PRD §7.3 P4 明确要求「所属主题与时间」）。 */
+      function recordRow(row) {
+        var box = document.createElement('div');
+        box.appendChild(window.Components.item({ item: row.item, onToggle: handleFavorite }));
+        var meta = document.createElement('div');
+        meta.className = 'item-src';
+        meta.textContent = row.topicName + '（' + row.topicId + '） · ' + fmtTime(row.at);
+        box.appendChild(meta);
+        return box;
+      }
+
+      function emptyBox(title, small) {
+        var e = document.createElement('div');
+        e.className = 'empty';
+        var big = document.createElement('div');
+        big.className = 'big';
+        big.textContent = title;
+        e.appendChild(big);
+        if (small) {
+          var s = document.createElement('div');
+          s.className = 'small';
+          s.textContent = small;
+          e.appendChild(s);
+        }
+        return e;
+      }
+
+      function render() {
+        fetch('../../data/mock-items.json', { cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
+          .then(function (data) {
+            var rows = flatten(data);
+            var favList = document.getElementById('fav-list');
+            var allList = document.getElementById('all-list');
+
+            // ---------- 全部条目（时间倒序） ----------
+            if (rows.length) {
+              var f = document.createDocumentFragment();
+              rows.forEach(function (r) { f.appendChild(recordRow(r)); });
+              allList.replaceChildren(f);
+            } else {
+              allList.replaceChildren(emptyBox(
+                '还没有任何记录', '完成一次练习之后，这里会按时间倒序列出你的问题条目。'));
+            }
+
+            /* ---------- 收藏区（**按收藏时间倒序**，不是按会话时间） ----------
+               两次排序的差别：全部条目按会话时间排，收藏区按「你什么时候标的」排。
+               所以同一屏里两块的顺序可能不同 —— 这是对的，PRD §6.4 第 468 行
+               要求收藏区「最近标的在最上面」。顺序由 Storage.favoriteIds() 给。 */
+            var favOrder = window.Storage ? window.Storage.favoriteIds() : [];
+            var byId = {};
+            rows.forEach(function (r) { byId[r.item.itemId] = r; });
+
+            var favRows = favOrder
+              .map(function (id) { return byId[id]; })
+              .filter(function (r) { return !!r; });   // 收藏了但列表里没有的忽略掉
+
+            if (favRows.length) {
+              var f2 = document.createDocumentFragment();
+              favRows.forEach(function (r) { f2.appendChild(recordRow(r)); });
+              favList.replaceChildren(f2);
+            } else {
+              favList.replaceChildren(emptyBox(
+                '还没有收藏任何条目', '在会话结果页对某一条点「收藏」，它就会出现在这里。'));
+            }
+
+            document.getElementById('rec-mock').textContent =
+              '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json），' +
+              '不是你真练出来的。收藏状态存在本机浏览器里，刷新后仍在。';
+          })
+          .catch(function (err) {
+            var box = document.getElementById('all-list');
+            var e = emptyBox('记录没能加载',
+              '（' + (err && err.message ? err.message : '') + '）' +
+              '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。');
+            e.className = 'empty state-error';
+            box.replaceChildren(e);
+          });
+      }
+
+      render();
+    })();
+  </script>
 </body>
 </html>

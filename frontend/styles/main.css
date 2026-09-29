@@ -1134,6 +1134,322 @@ footer.page-foot {
   overflow-wrap: break-word;   /* 长英文串不撑破卡片 */
 }
 
+/* ============================================================
+   Day 11 新增：会反馈的按钮（交互反馈的表现层）
+   ------------------------------------------------------------
+   这一节是**表现层的唯一落点**，对应的状态机在
+   frontend/js/components/interact.js（组件头有完整说明）。
+   两层只通过 3 个 class + 2 个 data 属性连接：
+     .ic-btn / .ic-hint / .is-fav / data-state / aria-pressed
+
+   所以要换一套反馈风格（板块 ④ 搜到别的技能之后），**只改这一节**，
+   JS 一个字不用动。反过来若要换交互本身（收藏改成别的动作），
+   只改 interact.js 的回调，这一节也不用动。
+
+   三个问题各自的答案（板块 ① 的结论，落到具体实现）：
+     「我点到了吗」→ .ic-btn 的按压缩放（瞬态）
+     「它在忙吗」  → [data-state="busy"] 变灰 + 禁用（防错）
+     「成了吗」    → .is-fav 变色变字 + 一次弹跳（**持久状态，最强的一环**）
+   ============================================================ */
+
+/* 包装层：按钮 + 下方提示行，纵向排列 */
+.ic-wrap {
+  position: relative;
+  z-index: 2;              /* 压在主题卡左上角那枚色斑之上 */
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.ic-btn {
+  /* 光圈用绝对定位铺满按钮，所以本体要成为定位上下文 */
+  position: relative;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  /* 尺寸固定：文字从「☆ 收藏」变「★ 已收藏」宽度会变，不锁住的话
+     整行 meta 会跟着抖一下 —— 那看起来像布局坏了，不像反馈。 */
+  min-width: 7.5em;
+  text-align: center;
+  transition: background var(--fast) var(--ease-out),
+              color var(--fast) var(--ease-out),
+              border-color var(--fast) var(--ease-out),
+              transform var(--fast) var(--ease-out),
+              box-shadow var(--fast) var(--ease-out);
+}
+
+/* ---------- 光圈（按压 / 成功共用的一枚会扩散的环） ----------
+   为什么用伪元素而不是新加一个 DOM 节点：这是纯装饰，加节点会污染
+   「按钮 = 一个 button 元素」这个简单结构，也会让 interact.js 的
+   状态逻辑多一份牵挂。伪元素只活在样式层，JS 完全不知道它存在。
+   平时 visibility:hidden（不占位、不响应点击），只在对应状态下才显形。 */
+.ic-btn::before {
+  content: "";
+  position: absolute;
+  inset: -1px;                       /* 盖住按钮自己的 1px 边框 */
+  border-radius: inherit;
+  border: 2px solid var(--primary);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;              /* 绝不吞掉按钮的点击 */
+}
+
+.ic-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+/* 按下的那一瞬：缩一下 + 一圈环向外扩。这是回答「我点到了吗」的动作，
+   时长刻意比别的过渡更短（--fast 的一半），否则手感发黏。
+   环用 300ms 扩散、比缩放的 75ms 长，这样「按下」这件事有个可见的余韵，
+   而不是一闪就没。 */
+.ic-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 75ms;
+}
+
+.ic-btn:active:not(:disabled)::before {
+  animation: ic-ring-out 300ms var(--ease-out);
+}
+
+/* ---------- 已收藏 / 已星标（持久状态，最强的一环） ---------- */
+
+.ic-btn.is-fav {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  border-color: transparent;
+  color: #FFFFFF;
+  box-shadow: var(--shadow-sm);
+  /* 双段弹跳（比分段更「蹦」）：让状态变化被「看见」，而不只是「发现」。
+     用 --ease-spring（回弹曲线）而不是默认缓动，弹跳感更明确。
+     0.46s 刻意长于普通过渡 —— 这是整个交互里最该被记住的一下，值得多花点时间。 */
+  animation: ic-pop 460ms var(--ease-spring);
+}
+
+/* 成功时，同一枚环从按钮边缘**向外炸开并淡出**。
+   与按压环的区别：按压环是「描边扩散、留白不填」，成功环是
+   「实心外晕、扩散即消失」，视觉分量更重 —— 呼应它是「成了」的信号。
+   用 ::after（不是 ::before），好在两个环可以同时在场上，互不打架。 */
+.ic-btn.is-fav::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  animation: ic-burst 520ms var(--ease-out);
+}
+
+.ic-btn.is-fav:hover:not(:disabled) {
+  color: #FFFFFF;
+  box-shadow: var(--shadow-md);
+}
+
+@keyframes ic-pop {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.18); }
+  55%  { transform: scale(0.97); }   /* 回弹一下，像东西落回原位 */
+  75%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+/* 按压环：只扩散描边，透明度先升后降，最后完全消失 */
+@keyframes ic-ring-out {
+  0%   { opacity: 0.75; transform: scale(0.96); visibility: visible; }
+  100% { opacity: 0;    transform: scale(1.35); visibility: hidden; }
+}
+
+/* 成功环：实心外晕扩散即淡出，比按压环更亮、扩得更开 */
+@keyframes ic-burst {
+  0%   { opacity: 0.55; transform: scale(0.6); visibility: visible; }
+  60%  { opacity: 0.25; transform: scale(1.5); }
+  100% { opacity: 0;    transform: scale(1.8); visibility: hidden; }
+}
+
+/* 说明（Day 11 板块 ④ 手写加强时踩到的一点）：
+   原本还想让按钮里的 ★ 单独转一下，但**纯 CSS 做不到** ——
+   ★ 和文字是同一个文本节点，无法只旋它一半；要拆成独立元素就得改
+   interact.js 去包裹图标，那就破坏了两层分离（改样式要动 JS）。
+   权衡后放弃，把「成功」的分量压在弹跳 + 光圈上（已经足够醒目）。
+   记录在这里，免得下次又想去加。 */
+
+/* ---------- 处理中：不可重复点击 ---------- */
+
+.ic-btn[data-state="busy"] {
+  opacity: 0.6;
+  cursor: progress;
+  /* 还在用 cursor: not-allowed 的地方是 button:disabled 的通用规则；
+     这里覆盖成 progress，语义更准 —— 不是「不能点」，是「正在忙」。 */
+  transform: none;
+}
+
+/* ---------- 失败提示 ---------- */
+
+.ic-hint {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--accent);
+  /* 提示自己会缩进到与按钮文字对齐，不和卡片正文混在一起 */
+  padding-left: var(--space-1);
+  max-width: 20em;
+}
+
+/* 卡片里放这个按钮时，与上方内容留一道间距（覆盖 .card .hint + * 的 16px） */
+.topic .ic-wrap {
+  margin-top: var(--space-3);
+}
+
+/* 主题卡上的星标按钮：卡片本身是 <a>，点按钮不该顺带跳转（见 topics.js 的 stopPropagation） */
+.topic .ic-btn {
+  font-size: var(--text-xs);
+  min-width: 7em;
+}
+
+/* ---------- 被星标（置顶）的主题卡 ---------- */
+
+/* 左侧一道主色竖条 + 轻微上浮：让「它被标了」在不读文字时也能看见 */
+.topic.is-pinned {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md);
+}
+
+.topic.is-pinned::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-6);
+  bottom: var(--space-6);
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(180deg, var(--primary) 0%, var(--accent) 100%);
+}
+
+.topic-list.group-b .topic.is-pinned::after {
+  background: linear-gradient(180deg, var(--teal) 0%, #35A895 100%);
+}
+
+/* ---------- 收藏条目（P3 结果页 / P4 记录页） ---------- */
+
+.item-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.item {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: var(--surface-soft);
+  transition: border-color var(--fast) var(--ease-out),
+              background var(--fast) var(--ease-out);
+}
+
+/* 已收藏的条目整块变暖：反馈不止落在按钮上，条目本身也跟着变 ——
+   这是清单里「点击任意功能，界面发生明显变化」的落点之一 */
+.item:has(.ic-btn.is-fav) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+/* 类型胶囊三色。偏题=珊瑚（要提醒的问题）、逻辑错误=蜜橘（问题更重、要纠正）、
+   精彩句子=深青（**不是问题，是亮点** —— 用另一个色相，一眼能分开）。
+   为什么不像主题卡那样只靠 --primary/--teal 两个令牌：这里要在一屏里
+   同时区分三类，两色不够用，所以借用第三档强调色 --accent 并配套它的浅底。 */
+.item-tag-offtopic {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.item-tag-logic {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.item-tag-good {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.item-turn {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.item-quote {
+  font-family: var(--font-en);
+  font-style: italic;
+  font-size: var(--text-base);
+  color: var(--text);
+  line-height: 1.7;
+  margin-bottom: var(--space-2);
+}
+
+.item-note {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.item-note b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 逻辑错误条目才有「纠正」这一格；偏题条目没有（PRD.md §6.2 的刻意区别） */
+.item-fix {
+  margin-top: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--primary);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.item-foot {
+  margin-top: var(--space-3);
+}
+
+/* 记录页每条下方的归属信息（所属主题 · 时间）。
+   PRD.md §7.3 P4 要求每条能看到「所属主题与时间」—— 记录页跨会话，
+   不标归属用户会不知道这条是哪次说的。结果页不需要它（那一页的条目
+   全部属于同一次会话，标了是冗余）。 */
+.item-src {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-4) 0;
+}
+
+/* 假数据提示条：说明这一段的条目来自本地文件，不是真练出来的（Day 11 临时） */
+.mock-bar {
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-tint);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
 /* ---------- 小屏补充适配 ---------- */
 
 @media (max-width: 640px) {
@@ -1143,5 +1459,10 @@ footer.page-foot {
 
   .blk-topics > .blk-head {
     align-items: flex-start;
+  }
+
+  /* 窄屏上星标按钮与时长挤在一行会换行，让它整宽独立成行更好点 */
+  .topic .ic-btn {
+    min-width: 0;
   }
 }

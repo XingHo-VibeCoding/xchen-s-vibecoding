@@ -118,6 +118,19 @@
       var items = byGroup[group];
       if (!items.length) return;
 
+      /* Day 11 线 2-A：被星标的主题排到本组最前（其余保持原顺序）。
+         用 stable sort：JS 的 Array.sort 在现代浏览器里是稳定的，
+         所以没被星标的那些相对顺序不变，只把星标的拎到前面。
+         为什么要重排而不是只加个样式：清单要求「点击任意功能，界面发生明显变化」——
+         卡片换个位置是最明显的变化，用户一眼就知道「它被标上去了」。 */
+      var pinnedSet = {};
+      if (window.Storage) {
+        window.Storage.pinnedIds().forEach(function (id) { pinnedSet[id] = true; });
+      }
+      var sorted = items.slice().sort(function (x, y) {
+        return (pinnedSet[y.topicId] ? 1 : 0) - (pinnedSet[x.topicId] ? 1 : 0);
+      });
+
       var isGroupA = group === '会议上';
       var title = el('h2', 'section-title ' + (isGroupA ? 'group-a' : 'group-b'));
       title.appendChild(document.createTextNode('组 ' + GROUP_LABEL[group] + ' · ' + group + ' '));
@@ -125,14 +138,67 @@
       frag.appendChild(title);
 
       var grid = el('div', 'topic-list ' + (isGroupA ? 'group-a' : 'group-b'));
-      items.forEach(function (t) {
+      sorted.forEach(function (t) {
         // 出过问题条目的主题，才在卡片上带「上次在这里卡过」标记（PRD.md §6.3）
-        grid.appendChild(topicCard(t, { stuck: !!stuckMap[t.topicId] }));
+        grid.appendChild(topicCard(t, {
+          stuck: !!stuckMap[t.topicId],
+          pinned: !!pinnedSet[t.topicId],
+          onPin: handlePin
+        }));
       });
       frag.appendChild(grid);
     });
 
     topicsBody.replaceChildren(frag);
+  }
+
+  /* ---------- 2.1 Day 11 线 2-A：星标（置顶）的回调 ----------
+
+     这个函数是「状态机」与「存储」之间的桥：interact.js 只管按钮长什么样、
+     什么时候变，能不能存下来由这里决定。
+     为什么要有延时：真实场景下这里要发请求（第 3 周接库），
+     先把「接口慢」这个事实摆进交互里，用户才会看到 busy 态；
+     同步立刻完成的话，busy 态会一闪而过等于没有。
+     时长 320ms：短到不烦人，长到能让眼睛捕捉到「它在忙」。 */
+  var PIN_DELAY_MS = 320;
+
+  function handlePin(topicId, next, api) {
+    // 存储不可用（无痕模式 / 配额满）时给一条能看懂的提示，不是抛错
+    if (!window.Storage) {
+      api.reject('这个浏览器不允许本地保存，星标暂时用不了。');
+      return;
+    }
+
+    setTimeout(function () {
+      var ok = window.Storage.togglePin(topicId);
+
+      // 写失败：E8 场景（无痕 / 配额满）。storage 层返回原状态，这里如实报错。
+      if (ok !== next) {
+        api.reject('没能保存星标，可能是浏览器不允许本地存储。');
+        return;
+      }
+
+      api.resolve();
+
+      /* 重排整张列表 —— 星标后立刻置顶、取消后立刻归位。
+         为什么要重跑渲染而不是把卡片挪一下 DOM：重排要跨「组」考虑边界，
+         直接重渲染同一份数据最不容易出错；这里数据量只有 8 张卡，代价可忽略。 */
+      reorderTopics();
+    }, PIN_DELAY_MS);
+  }
+
+  /* 保存住上次成功渲染的主题数据，供星标后重排用。
+     为什么不在 handlePin 里重新 fetch：没必要为一次重排再打一次网络请求，
+     而且重新 fetch 期间列表会闪一下骨架屏。 */
+  var lastTopics = null;
+  var lastMock = null;
+
+  function reorderTopics() {
+    if (!lastTopics) return;
+    // 重排前记下当前滚动位置：重渲染会把视口弹回顶部，用户会以为页面跳走了
+    var y = window.scrollY;
+    renderTopics(lastTopics, lastMock);
+    window.scrollTo(0, y);
   }
 
   /* ---------- 3. 成功态：区块 3（卡点概览，mock 数据） ---------- */
@@ -204,6 +270,10 @@
       renderEmpty();
       return;
     }
+
+    // 存住这两份数据：星标之后要重排列表，不必再 fetch 一次（见 reorderTopics）
+    lastTopics = topics;
+    lastMock = mock;
 
     renderTopics(topics, mock);
     renderOverview(mock);
