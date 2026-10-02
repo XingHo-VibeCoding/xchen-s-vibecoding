@@ -1,8 +1,33 @@
 /* 口语对话实战器 · 全站样式
-   设计参考：web-design-layout 技能的设计系统（60-30-10 配色、4px 间距网格、
-   1.25 字号比例、圆角/阴影层级、动效时长）。
-   结构约定见 TECH_DESIGN.md §4.1：本文件是全站唯一样式表，4 个页面共用一个，
-   不采用技能包建议的「CSS 内联到各页面」（那会让同一套样式存四份）。 */
+   ============================================================
+   结构约定（不变）
+     本文件是全站唯一样式表，4 个页面共用一个 —— 不采用技能包建议的
+     「CSS 内联到各页面」（那会让同一套样式存四份）。见 TECH_DESIGN.md §4.1。
+
+   Day 12 重设计
+     设计依据换成 Taste Skill V1，参数取值（技能基线 8 / 6 / 4）：
+       DESIGN_VARIANCE  8 → 5   这是每天要用的任务入口，不是作品集。
+                                用户带着「开口焦虑」来，不对称只留在留白与
+                                比例上，不留在「内容位置不可预测」上。
+       MOTION_INTENSITY 6 → 6   保留：错峰入场 + 触觉按压 + 弹簧曲线 + 持续微动。
+       VISUAL_DENSITY   4 → 4   Daily App Mode，正常应用间距。
+
+     技能与项目既有锁定的三处冲突，处理方式（不自行取舍，逐条说明）：
+       ① 技能默认 React / Tailwind / Framer Motion
+          → 本项目技术路线「乙」是原生 HTML/CSS/JS 无打包（TECH_DESIGN.md §3.3），
+            不引入任何依赖。技能里关于动效的建议一律用纯 CSS 实现。
+       ② 技能「Dashboard 禁用衬线体」
+          → 本项目衬线体只用在**英文内容本身**（卡片英文说明、条目引文），
+            不用在任何标题/标签/数字上。技能禁的是「UI 外壳用衬线」，
+            这里是「内容是英文句子，用衬线才读得对」——不冲突，保留。
+       ③ 技能「最多 1 个强调色」
+          → 保留三色，但改成**各有分工、互不抢位**（见下方 --accent 的注释）。
+            PRD §6.2 用颜色区分「偏题 / 逻辑错误 / 精彩句子」是产品语义，
+            不能为了配色规则删掉。
+
+     这一版改的是：字体栈、间距节奏、卡片结构、层级、动效、状态页；
+     锁定的品牌色值与 PRD 口径全部不动。
+   ============================================================ */
 
 :root {
   /* ---- 配色（60-30-10）---- */
@@ -12,32 +37,75 @@
   /* 30% 辅助色：白卡片 + 浅奶油区块 */
   --surface: #FFFFFF;
   --surface-soft: #FFF8EE;
-  /* 10% 强调色：蜜橘 + 珊瑚 */
-  --primary: #D97706;
-  --primary-dark: #B45309;
+
+  /* ---------- 10% 强调色（Day 12 重新分工）----------
+     原来三个色到处串：编号是珊瑚、区块小标是珊瑚、悬停边框是蜜橘、
+     星标渐变是蜜橘→珊瑚、卡点数字是珊瑚…… 结果是**没有一个颜色在说事**，
+     页面看着吵。现在按职能分工，每个色只干一件事：
+
+       --primary / --primary-dark  → 组 A（会议上）的**组色**
+       --teal                      → 组 B（同事间）的组色
+       --accent（珊瑚）            → 警示：偏题、卡点、失败、品牌点
+
+     另一条：**鲜色只做装饰，深色才做文字**。
+     依据是 Day 12 实测的对比度（白底 / 奶油底）：
+       原写法                          实测     12px 文字要求 4.5
+       --accent  #E8624A 当文字         3.35     ✗ 不达标
+       --primary #D97706 当文字         3.19     ✗ 不达标
+       白字压在蜜橘→珊瑚渐变按钮上      3.19~3.35 ✗ 不达标
+     所以新增两个「-deep」令牌专供小字，鲜色值一个没动（继续做圆斑、
+     竖条、圆点、大号数字等装饰）。 */
+  --primary: #D97706;          /* 装饰：组 A 圆斑、竖条、边框、大号数字 */
+  --primary-dark: #B45309;     /* 白底 5.02 · 奶油底 4.86 —— 可做正文级文字 */
+  --primary-deep: #9A4708;     /* Day 12 新增：小字专用。白底 6.40 · 蜜橘浅底 5.70 */
   --primary-soft: #FDF0DC;
-  --accent: #E8624A;
+
+  --accent: #E8624A;           /* 装饰：品牌圆点、警示边框、渐变止点 */
+  --accent-deep: #A83A23;      /* Day 12 新增：警示小字专用。白底 6.37 · 珊瑚浅底 5.60 */
   --accent-soft: #FDEDE8;
-  /* 第二色相：深青，用于「同事间」组与英文点缀 */
-  --teal: #0F7A6B;
+
+  --teal: #0F7A6B;             /* 组 B 组色。白底 5.23 · 深青浅底 4.61 —— 达标，不用改 */
   --teal-soft: #E4F4F0;
 
-  --text: #2B2622;
+  /* 主按钮渐变端点（Day 12 新增两个令牌）。
+     原 #D97706 → #E8624A 上压白字只有 3.19~3.35，16px 文字不达标；
+     换成下面两档后两端都是 5.02 / 4.87，且色相仍是蜜橘→红橘，
+     「多巴胺」的暖色观感保住，只是深了一档 —— 反而更像熟成的水果，不像荧光。 */
+  --grad-from: #B45309;
+  --grad-to: #C24A2E;
+  --grad-from-hover: #9A4708;
+  --grad-to-hover: #A83A23;
+
+  --text: #2B2622;             /* 非纯黑（技能第八节禁用 #000000） */
   /* 三级文字色阶（深 → 中 → 浅）。
      --text-muted 于 Day 9 由 #9C9288 调深为 #736A5F：
-     原值在 6 种底色上只有 2.68~3.05，低于 frontend-design 要求的正文 4.5:1；
-     调深后为 4.67~5.31，全部达标。副作用：与 --text-secondary 的视觉距离
-     由 1.96 缩至 1.12（层级变紧），如需拉开可将 secondary 一并调深。 */
+     原值在 6 种底色上只有 2.68~3.05，低于正文 4.5:1；调深后为 4.67~5.31。
+     Day 12 复核：4.89（奶油深底）~5.31，全达标，不动。 */
   --text-secondary: #6B6259;
   --text-muted: #736A5F;
   --border: #EBE3D6;
   --border-soft: #F2EADD;
 
-  /* ---- 排版 ---- */
-  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-  --font-en: Georgia, "Times New Roman", "Songti SC", serif;
-  --font-mono: "SF Mono", "Fira Code", Consolas, "Courier New", monospace;
+  /* ---- 排版（Day 12 换栈）----
+     换中文字体这件事原本挂在「待决」里，理由是「自托管几 MB 进仓库 / CDN 国内不稳」。
+     Day 12 查了本机 C:\Windows\Fonts，发现**不需要下载**：
+       Noto Sans SC（VF + 静态 Regular/Medium/Bold）、MiSans、HarmonyOS Sans SC
+       都在本地已装。于是直接换栈，零下载、零网络依赖、零授权风险。
+     为什么 Noto Sans SC 排第一：它是思源黑体的 Google 发行版，本机有真
+     Regular/Medium/Bold 三档（MiSans 只有 Regular，标题会退化成合成粗体）。
+     观感上它比原先实际落到的「微软雅黑」笔画更匀、拉丁字母更干净。
+     代价（已记录）：换机器若没装这几款，会退到 PingFang / 雅黑 —— 中文仍正常，
+     只是没了这一档质感。要彻底锁定就得自托管字体文件，那件事仍然没做。 */
+  --font-sans: "Noto Sans SC", "MiSans", "HarmonyOS Sans SC", "PingFang SC",
+    "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+  /* 英文内容（卡片说明、条目引文）走衬线斜体，是「英语特色」的主要落点。
+     只在装英文句子的地方用，不用在标题/标签/数字上。 */
+  --font-en: Georgia, "Sitka Text", Cambria, "Times New Roman",
+    "Songti SC", serif;
+  /* 等宽只用在「技术小标」：区块编号、TOPIC N、轮次、计时。
+     原先落到的 Consolas 太像代码编辑器；Cascadia Mono 笔画更整、更现代。 */
+  --font-mono: "Cascadia Mono", "Cascadia Code", "Source Code Pro",
+    "SF Mono", Consolas, "Courier New", monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -58,7 +126,9 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* ---- 圆角与阴影 ---- */
+  /* ---- 圆角与阴影 ----
+     阴影一律带暖色底（rgba(107,84,56,…)），不用中性灰 ——
+     压在奶油底上，中性灰阴影会显脏。技能第四条同款要求（阴影要染色）。 */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
@@ -69,11 +139,58 @@
   --shadow-md: 0 4px 10px -2px rgba(107, 84, 56, 0.09), 0 2px 4px -2px rgba(107, 84, 56, 0.06);
   --shadow-lg: 0 12px 24px -6px rgba(107, 84, 56, 0.13), 0 4px 8px -4px rgba(107, 84, 56, 0.07);
 
-  /* ---- 动效 ---- */
+  /* ---- 动效 ----
+     --ease-spring 是回弹曲线（技能要求交互元素走弹簧感，不要线性）。
+     --ease-soft 是入场曲线：比 --ease-out 更缓，长距离位移用它。 */
   --fast: 150ms;
   --normal: 300ms;
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-soft: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 卡片错峰入场：第 N 张的延迟 = --i × --stagger（--i 由 nth-child 给，见下）。
+     55ms × 最多 5 档 = 275ms 之内全部起步，整段动画 700ms 内收尾。 */
+  --stagger: 55ms;
+
+  /* ============================================================
+     暗场 + 光球（Day 13 新增）
+     ------------------------------------------------------------
+     为什么需要一个暗场：这一版的核心形象是「AI 是一枚会脉动的光球」，
+     而**光只有落在暗处才看得见**。奶油底上放一颗发光球，它顶多是个橙色圆圈。
+     所以对话页的对话区（.stage）单独做成一块深暖棕的「舞台」——
+     像书桌上的一盏灯，四周暗下来，光球成为房间里唯一在动的东西。
+
+     为什么不是整站变深色（这是刻意的克制）：
+       ① 主题列表是「挑东西」，要在明亮里快速扫读，暗色只会拖慢判断；
+       ② 明暗对比本身就是冲击力 —— 从亮处点进对话页，画面沉下去，
+          这个下坠感在告诉用户「现在开始认真说话了」；
+       ③ 全站深色 + 发光是通用的 AI 套路，只在需要的地方暗，才有意图。
+
+     颜色为什么是暖棕而不是黑：纯黑（#000）会把暖橘光压成冷调，
+     整个屏幕像关机的手机。深暖棕是「关了灯的客厅」，木色还在。
+     全部取值经 WCAG 相对对比度实测（背景用最深的 --night）：
+       --night-text  #F5EDE2  14.68  正文与光球上方的引导语
+       --night-2nd   #CDBBA6   9.13  次一级说明
+       --night-muted #AB9985   6.19  12px 小字（阈值 4.5）
+       --night-accent#E8A34E   7.94  暗场上的强调文字
+     ============================================================ */
+  --night: #241A13;              /* 舞台底色 */
+  --night-raised: #33251A;       /* 舞台内需要抬升的块 */
+  --night-edge: #3E2D20;         /* 舞台描边 */
+  --night-text: #F5EDE2;
+  --night-2nd: #CDBBA6;
+  --night-muted: #AB9985;
+  --night-accent: #E8A34E;
+
+  /* 光球的三档配色。它不是「一个橙色的圆」——
+     从左上角高光到右下角收暗是一个完整的球体，所以用径向渐变而不是纯色。
+     暗底上的对比度（只需 3.0 即清晰可辨）：亮核 10.84 / 暖橙 8.01 / 珊瑚 5.09。 */
+  --orb-hi: #FFE0AE;             /* 球面高光 */
+  --orb-core: #FFC46B;           /* 受光面 */
+  --orb-warm: #F2A03C;           /* 球体主色 */
+  --orb-lo: #E8624A;             /* 背光面（收在珊瑚，与品牌色同源） */
+  --orb-glow: rgba(242, 160, 60, 0.5);
+  --orb-ring: rgba(255, 196, 107, 0.65);
 }
 
 * {
@@ -94,11 +211,10 @@
 /* 键盘焦点描边（Day 9 新增）。
    出处：frontend-design 中文版第 235 行「:focus-visible 可见描边（2px + 2px 偏移）」。
    为什么用 :focus-visible 而不是 :focus：鼠标点击时不显示描边，只有键盘 Tab
-   或程序化聚焦时才出现 —— 这是规范推荐的做法，不会给鼠标用户添噪。
-   为什么用 --primary-dark：它在奶油底上对比度 4.86:1，是三个强调色里最高的，
-   焦点指示要的是「一眼看见」而不是「好看」。
-   这里**不写 border-radius**：outline 会自动跟随元素自身的圆角，写了反而会
-   把胶囊按钮（--radius-full）的描边压成小圆角，形状与按钮对不上。 */
+   或程序化聚焦时才出现 —— 规范推荐做法，不给鼠标用户添噪。
+   为什么用 --primary-dark：奶油底上 4.86:1，焦点指示要的是「一眼看见」。
+   这里**不写 border-radius**：outline 会自动跟随元素自身圆角，写了反而会把
+   胶囊按钮的描边压成小圆角。 */
 :focus-visible {
   outline: 2px solid var(--primary-dark);
   outline-offset: 2px;
@@ -113,33 +229,50 @@ body {
   min-height: 100vh;
   padding: var(--space-8) var(--space-6) var(--space-12);
   -webkit-font-smoothing: antialiased;
+  /* 中英夹排时数字与标点不跳字宽 */
+  font-variant-numeric: tabular-nums;
 }
 
-/* 页面顶部一层极淡的暖光，让整片底色不那么平 */
+/* 页面顶部一层极淡的暖光，让整片底色不那么平。
+   Day 12：高度 320 → 420px，渐变更缓 —— 拉开后上半屏有一层「晨光」，
+   hero 与通知卡落在里面，视线自然从亮处往内容走。
+   技能第五条要求：这类装饰滤镜只能挂在 fixed + pointer-events:none 的伪元素上，
+   不能挂在滚动容器上（否则每帧重绘，手机端掉帧）。这条本来就合规。 */
 body::before {
   content: "";
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 320px;
+  height: 420px;
   background: linear-gradient(180deg, var(--bg-tint) 0%, rgba(251, 245, 234, 0) 100%);
   pointer-events: none;
   z-index: 0;
 }
 
+/* 容器宽度 1000 → 1080（Day 12）。
+   为什么：主题卡三列是页面的主体，1000px 下每张只有约 305px，
+   卡片英文说明两行就满、和「预计时长」挤在一起。1080px 下每张 333px，
+   同时正文仍在 65ch 以内（.lede / .hint 各自限宽），不影响阅读。 */
 .wrap {
   position: relative;
   z-index: 1;
-  max-width: 1000px;
+  max-width: 1080px;
   margin: 0 auto;
 }
 
-/* ---------- 顶栏 ---------- */
+/* ============================================================
+   页头（hero）
+   ------------------------------------------------------------
+   技能第三条「反对居中 bias」：hero 一律左对齐或分屏，不做居中大标题。
+   这一页本来就是左对齐，改动在**层级怎么交代**：
+   技能第七条禁止「靠巨大字号喊话」，所以标题不再放大，
+   改为「标题压重 + 说明限宽 + 一条发丝线收口」建立区块感。
+   ============================================================ */
 
 .topbar {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
@@ -147,22 +280,54 @@ body::before {
 }
 
 .topbar h1 {
-  font-size: var(--text-3xl);
+  /* Day 13：30px 定值 → clamp 流式（28 ~ 38px）。
+     为什么：30px 的页头标题与区块 2 的标题（24px）只差 6px，
+     在 1440px 的宽屏上页头压不住场面，两级标题看着差不多大。
+     改成流式后窄屏不溢出、宽屏撑得起页头，层级一眼分明。
+     上限 38px 是刻意的 —— 再往上就成营销页的喊话体了（技能第七条禁「靠字号喊话」）。 */
+  font-size: clamp(1.75rem, 3.4vw, 2.375rem);
   font-weight: 700;
   line-height: 1.25;
+  /* 中文标题收紧字距会显得局促，只收一点点（-0.01em）；
+     真正拉开层级的是下面的说明文字与发丝线，不是字号。 */
   letter-spacing: -0.01em;
+  /* 标题折行时按语义均衡分配，避免「口语对话实 / 战器」这种断法 */
+  text-wrap: balance;
 }
 
-/* 标题右侧一枚小色点，作为品牌记忆点 */
+/* 标题右侧一枚发光的小球，作为品牌记忆点。
+   Day 13：从「一枚珊瑚圆点」改成**光球的缩小版**（同一套径向渐变 + 一圈柔光），
+   理由是形象要自洽 —— 对话页中央那颗球是这个产品的脸，
+   它在页头以 10px 的尺寸先出现一次，用户进对话页看到大球时才会认出「是它」。
+   若这里仍是一枚扁平色点，大球就成了一个孤立的装饰。
+
+   呼吸 3.2s 是全站唯一的持续微动（技能第四条要求 MOTION_INTENSITY > 5 时埋一枚），
+   幅度刻意小：1 → 1.18 倍。它同时充当「AI 在线」的活体信号。 */
 .topbar h1::after {
   content: "";
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: radial-gradient(
+    circle at 34% 30%,
+    var(--orb-hi) 0%,
+    var(--orb-core) 30%,
+    var(--orb-warm) 66%,
+    var(--orb-lo) 100%
+  );
+  /* 两圈：近处一圈实边（球的轮廓），远处一圈散开（光溢出到空气里） */
+  box-shadow:
+    0 0 0 3px rgba(242, 160, 60, 0.16),
+    0 0 12px rgba(242, 160, 60, 0.55);
   margin-left: 10px;
   vertical-align: 0.5rem;
+  animation: brandBreath 3.2s var(--ease-out) infinite;
+}
+
+@keyframes brandBreath {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(1.18); opacity: 0.72; }
 }
 
 .navlink {
@@ -171,31 +336,50 @@ body::before {
   font-weight: 500;
   color: var(--primary-dark);
   text-decoration: none;
-  /* Day 9：上下内边距 8px → 10px。原值实测点击区仅 43px，低于
-     frontend-design 要求的 44×44px；10px 落在 4px 网格上，实测得 46px。 */
+  /* Day 9：上下内边距 8px → 10px。原值实测点击区仅 43px，低于要求的 44×44px；
+     10px 落在 4px 网格上，实测得 46px。 */
   padding: 10px var(--space-4);
   border-radius: var(--radius-full);
   background: var(--surface);
   border: 1px solid var(--border);
-  transition: all var(--fast) var(--ease-out);
+  transition: color var(--fast) var(--ease-out),
+              border-color var(--fast) var(--ease-out),
+              background var(--fast) var(--ease-out),
+              transform var(--fast) var(--ease-out);
 }
 
+/* 悬停文字原用 --accent（白底 3.35，14px 不达标），改用 --accent-deep（6.37）。
+   边框是装饰、只需 3:1，仍可用鲜珊瑚。 */
 .navlink:hover {
-  color: var(--accent);
+  color: var(--accent-deep);
   border-color: var(--accent);
   background: var(--accent-soft);
   transform: translateY(-1px);
 }
 
-/* 顶栏里的多个链接用竖线隔开 */
-.topbar > div > .navlink + .navlink {
-  margin-left: var(--space-2);
+.navlink:active {
+  transform: translateY(0) scale(0.98);
 }
 
+/* 页头与主内容之间的一条发丝线（Day 12 新增）。
+   为什么：原来标题区与三张卡之间只靠 margin 分隔，视觉上是一个连续的大块；
+   加一条线之后页头自成一个「带」，下面的内容从线上「开始」。
+   为什么挂在 .lede 上：HTML 里 .topbar 与 .lede 是兄弟节点，没有共同父级
+   可以做浏览器，写在 .lede 的 border-bottom 上等于给整个页头收口，
+   且不需要改 HTML 结构。 */
 .lede {
   color: var(--text-secondary);
   font-size: var(--text-base);
+  max-width: 62ch;                 /* 技能：正文行宽不超过 65ch */
+  text-wrap: pretty;               /* 末行不留单字 */
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-8);
+}
+
+/* 顶栏里的多个链接用竖线隔开 */
+.topbar > div > .navlink + .navlink {
+  margin-left: var(--space-2);
 }
 
 /* 英文引文统一走衬线体，是「英语特色」的主要落点 */
@@ -204,7 +388,9 @@ body::before {
   font-style: italic;
 }
 
-/* ---------- 通用块 ---------- */
+/* ============================================================
+   通用块
+   ============================================================ */
 
 .card {
   background: var(--surface);
@@ -218,12 +404,13 @@ body::before {
 .card h2 {
   font-size: var(--text-lg);
   font-weight: 600;
+  line-height: 1.45;
   margin-bottom: var(--space-1);
+  text-wrap: balance;
 }
 
 /* 需要与上方内容拉开一段距离的卡片（Day 9 新增）。
-   出处：records.html 第 48 行原来是行内 `style="margin-top:24px"`。
-   24px = var(--space-6)，落在 4px 网格上，只是没走令牌，现提到类里。 */
+   出处：records.html 第 48 行原来是行内 `style="margin-top:24px"`。 */
 .card-spaced {
   margin-top: var(--space-6);
 }
@@ -232,31 +419,23 @@ body::before {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: 1.7;
+  max-width: 62ch;
+  text-wrap: pretty;
 }
 
 /* 卡片里「标题区（h2 + .hint）」与「正文内容」之间的一道间距（Day 9 新增）。
    出处：result.html 三处行内 `style="margin-top:14px"` —— 14px 不在 4px 网格上，
    且同一意图写三遍。现在统一用兄弟选择器表达：任何紧跟在 .card .hint 后面的元素
-   自动获得 16px 上边距，HTML 里不必再贴类名。
-   为什么 16px：var(--space-4) 是本项目默认的元素间距，也是网格上的常用档；
-   原值 14px 夹在 12 与 16 之间，属「随手写的值」。 */
+   自动获得 16px 上边距，HTML 里不必再贴类名。 */
 .card .hint + * {
   margin-top: var(--space-4);
 }
 
 /* 说明性条目列表（Day 9 新增）。
-   出处：原来是 records.html 第 51 行的一串行内样式
-   `margin:12px 0 0 20px;font-size:14px;color:#57606a`，现全部提到这里。
-   处理口径：
-     · 字号 14px → var(--text-sm)，本来就有对应令牌
-     · 颜色 #57606a → var(--text-muted)，与上方 .hint 的引导语同一层次
-       （#57606a 是和 --text-secondary 数值不同、语义相同的那种「另一种灰」，
-        统一到令牌后这个问题消失）
-     · 间距 12px → var(--space-3)，落在 4px 网格上
-     · 左侧 20px 缩进保留原值：它给的是列表标记留位，属列表自身的排版，
-       不属于「元素间距」，因此不走 --space-* 梯度
-   命名用通用名 .spec-list（「规格说明列表」），不绑死 records.html，
-   将来任何页面要写这种条目式说明都能直接用。 */
+   出处：原来是 records.html 第 51 行的一串行内样式。
+   处理口径：14px → --text-sm；#57606a → --text-muted；12px → --space-3；
+   左侧 20px 缩进保留原值（它给的是列表标记留位，属列表自身排版）。
+   命名用通用名 .spec-list，不绑死某个页面。 */
 .spec-list {
   margin: var(--space-3) 0 0 var(--space-5);
   font-size: var(--text-sm);
@@ -268,7 +447,13 @@ body::before {
   margin-top: var(--space-1);
 }
 
-/* ---------- 分组标题 ---------- */
+/* ============================================================
+   分组标题
+   ------------------------------------------------------------
+   Day 12 改动：左侧色条之后补一条**渐隐发丝线**，一直拉到容器右边缘。
+   为什么：原来标题后面是一片空白，组与组之间的分界靠「上面的卡片结束」
+   猜出来；补线之后每组有了明确的起始边，页面被切成三段，扫描成本下降。
+   ============================================================ */
 
 .section-title {
   display: flex;
@@ -278,6 +463,7 @@ body::before {
   font-weight: 600;
   color: var(--text);
   margin: var(--space-10) 0 var(--space-5);
+  text-wrap: balance;
 }
 
 .section-title::before {
@@ -287,6 +473,15 @@ body::before {
   border-radius: var(--radius-full);
   flex: none;
   background: var(--primary);
+}
+
+/* 发丝线：撑满剩余宽度，向右渐隐，不与卡片边框抢存在感 */
+.section-title::after {
+  content: "";
+  flex: 1 1 auto;
+  min-width: var(--space-4);
+  height: 1px;
+  background: linear-gradient(90deg, var(--border) 0%, rgba(235, 227, 214, 0) 100%);
 }
 
 .section-title.group-a::before {
@@ -301,26 +496,33 @@ body::before {
   font-weight: 400;
   font-size: var(--text-sm);
   color: var(--text-muted);
+  flex: none;
 }
 
-/* ---------- 昵称区 ---------- */
+/* ============================================================
+   昵称区
+   ------------------------------------------------------------
+   技能第六条：表单标签必须在输入框上方。原先标签与输入框同排（.field 是横向
+   flex），宽屏下没问题，但窄到 400px 时「昵称」会被挤到输入框左侧贴边，
+   标签与控件的关系变模糊。
+   Day 12：改成**纵向两行**（标签在上、输入框在下），桌面端靠栅格放到右列，
+   与左列标题齐平 —— 结构上成了标准的「label 在上」表单块，任何宽度都不会歧义。
+   ============================================================ */
 
 .field {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .field label {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-secondary);
-  flex: none;
 }
 
 .field input {
-  flex: 1 1 240px;
+  width: 100%;
   min-width: 0;
   font: inherit;
   font-size: var(--text-base);
@@ -329,7 +531,9 @@ body::before {
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  transition: border-color var(--fast), box-shadow var(--fast);
+  transition: border-color var(--fast) var(--ease-out),
+              background var(--fast) var(--ease-out),
+              box-shadow var(--fast) var(--ease-out);
 }
 
 .field input::placeholder {
@@ -342,23 +546,46 @@ body::before {
   box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.13);
 }
 
-/* 输入框原有的 `outline: none`（Day 9 移除）会把键盘焦点圈一并干掉，
-   导致 Tab 到输入框时看不出焦点在哪。现在改由全局 :focus-visible 统一给
-   描边，鼠标点击时仍只显示边框变色 + 柔光环，不加描边。 */
+/* 输入框原有的 `outline: none`（Day 9 移除）会把键盘焦点圈一并干掉。
+   现在改由全局 :focus-visible 统一给描边，鼠标点击时只显示边框变色 + 柔光环。 */
 
-/* ---------- 主题卡片 ---------- */
+/* ============================================================
+   主题卡片
+   ------------------------------------------------------------
+   Day 12 重排卡片内部结构。原来卡片是「一条条竖着摞的块」，
+   编号、名称、角色、英文说明、标记、星标逐行往下排，
+   星标落在最后一行的左下方 —— 视觉上像被随手丢下的按钮。
+   现在把卡片改成 5 行栅格，把**星标挪到顶行右侧**，
+   与左上角的 TOPIC N 形成对角；底部一整行留给信息胶囊。
+   ============================================================ */
 
 .topic-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: var(--space-4);
 }
 
 .topic {
+  /* 5 行栅格：no / name / role / summary / (meta + star) */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* 第 4 行（英文说明）拿 1fr：卡片被同行其他卡片拉高时，
+     多出来的空间全给说明行，底部信息栏始终贴着卡片下沿对齐。 */
+  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-areas:
+    "no    no"
+    "name  name"
+    "role  role"
+    "sum   sum"
+    "meta  star";
+
   position: relative;
-  display: block;
   background: var(--surface);
+  /* 左侧 3px 是「悬停指示条」的预留位。
+     为什么预留在常驻状态而不是悬停时才加宽：悬停才加宽会让内容横移 3px，
+     看着像卡片被推动了一下。常驻留白、只换颜色，就没有位移。 */
   border: 1px solid var(--border);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   text-decoration: none;
@@ -367,34 +594,94 @@ body::before {
   transition: border-color var(--normal) var(--ease-out),
               box-shadow var(--normal) var(--ease-out),
               transform var(--normal) var(--ease-out);
+
+  /* 错峰入场（技能第四条「不要瞬间挂载整个列表」）。
+     延迟量 --i 由下面的 nth-child 规则给，不从 HTML/JS 传 ——
+     这样卡片组件（topic-card.js）一个字都不用改。
+     animation-fill-mode: backwards 保证延迟期间停在起始态（透明），
+     否则会先闪一帧完整卡片再跳回去重放。 */
+  animation: cardRise 420ms var(--ease-soft) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
-/* 左上角一枚大面积暖色圆斑，悬停时放大 —— 多巴胺的来源，但压在内容之下 */
+@keyframes cardRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 第 N 张卡的序号。上限压到 5：组 A 5 张、组 B 3 张，
+   最大延迟 5 × 55ms = 275ms，整组动画 700ms 内收尾，不拖。 */
+.topic-list > .topic:nth-child(1) { --i: 0; }
+.topic-list > .topic:nth-child(2) { --i: 1; }
+.topic-list > .topic:nth-child(3) { --i: 2; }
+.topic-list > .topic:nth-child(4) { --i: 3; }
+.topic-list > .topic:nth-child(5) { --i: 4; }
+.topic-list > .topic:nth-child(n + 6) { --i: 5; }
+
+/* 卡片右上角一枚暖色光斑，悬停时向外扩 —— 「多巴胺」的主要来源。
+   Day 13：由**实心圆**改成**径向渐隐**。
+   理由：实心圆无论多淡，都是一个有硬边的色块（放大截图能看见边缘）；
+   而这一版全站的主题是「光」，光没有边。
+   改成渐隐后悬停放大 1.3 倍时，读者看到的是「这片光变亮了」，
+   而不是「这个圆变大了」——同一个动作，读出来的意思完全不同。
+   尺寸与位置随之调（108 → 150px、-46 → -56px），
+   让圆心仍落在卡片外侧、只把一段弧渗进卡内，绝不压到英文说明那一行。 */
 .topic::before {
   content: "";
   position: absolute;
-  top: -46px;
-  right: -46px;
-  width: 108px;
-  height: 108px;
+  top: -66px;
+  right: -66px;
+  width: 180px;
+  height: 180px;
   border-radius: var(--radius-full);
-  background: var(--primary-soft);
-  opacity: 0.75;
+  background: radial-gradient(
+    circle,
+    rgba(253, 240, 220, 1) 0%,
+    rgba(253, 240, 220, 0.55) 44%,
+    rgba(253, 240, 220, 0) 74%
+  );
   transition: transform var(--normal) var(--ease-out), opacity var(--normal) var(--ease-out);
 }
 
 .topic-list.group-b .topic::before {
-  background: var(--teal-soft);
+  background: radial-gradient(
+    circle,
+    rgba(228, 244, 240, 1) 0%,
+    rgba(228, 244, 240, 0.55) 44%,
+    rgba(228, 244, 240, 0) 74%
+  );
 }
 
+/* 悬停：上浮 + 左侧组色指示条亮起 + 一层**暖色**光晕。
+   第三项是 Day 13 加的：原先只有中性灰阴影，卡片浮起来了但没「亮」起来。
+   补一层同色相的柔光后，悬停的观感从「被抬起来」变成「被点亮」——
+   这正是用户在挑主题时想要的那一下：选中感。 */
 .topic:hover {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-lg);
+  border-color: var(--border);
+  border-left-color: var(--primary);
+  box-shadow:
+    var(--shadow-lg),
+    0 16px 34px -22px rgba(217, 119, 6, 0.55);
   transform: translateY(-4px);
 }
 
+.topic-list.group-b .topic:hover {
+  border-left-color: var(--teal);
+  box-shadow:
+    var(--shadow-lg),
+    0 16px 34px -22px rgba(15, 122, 107, 0.5);
+}
+
+/* 按下时回落到 -1px 并轻微收紧，模拟「压下去」的触感。
+   技能第五条要求 :active 必须有物理反馈，否则点击手感发空。 */
+.topic:active {
+  transform: translateY(-1px) scale(0.992);
+  box-shadow: var(--shadow-md);
+  transition-duration: 75ms;
+}
+
 .topic:hover::before {
-  transform: scale(1.5);
+  transform: scale(1.3);
   opacity: 1;
 }
 
@@ -404,12 +691,16 @@ body::before {
 }
 
 .topic .no {
+  grid-area: no;
+  /* 等宽编号，与顶行右侧星标同处一行 */
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  margin-bottom: var(--space-2);
+  letter-spacing: 0.08em;
+  /* 原用 --accent（白底 3.35，12px 不达标）→ 改用组色的深档。
+     组 A 蜜橘深档 6.40、组 B 深青 5.23，都远超 4.5。 */
+  color: var(--primary-deep);
+  margin-bottom: var(--space-3);
 }
 
 .topic-list.group-b .topic .no {
@@ -417,21 +708,25 @@ body::before {
 }
 
 .topic .name {
+  grid-area: name;
   font-size: var(--text-lg);
   font-weight: 600;
   line-height: 1.45;
   margin-bottom: var(--space-2);
+  overflow-wrap: break-word;
 }
 
 /* 职场角色（Day 10 加练新增）：告诉用户这一轮扮演谁。
    刻意不做成 .tag 那样的胶囊底色 —— 它紧挨着主题名，再上一块底色会
    和名称抢注意力；改用「小一号 + 主色文字 + 左侧短竖线」轻量区分。 */
 .topic .role {
+  grid-area: role;
   font-size: var(--text-xs);
   color: var(--primary-dark);
   line-height: 1.5;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
   padding-left: var(--space-3);
+  /* 竖线是装饰，仍可用鲜色；文字用的是深档（白底 5.02） */
   border-left: 2px solid var(--primary);
 }
 
@@ -440,8 +735,9 @@ body::before {
   border-left-color: var(--teal);
 }
 
-/* 英文说明走衬线体 + 加深字号，是卡片上最醒目的英文信息 */
+/* 英文说明走衬线体 + 斜体，是卡片上最醒目的英文信息 */
 .topic .summary {
+  grid-area: sum;
   font-family: var(--font-en);
   font-size: var(--text-sm);
   font-style: italic;
@@ -449,14 +745,26 @@ body::before {
   color: var(--text-secondary);
   margin-bottom: var(--space-4);
   min-height: 46px;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
 }
 
 .topic .meta {
+  grid-area: meta;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-wrap: wrap;   /* 多一枚标记时允许换行，窄卡片不横向溢出 */
   font-size: var(--text-xs);
   color: var(--text-muted);
+  align-self: end;
+}
+
+/* 星标按钮所在格：右下角，与左上角的 TOPIC N 成对角 */
+.topic > .ic-wrap {
+  grid-area: star;
+  justify-self: end;
+  align-self: end;
 }
 
 .tag {
@@ -464,7 +772,8 @@ body::before {
   padding: 2px var(--space-3);
   border-radius: var(--radius-full);
   background: var(--primary-soft);
-  color: var(--primary-dark);
+  /* 原用 --primary-dark：蜜橘浅底上 4.47，差 0.03 不达标 → 换深档 5.70 */
+  color: var(--primary-deep);
   font-size: var(--text-xs);
   font-weight: 500;
 }
@@ -474,7 +783,22 @@ body::before {
   color: var(--teal);
 }
 
-/* ---------- 对话页 ---------- */
+/* ---------- 主题卡片上的「上次在这里卡过」标记（PRD.md §6.3） ---------- */
+
+.topic .stuck {
+  display: inline-block;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  /* 原用 --accent：珊瑚浅底上 2.94，12px 严重不达标 → 换深档 5.60 */
+  color: var(--accent-deep);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+/* ============================================================
+   对话页（Day 10 起）
+   ============================================================ */
 
 .dialogue-head {
   display: flex;
@@ -488,10 +812,11 @@ body::before {
   font-size: var(--text-xl);
   font-weight: 600;
   line-height: 1.4;
+  text-wrap: balance;
 }
 
 /* 对话页顶部的职场角色（Day 10 加练新增）。
-   与主题卡上的 .topic .role 同一视觉语言（主色浅底 + 左侧短竖线），
+   与主题卡上的 .topic .role 同一视觉语言（主色文字 + 左侧短竖线），
    但这里是通栏卡片内部，字号沿用 --text-sm 便于与主题名形成层级。 */
 .dialogue-head .topic-role {
   margin-top: var(--space-2);
@@ -533,20 +858,268 @@ body::before {
   white-space: nowrap;
 }
 
+/* ============================================================
+   对话舞台 + 光球（Day 13 重做）
+   ------------------------------------------------------------
+   原来这里是一个虚线框，写着「这里会显示你说的话和 AI 的回应」——
+   它诚实地说明了「还没接上」，但代价是：用户点进对话页，
+   看到的是整页里最没有生命的一块。而对话页恰恰是这个产品的主场。
+
+   现在把它做成「舞台」：一块暗场，中央一枚会呼吸的光球 ——
+   光球就是 AI 在这张桌子上的样子。它不该是头像、不该是「AI」两个字，
+   因为用户对着一个名字说话是紧张的，对着一枚安静发光的东西说话才放松。
+   这就是「陪伴感」的落点：屏幕上有个东西在，而且它在等你。
+
+   三态与光球联动（由 dialogue.html 的脚本写 data-mood）：
+     rest    未开始    慢呼吸（4.6s），光晕饱满，像在安静地等你开口
+     listen  你在说    球收小、变亮、光晕内收（1.7s 快而浅）——
+                       像人在认真听时会不自觉地屏住呼吸
+     hold    已暂停    呼吸放到 6.4s、饱和度降到 0.5、轨道弧停转
+                       像把灯调暗了一点，等你回来
+
+   无障碍怎么处理（这条是刻意的）：
+     **状态全部用「尺寸 / 亮度 / 饱和度」表达，动画只是加强**。
+     所以 prefers-reduced-motion 把动画时长压到 0 之后，
+     三个状态的静态外观依然互不相同 —— 不依赖动画也读得懂。
+     光球本身 aria-hidden，状态由上面的文字（.orb-line）传达。
+   ============================================================ */
+
 .stage {
-  min-height: 240px;
-  border: 1.5px dashed var(--border);
+  position: relative;
+  margin-top: var(--space-4);
+  padding: var(--space-10) var(--space-6);
+  border: 1px solid var(--night-edge);
   border-radius: var(--radius-xl);
-  padding: var(--space-8);
+  background: var(--night);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   text-align: center;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  line-height: 1.8;
-  background: var(--surface-soft);
+  gap: var(--space-6);
+  overflow: hidden;
+  isolation: isolate;
+  /* 阴影用舞台自己的深色，而不是通用的暖灰 ——
+     这样它看起来是「屏幕上凹进去的一块」，
+     而不是「一张卡片碰巧是黑的」。 */
+  box-shadow:
+    0 26px 50px -28px rgba(36, 26, 19, 0.65),
+    0 2px 6px -2px rgba(36, 26, 19, 0.18);
 }
+
+/* 舞台里的一层暖光：从光球所在的位置（居中偏上）向外扩散，
+   再在底部补一点珊瑚色的反射光。为什么要在背景上做：
+   球体自身的 box-shadow 只能照亮它周围一小圈，
+   真正让整个暗场「有光」的是这层底色渐变。 */
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(58% 44% at 50% 30%, rgba(242, 160, 60, 0.17) 0%, rgba(242, 160, 60, 0) 72%),
+    radial-gradient(120% 70% at 50% 118%, rgba(232, 98, 74, 0.13) 0%, rgba(232, 98, 74, 0) 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---------- 光球本体 ----------
+   四层从外到内：光晕 / 涟漪 / 轨道弧 / 核心。
+   为什么分四层而不是一个元素堆 box-shadow：
+   它们的运动节奏不同（光晕 4.6s、涟漪 7.4s、轨道 16s），
+   分开才能各走各的周期，叠加起来才不会看出「在循环」。 */
+
+.orb {
+  position: relative;
+  z-index: 1;
+  /* Day 13 复核（看截图才发现）：初版上限 148px，1440px 下实测 149px ——
+     暗场块有 1080px 宽、360px 高，一颗 149px 的球放在里面显得空，
+     四周的光晕铺不满，像一张没拍满的照片。上限提到 176px 后，
+     球与暗场的比例才对（手机端仍由下限 104px 兜住，见 640px 媒体查询）。
+     这条纯靠量数字发现不了 —— 量出来的 149 完全「合法」，是构图问题。 */
+  width: clamp(104px, 26vw, 176px);
+  aspect-ratio: 1 / 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+
+  /* 状态变量：一处定义、四层共用，切换状态时只改这几个数。
+     默认值是 rest 态。 */
+  --orb-scale: 1;
+  --orb-bright: 1;
+  --orb-sat: 1;
+  --orb-halo: 1;
+  --orb-speed: 4.6s;
+
+  animation: orbBreathe var(--orb-speed) ease-in-out infinite;
+}
+
+/* 光晕：最外圈大面积暖色，跟着呼吸一起涨落。
+   脉动感主要来自这一层 —— 核心的缩放幅度刻意只有 4.5%，
+   挪动太多会像在弹跳，不像在呼吸。 */
+.orb-halo {
+  position: absolute;
+  inset: -36%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(242, 160, 60, 0.45) 0%,
+    rgba(242, 160, 60, 0.17) 40%,
+    rgba(242, 160, 60, 0) 72%
+  );
+  opacity: var(--orb-halo);
+  animation: orbHaloPulse calc(var(--orb-speed) * 1.15) ease-in-out infinite;
+  transition: opacity 520ms var(--ease-soft);
+  will-change: transform;
+}
+
+/* 涟漪：一圈从球面向外散开、扩散即淡出的细环。
+   它是「这一刻有反应」的信号 —— 从开始说话到 AI 有回应，
+   中间不必等文字，这圈环一直在替系统说「我在」。
+   基础 opacity 是给 prefers-reduced-motion 用的：动画停掉之后，
+   环仍以 0.4 的透明度留在原地，成了一道静态的光环，而不是消失或突变成实线。 */
+.orb-ripple {
+  position: absolute;
+  inset: -8%;
+  border-radius: 50%;
+  border: 1px solid var(--orb-ring);
+  opacity: 0.4;
+  animation: orbRipple calc(var(--orb-speed) * 1.6) cubic-bezier(0.2, 0.6, 0.2, 1) infinite;
+  will-change: transform, opacity;
+}
+
+/* 轨道弧：一圈不闭合的细光弧，16s 转一圈。
+   用 conic-gradient 画出「一段弧」，再靠 mask 把圆心掏空成环。
+   为什么用弧而不是整圈：整圈太像一个加载动画，弧才有「在运转」的活的观感。 */
+.orb-orbit {
+  position: absolute;
+  inset: -16%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 196, 107, 0) 0deg,
+    rgba(255, 196, 107, 0) 196deg,
+    rgba(255, 196, 107, 0.5) 296deg,
+    rgba(255, 196, 107, 0.92) 348deg,
+    rgba(255, 196, 107, 0) 360deg
+  );
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(closest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  opacity: 0.75;
+  animation: orbSpin 16s linear infinite;
+  transition: opacity 520ms var(--ease-soft);
+}
+
+/* 核心：一颗有体积的球，不是一个圆片。
+   高光偏左上（34% 30%）、背光收在右下角的珊瑚 —— 与整站光源方向一致。
+   box-shadow 的第四、五条是 inset：一条压暗右下（模拟球体自身的转折），
+   一条提亮左上（模拟环境光又一次打在受光面），有这两条才有「球」的体积感。 */
+.orb-core {
+  position: relative;
+  width: 72%;
+  height: 72%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 34% 30%,
+    var(--orb-hi) 0%,
+    var(--orb-core) 26%,
+    var(--orb-warm) 60%,
+    var(--orb-lo) 100%
+  );
+  box-shadow:
+    0 0 22px var(--orb-glow),
+    0 0 64px rgba(232, 98, 74, 0.32),
+    inset -7px -9px 20px rgba(168, 58, 35, 0.3),
+    inset 5px 7px 16px rgba(255, 232, 190, 0.42);
+  transform: scale(var(--orb-scale));
+  filter: brightness(var(--orb-bright)) saturate(var(--orb-sat));
+  transition:
+    transform 560ms var(--ease-soft),
+    filter 560ms var(--ease-soft);
+}
+
+/* ---------- 三态 ---------- */
+
+/* 你在说：球往回收、提亮，光晕和轨道一起暗下去 ——
+   「安静下来听」。这是三个状态里最明显的一个变化。 */
+.stage[data-mood="listen"] .orb {
+  --orb-scale: 0.82;
+  --orb-bright: 1.16;
+  --orb-sat: 1.06;
+  --orb-halo: 0.46;
+  --orb-speed: 1.7s;
+}
+
+.stage[data-mood="listen"] .orb-orbit {
+  opacity: 0.9;
+  animation-duration: 6s;
+}
+
+/* 已暂停：把灯调暗，但不是关掉 —— 用户随时会回来，不该给他一块黑屏。
+   Day 13 复核（看截图才发现，改了两轮）：
+     初版 brightness(0.62) + saturate(0.5) → 球变成一颗灰白色的石头。
+     原因有两层：① filter 作用于整个渲染结果，包括外圈那两道 box-shadow 发光，
+     所以「压暗」把发光一起压没了，球就失去了光源的属性；
+     ② 受光面本来就是很浅的 #FFE0AE，再乘 0.62 直接掉进灰区。
+     第二版改成 0.76 / 0.78 —— 暖了一些，但**降饱和会把高光推向白**，
+     球看着像个鸡蛋，「暖」还是没有回来。
+     定版：亮度只压到 0.82，饱和度几乎不动（0.95）。
+     结论是「歇一下」这件事不该由褪色来表达 —— 它交给另外三处：
+     光晕收到 0.3、轨道弧停转、呼吸放到 6.4s。
+     少用一层手段，状态反而更清楚（这也是色觉障碍用户更能读懂的版本）。 */
+.stage[data-mood="hold"] .orb {
+  --orb-scale: 0.94;
+  --orb-bright: 0.82;
+  --orb-sat: 0.95;
+  --orb-halo: 0.3;
+  --orb-speed: 6.4s;
+}
+
+.stage[data-mood="hold"] .orb-orbit {
+  opacity: 0.22;
+  animation-play-state: paused;
+}
+
+@keyframes orbBreathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.045); }
+}
+
+@keyframes orbHaloPulse {
+  0%, 100% { transform: scale(0.9); }
+  50%      { transform: scale(1.22); }
+}
+
+@keyframes orbRipple {
+  0%   { transform: scale(0.74); opacity: 0.45; }
+  100% { transform: scale(1.42); opacity: 0; }
+}
+
+@keyframes orbSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 光球上方那行字 ----------
+   它是这个产品里唯一一处「AI 直接对用户说话」。
+   口径（对齐 PRD.md §4.1 H1「怕被评判」）：
+   **只说陪伴和鼓励，不承诺功能、不评价用户**。
+   所以是「我在这儿」「慢慢说」，不是「我已准备好识别你的语音」。 */
+.orb-line {
+  position: relative;
+  z-index: 1;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--night-text);
+  max-width: 26ch;
+  text-wrap: balance;
+}
+
+/* 这里原来还有一条 .stage-note（写着「语音录音与 AI 回应尚未接入」）。
+   Day 14 · F6 第 3 步做完对话记录区之后，那半句已经不成立 ——
+   你说的话和 AI 的回应现在真的会出现在页面上。
+   那句话没有被删掉，而是挪到记录区底部，换成了**现在仍然为真**的事实：
+   AI 的回应来自本地文案池，不是大模型现场生成的。
+   为什么坚持在页面上留一句实话：这块暗场会让人以为「功能已经全接好了」，
+   对用户说实话比看起来完整更重要。 */
 
 .actions {
   display: flex;
@@ -584,15 +1157,17 @@ body::before {
   border: 1px solid var(--border);
 }
 
+/* 录音中/暂停的标签是「白底反转」（浅底 + 深色文字），
+   所以文字改用深档：原 --accent 压在 --accent-soft 上是 2.94，不达标。 */
 .recorder[data-state="recording"] .rec-label {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-deep);
   border-color: transparent;
 }
 
 .recorder[data-state="paused"] .rec-label {
   background: var(--primary-soft);
-  color: var(--primary-dark);
+  color: var(--primary-deep);
   border-color: transparent;
 }
 
@@ -633,10 +1208,15 @@ body::before {
   font-weight: 500;
 }
 
-/* 计时数字：等宽数字，跳秒时不会左右抖 */
+/* 计时数字：等宽数字，跳秒时不会左右抖。
+   Day 12：字号 18px → 20px。原因是可访问性 ——
+   18px 粗体刚好差一点够不到 WCAG「大字号」门槛（需 ≥18.66px 粗体），
+   于是必须满足小字的 4.5:1，而珊瑚色在这个尺寸只有 3.35。
+   提到 20px 后按大字号算（需 3.0），珊瑚色 3.35 达标，
+   同时计时数字在状态条里更醒目 —— 尺寸与合规一起解决。 */
 .rec-timer {
   font-family: var(--font-mono);
-  font-size: var(--text-lg);
+  font-size: var(--text-xl);
   font-weight: 700;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
@@ -667,6 +1247,205 @@ body::before {
   }
 }
 
+/* ============================================================
+   对话记录 + 提交发言（Day 14 · F6 第 3 步）
+   ------------------------------------------------------------
+   为什么现在才有：PRD §7.3 给 P2 列的必现信息里本来就有
+   「用户转写区、AI 回应区」，但页面一直空着 —— Day 13 又把那个
+   占位虚线框换成了光球舞台，记录区就更没地方放了。这一步补上，
+   **两种模式共用同一套结构**（8 个职场主题与自由对话）。
+
+   配色上做的一件事：**AI 的话放暗色气泡，用户的话放暖色气泡**。
+   暗色气泡与那块舞台同族（--night-raised / --night-text），于是
+   「在暗处发光的那颗球」与「它说的话」看起来来自同一个地方；
+   用户的话用奶油族的暖浅底，与页面其余部分一家。
+   实测对比度：AI 正文 12.74 · 用户正文 13.31 · 12px 署名 6.89 / 5.70。
+
+   语言口径（PRD §6.6、TECH_DESIGN §5.2.1 约定 4）：
+   **AI 的台词是英语，中文只出现在页面说明文字里**。
+   所以「本轮 AI 的回应来自本地文案池」这类话走 .tr-note，不做成气泡 ——
+   不让用户以为这句话是 AI 用中文说的。
+   ============================================================ */
+
+.transcript {
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.tr-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.tr-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 右侧那一小行计数走等宽：与「第 N 轮」「计时」一样是技术小标，
+   三者同族，用户一眼能分出"这是数字，不是正文"。 */
+.tr-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* 滚动区：对话长了不把整页顶开，输入框始终留在视线里。
+   上限 340px ≈ 四五个来回，再长就该收起来了。
+   右侧留一点内边距：气泡贴边时它的圆角不会被裁掉。 */
+.tr-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.tr-empty {
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.tr-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;        /* 用户的话靠右 */
+  animation: bubbleIn 260ms var(--ease-soft) backwards;
+}
+
+.tr-row.is-ai {
+  align-items: flex-start;      /* AI 的话靠左 —— 一来一往看得出方向 */
+}
+
+.tr-bubble {
+  max-width: 78%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: var(--primary-soft);
+  color: var(--text);
+}
+
+.tr-row.is-ai .tr-bubble {
+  background: var(--night-raised);
+  border-color: var(--night-edge);
+  color: var(--night-text);
+}
+
+.tr-who {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: var(--space-1);
+  color: var(--primary-deep);   /* 5.70 压在 primary-soft 上 */
+}
+
+.tr-row.is-ai .tr-who {
+  color: var(--night-accent);   /* 6.89 压在 night-raised 上 */
+}
+
+.tr-text {
+  font-size: var(--text-base);
+  line-height: 1.75;
+  /* 长英文单词 / 长串不撑破气泡 */
+  word-break: break-word;
+}
+
+/* 英文台词走衬线斜体（全站规矩：--font-en 只用在装英文句子的地方）。
+   加 .en 这个判据，是因为本期 8 个职场主题的追问句还是中文的
+   （followUps 本来就是中文描述），中文落进 --font-en 会退到宋体 + 伪斜体，
+   很难看。由脚本按「整行是否 ASCII」决定加不加 —— 将来 8 主题补上
+   英文追问句，它会自动套上斜体，这里一个字不用改。 */
+.tr-text.en {
+  font-family: var(--font-en);
+  font-style: italic;
+}
+
+/* 本地文案池的说明。**刻意不做成气泡**：它是页面在说实话，
+   不是 AI 说的话（语言口径见本节开头）。 */
+.tr-note {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 提交发言（本期用文本框代替开口，PRD §6.6 边界与约定）----------
+   接入语音识别后，这个框的内容来源改成转写结果，结构不变
+   （PRD §8.2 E3「转写文字允许用户编辑」就是同一个位置）。 */
+
+.composer {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.say-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-base);
+  line-height: 1.7;
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  /* 允许用户自己拉高：说长一点时能一眼看到整句，不必在小框里翻 */
+  resize: vertical;
+  min-height: 58px;
+  max-height: 180px;
+  transition: border-color var(--fast) var(--ease-out),
+              box-shadow var(--fast) var(--ease-out);
+}
+
+.say-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* 与 .field input:focus 同一套「边框变色 + 柔光环」。
+   这里不写 outline: none —— 键盘焦点圈由全站 :focus-visible 统一给。 */
+.say-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.13);
+}
+
+@media (max-width: 640px) {
+  /* 窄屏：输入框与按钮竖排，按钮铺满一行 —— 它是这一态的主操作 */
+  .composer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* 气泡占宽放宽：窄屏上再留 22% 空白，一句英文要折成三行 */
+  .tr-bubble {
+    max-width: 88%;
+  }
+}
+
+/* ============================================================
+   按钮
+   ============================================================ */
+
 button {
   font: inherit;
   font-size: var(--text-base);
@@ -686,21 +1465,42 @@ button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* 主按钮：蜜橘→红橘渐变，白字。
+   Day 12 换端点：原 #D97706 → #E8624A 上压白字只有 3.19~3.35，
+   16px 正文级文字不达标；换成 #B45309 → #C24A2E 后两端为 5.02 / 4.87，
+   均达标，色相仍是暖橘，观感只是深了一档。
+
+   Day 13：补一层**染色投影** + 加宽左右内边距。
+   为什么投影要染色（不用中性灰）：按钮在奶油底上，「按下去会发光」这一点
+   只靠渐变是做不到的；投影染成按钮自己的深色后，
+   它在视觉上就成了一个「亮着的物件」，而不是一块贴纸。
+   加宽内边距是为了拉开主次 —— 一个页面只该有一个主按钮，
+   那就必须让人一眼看出哪个是主。 */
 button.primary {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  background: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
   border-color: transparent;
   color: #FFFFFF;
-  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+  padding: var(--space-3) var(--space-8);
+  box-shadow:
+    0 7px 18px -9px rgba(168, 58, 35, 0.75),
+    var(--shadow-sm);
 }
 
 button.primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--primary-dark) 0%, #D0503A 100%);
-  box-shadow: var(--shadow-md);
+  background: linear-gradient(135deg, var(--grad-from-hover) 0%, var(--grad-to-hover) 100%);
+  box-shadow:
+    0 12px 26px -9px rgba(168, 58, 35, 0.8),
+    var(--shadow-md);
 }
 
 button.link {
@@ -713,11 +1513,13 @@ button.link {
 
 button.link:hover:not(:disabled) {
   background: none;
-  color: var(--accent);
+  color: var(--accent-deep);
   transform: none;
 }
 
-/* ---------- 结果页 ---------- */
+/* ============================================================
+   结果页
+   ============================================================ */
 
 .field-grid {
   display: grid;
@@ -748,15 +1550,19 @@ button.link:hover:not(:disabled) {
   font-weight: 700;
   color: var(--text);
   line-height: 1.3;
+  font-variant-numeric: tabular-nums;
 }
 
-/* 第二个字段（对话时长）用暖色，避免四个数字一样重 */
+/* 第二个字段（对话时长）用暖色，避免四个数字一样重。
+   24px 粗体属 WCAG 大字号（≥18.66px 粗体），阈值 3.0，珊瑚色 3.35 达标。 */
 .field-grid .cell:nth-child(2) .value {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 记录页 / 空状态 ---------- */
+/* ============================================================
+   记录页 / 空状态
+   ============================================================ */
 
 .empty {
   border: 1.5px dashed var(--border);
@@ -771,12 +1577,16 @@ button.link:hover:not(:disabled) {
   font-weight: 600;
   color: var(--text);
   margin-bottom: var(--space-2);
+  text-wrap: balance;
 }
 
 .empty .small {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: 1.8;
+  max-width: 52ch;      /* 空态说明居中对齐，行宽必须收窄，否则读起来要横扫 */
+  margin-inline: auto;
+  text-wrap: pretty;
 }
 
 /* 实线框版本的空态（Day 9 新增）。
@@ -798,49 +1608,22 @@ footer.page-foot {
   color: var(--text-muted);
 }
 
-/* ---------- 小屏适配 ---------- */
-
-@media (max-width: 640px) {
-  body {
-    padding: var(--space-6) var(--space-4) var(--space-10);
-  }
-
-  .topbar h1 {
-    font-size: var(--text-2xl);
-  }
-
-  .topic-list {
-    grid-template-columns: 1fr;
-  }
-
-  .topic .summary {
-    min-height: 0;
-  }
-
-  .counter {
-    gap: var(--space-4);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-  }
-}
-
 /* ============================================================
-   Day 8 新增：P1 主视图（三区块 + 四种状态）
-   数据目前来自本地假数据（data/topics.json、data/mock-sessions.json），
-   第 3 周换成真实接口与 localStorage 时，这一节样式不用改。
+   页面主布局（区块 1 / 2 / 3）
+   ------------------------------------------------------------
+   Day 12 改动：断点由 900px 降到 740px。
+   原先「平板区间 640~900 两不靠」是记在待决项里的问题：
+   .layout 本身在两种宽度下都是单列（900px 那条只改了 gap），
+   真正只在 900px 以上生效的只有「区块 1 内部拆两列」，
+   于是 640~900 这段区间里，区块 1 是通栏宽卡却把内容全挤在左边，
+   右半边一大片空白。降到 740px 后，只有 641~739 这一小段是堆叠态，
+   且这两个宽度本身就是手机横放的大小，堆叠本来就对。
    ============================================================ */
-
-/* ---------- 页面主布局：桌面横排，窄屏纵向堆叠 ---------- */
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);   /* 手机 / 窄屏：单列纵向堆叠 */
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
 }
 
 /* 每一栏都允许被压缩，防止内容把栅格撑宽、在手机上出现横向滚动 */
@@ -852,50 +1635,425 @@ footer.page-foot {
   margin-bottom: 0;                        /* 栏内间距交给 gap 管 */
 }
 
-/* 分组容器只用于归类、不生成盒子：三个区块直接参与外层栅格，
-   窄屏顺序由 order 排成 1 → 2 → 3，和区块小标上的编号一致。 */
+/* 分组容器只用于归类、不生成盒子：四个区块直接参与外层栅格，
+   顺序由 order 排成 1 → 2 → 3 → 4，和区块小标上的编号一致。
+   （注意：order 影响视觉顺序，所以区块编号必须与视觉顺序一致 ——
+     改顺序就等于要改编号，那属于改产品信息，不是改版式。
+     Day 14 把自由对话提到 02 时，01 / 03 / 04 的编号就是跟着这张表一起改的。） */
 .col-side {
   display: contents;
 }
 
 .blk-identity { order: 1; }
-.blk-topics   { order: 2; }
-.blk-overview { order: 3; }
+.blk-free     { order: 2; }   /* 自由对话：Day 14 由「列表末尾」提到「主题之上」，见 §自由对话入口 */
+.blk-topics   { order: 3; }
+.blk-overview { order: 4; }
 
-@media (min-width: 900px) {
-  /* 桌面排版：区块 1 与区块 3 各占一条通栏，区块 2（主题列表）通栏垫底。
-     为什么不让区块 1 与区块 3 并排 —— 区块 1 是一次性设置（填个昵称），
-     跟内容卡片并排抢位会把它的视觉比重放大，还会把输入框挤成窄条；
-     拎成通栏一条后它只是一条矮横条，主题列表也就能更早进入视线。
-     区块 1 通栏后若不处理，标题与输入框会平铺铺满整行显得散 ——
-     所以内部再分两列：左边标题与说明，右边输入框（见下方 .blk-identity 规则）。 */
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "identity"
-      "overview"
-      "topics";
-    align-items: stretch;
-    gap: var(--space-5);
-  }
+/* ---------- 区块小标（等宽字体编号，与卡片上的 TOPIC N 同一套语言） ---------- */
 
-  .blk-identity { grid-area: identity; }
-  .blk-overview { grid-area: overview; }
-  .blk-topics   { grid-area: topics; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;      /* 0.08 → 0.1：等宽小字拉开字距更像「编号」而非正文 */
+  /* 原用 --accent（奶油底 3.23，12px 不达标）→ 换深档 6.16 */
+  color: var(--accent-deep);
+  margin-bottom: var(--space-3);
+}
 
-  /* 区块 2 通栏后，原有的 `auto-fill / minmax(280px, 1fr)` 自己就会排成 3 列
-     （组 A 5 张 → 3 + 2，组 B 3 张铺满一排）；窗口窄到 ~1000px 以下它会自动退成 2 列，
-     所以这里不用再写死列数。 */
+.blk-overview .eyebrow {
+  /* 区块 4 走深青：与它的三条统计同一色相，区块内不超过两种颜色 */
+  color: var(--teal);
+}
 
+/* ---------- 区块 01｜称呼区：收起说明行（Day 14，与自由对话那一节对调主次） ----------
+   用户要求把「自由对话」与「称呼区」的视觉占比对调。两块都是通栏，
+   所以「面积」的差别 100% 是高度（1440px 实测 176 vs 129）—— 对调即换高度。
+   撑高称呼区的是输入框那一列（实测 103px：标签 25 + 间距 8 + 输入框 54 + 上间距 16），
+   它一个字不能动（那是用户真正要打字的地方）；能省的只有这句说明行（实测 24px 桌面 / 48px 手机）。
+   只收这一行就够了，内边距不用再动 —— 实测收起后 1440px → 151、390px → 215，
+   正落在自由对话那一节对调前的两个高度（176 / 263）上；再收内边距反而会偏。
+   文案仍留在 HTML 里（只是不显示），要放回来删掉下面这一条即可。 */
+.blk-identity > .hint {
+  display: none;
+}
+
+/* 区块 2 是主内容，自己不是卡片，头部单独排 */
+.blk-topics > .blk-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+/* 区块 2 的标题是页面上第二重的文字（次于页头 h1）。
+   Day 12：20px → 24px。原来它和卡片标题（18px）只差 2px，
+   整页看起来「所有标题差不多大」；拉开到 24px 后，
+   视线能立刻分出「区块 → 卡片」两级。 */
+.blk-topics > .blk-head h2 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.blk-topics .blk-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* 区块 2 里的第一个分组标题不要再顶出一段间距 */
+.topics-body > .section-title:first-child {
+  margin-top: 0;
+}
+
+/* ============================================================
+   区块 02｜自由对话入口（Day 14 · F6）
+   ------------------------------------------------------------
+   它不是「第 9 个主题」，是一个**去处** —— 所以形状与主题卡故意不同：
+   一条暗场横条，配色与对话页那块舞台同一套（--night 一族），
+   左侧一颗缩小版光球（同一个 .orb）。用户点进去看到的，
+   就是这颗在等他的球。形状不同这件事本身也在说：
+   这里不是「再练一个场景」，是「换个方式说说话」。
+
+   为什么用暗色：这页其余部分全是奶油底，一条暗横条天然读作「另一个地方」；
+   而且光球在亮底上几乎看不见 —— 它的光本来是为暗处设计的（对话页那条理由）。
+
+   Day 14 修订（用户拍板）：位置由「8 个主题之后的列表末尾」提到
+   「8 个主题之上」，编号 02，自成一节（.blk-free）。
+   这条假设的版式落点（原定在 8 个主题之后）已随本次修订，
+   见 PRD.md §4.1 H4「H4 在版式上的落点」。
+
+   随之作废的两件事（原来那条 .free-entry 规则就是为它们写的，现已删除）：
+     ① 列表末尾那道发丝分隔线 —— 它不再是列表里的一项，没有「上面一组」可分隔；
+     ② 入场错峰等到第 6 拍 —— 它现在排在第一张主题卡之前，改 1 拍。
+
+   这一节自己不画盒子：等宽小标与横条直接落在奶油底上，与区块 03「选一个主题」
+   同构（那节也是「小标在外面 + 内容在下」，不套卡片）。小标到横条的距离沿用
+   全局 .eyebrow 的 12px，与 01 / 04 一致，不为它单开一条规则。
+
+   高度（Day 14 修订）：这一节连同小标要做到约 176px（1440px 实测），
+   正好接住称呼区对调前的高度 —— 两块的主次由此对调。
+   横条本身原有 129px，加一个小标（21 + 12）是 162，还差 14，
+   所以下面 .free-link 的上下内边距由 20px 提到 28px。
+   实测结果见交付说明；这不是「看着差不多」，是两处高度都量过。
+   ============================================================ */
+
+.free-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  /* 上下 28px（原 20px）：这一节现在是页面上的区块 02，要与称呼区对调主次，
+     光靠一个小标补不上 14px 的差额，所以这里放开一点。算式写在上面那段说明里。 */
+  padding: 28px var(--space-6);
+  border: 1px solid var(--night-edge);
+  border-radius: var(--radius-xl);
+  background: var(--night);
+  color: var(--night-text);
+  text-decoration: none;
+  overflow: hidden;
+  isolation: isolate;
+  /* 阴影用舞台自己的深色（同 .stage），看起来才是「凹进去的一块」 */
+  box-shadow:
+    0 20px 38px -24px rgba(36, 26, 19, 0.62),
+    0 2px 6px -2px rgba(36, 26, 19, 0.16);
+  transition:
+    transform var(--normal) var(--ease-soft),
+    box-shadow var(--normal) var(--ease-out);
+
+  /* 入场错峰：原来排在第 6 拍（它在 8 张主题卡之后），搬成区块 02 后改第 1 拍 ——
+     顺序即层级，它现在比第一张主题卡还早落位。落位方式与主题卡同一套 cardRise。 */
+  animation: cardRise 420ms var(--ease-soft) backwards;
+  animation-delay: calc(1 * var(--stagger));
+}
+
+/* 光球那一侧铺一层暖光：与 .stage::before 同一手法，
+   让这条横条看起来「有光源」，而不是一块深色贴纸。 */
+.free-link::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    42% 130% at 6% 50%,
+    rgba(242, 160, 60, 0.22) 0%,
+    rgba(242, 160, 60, 0) 70%
+  );
+}
+
+/* 内容压在光之上（与 .stage 内部的关系一致） */
+.free-link > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 悬停沿用主题卡那套「被点亮」而不是「被抬起来」：
+   一小段上浮 + 外圈一圈极淡的暖色描边。 */
+.free-link:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 26px 46px -24px rgba(36, 26, 19, 0.7),
+    0 0 0 1px rgba(255, 196, 107, 0.16);
+}
+
+.free-link:active {
+  transform: translateY(-1px);
+}
+
+/* ---------- 缩小版光球 ----------
+   与对话页那颗是同一个组件、同样四层，只改尺寸。
+   core 的 box-shadow 是绝对 px，不按比例收小就会糊成一团光晕，
+   所以这里把三层发光与两条 inset 一并收窄。 */
+.orb.free-orb {
+  width: 60px;
+}
+
+.free-orb .orb-halo  { inset: -34%; }
+.free-orb .orb-ripple { inset: -10%; }
+.free-orb .orb-orbit { inset: -18%; }
+
+.free-orb .orb-core {
+  box-shadow:
+    0 0 10px var(--orb-glow),
+    0 0 26px rgba(232, 98, 74, 0.3),
+    inset -3px -4px 9px rgba(168, 58, 35, 0.3),
+    inset 2px 3px 7px rgba(255, 232, 190, 0.42);
+}
+
+/* ---------- 文字（全部走暗场令牌，取值见 :root 那一段的实测表） ---------- */
+
+.free-body {
+  /* flex-basis 用 0 而不是 auto：auto 会拿「整句话不折行」的宽度去要空间，
+     窄屏上光球就被挤到单独一行，横条凭空高出一大截（390px 实测 275px → 修后约 200px）。
+     用 0 起步让它只吃「剩下的空间」，光球与文字始终在同一行，
+     真正需要换行的只有右侧的时长与按钮（它自带 flex-basis:100%）。 */
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.free-kicker {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--night-accent);   /* 7.94 */
+  margin-bottom: var(--space-2);
+}
+
+.free-name {
+  display: block;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--night-text);     /* 14.68 */
+  margin-bottom: var(--space-2);
+}
+
+.free-sum {
+  display: block;
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--night-2nd);      /* 9.13 */
+  /* 不设 max-width：这句只有 33 个字，被限宽（试过 44ch）会折成
+     「…AI 会接着 / 聊，不打断、不评判。」—— 第二行只剩孤零零一截。
+     整句落在一行时横条更矮，也就不那么抢主题卡的眼。
+     text-wrap: pretty 兜住将来文案变长的情况：宁可让上一行多装一点，
+     也不要在末尾留一个孤字。 */
+  text-wrap: pretty;
+}
+
+/* 右侧：时长 + 行动。竖排、右对齐，与横条左端的球形成两端锚点。 */
+.free-meta {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.free-dur {
+  font-size: var(--text-xs);
+  color: var(--night-muted);    /* 6.19，12px 也达标 */
+}
+
+.free-go {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--night-text);
+  border: 1px solid rgba(255, 196, 107, 0.36);
+  border-radius: var(--radius-full);
+  padding: 8px 18px;
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease-out),
+    border-color var(--fast) var(--ease-out);
+}
+
+/* 悬停时整条横条亮起来的同时，把「开始聊」也点亮一档 —— 
+   它是这条横条唯一可点的动作，值得跟着一起响应。 */
+.free-link:hover .free-go {
+  background: rgba(242, 160, 60, 0.16);
+  border-color: rgba(255, 196, 107, 0.62);
+}
+
+/* ============================================================
+   四种状态：加载中 / 成功 / 空 / 错误
+   ------------------------------------------------------------
+   技能第五条要求三态都要「被认真设计过」。这一页本来就有，
+   Day 12 只做对齐：骨架屏尺寸与新卡片结构对齐（顶行小条 + 两行正文 + 底部一条），
+   这样从加载切到成功时画面不跳。
+   ============================================================ */
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--space-4);
+}
+
+.skeleton-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  /* 与 .topic 的最小高度对齐，切换时不产生跳动 */
+  min-height: 210px;
+}
+
+.skeleton-card .bar {
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    90deg,
+    var(--border-soft) 0%,
+    var(--bg-tint) 50%,
+    var(--border-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-card .bar + .bar {
+  margin-top: var(--space-3);
+}
+
+/* 第一条是「TOPIC N」那一行，短一点更像真实卡片的节奏 */
+.skeleton-card .bar:first-child {
+  height: 9px;
+  margin-bottom: var(--space-5);
+}
+
+.skeleton-card .bar.w40 { width: 40%; }
+.skeleton-card .bar.w70 { width: 70%; }
+.skeleton-card .bar.w100 { width: 100%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.state-hint,
+.mock-note {
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* 错误态：复用 .empty 的框，只换强调色；不给报错堆栈（TECH_DESIGN.md §8.2 E9） */
+.state-error {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 原用 --accent：珊瑚浅底上 3.17，18px 半粗不达大字号门槛 → 换深档 5.60 */
+.state-error .big {
+  color: var(--accent-deep);
+}
+
+/* ---------- 区块 3：卡点概览 ---------- */
+
+.stat-list {
+  list-style: none;
+  margin-top: var(--space-4);
+}
+
+.stat-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.stat-list li:last-child {
+  border-bottom: none;
+  padding-bottom: var(--space-2);
+}
+
+.stat-list .k {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.stat-list .v {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* 第二个数字（累计问题条目）用暖色，避免三个数字一样重。
+   20px 粗体属大字号，阈值 3.0，珊瑚 3.35 达标。 */
+.stat-list li:nth-child(2) .v {
+  color: var(--accent);
+}
+
+/* 数值下面的小字拆分（偏题 · 逻辑错误），口径见 PRD.md §8.3 */
+.stat-list .sub {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 概览区底部的「查看错误记录」入口。
+   Day 12：原来 display:block 会让这枚胶囊拉满整张卡的宽度（1080px 宽的一根横条），
+   在「一个次要入口」上给出了比主操作还重的分量；且胶囊内只有 9 个字，
+   左右各留 500px 空白，看着像一条分隔带而不是按钮。
+   改成 fit-content + 居中，恢复成正常胶囊大小。 */
+.navlink.block {
+  display: block;
+  width: fit-content;
+  margin: var(--space-5) auto 0;
+  text-align: center;
+}
+
+/* ============================================================
+   宽度 ≥740px：区块 1 内部拆两列、区块 3 三条统计横排
+   ============================================================ */
+
+@media (min-width: 740px) {
   /* ---------- 区块 1｜通栏后的内部两列 ---------- */
 
   /* 左列放「小标 + 标题 + 说明」，右列放输入框。
-     右列宽度用 minmax(320, 420)：320 是「昵称」标签 + 输入框不折行的下限，
-     420 是上限，超过就会把输入框拉成一条过长、眼睛要横扫的横条。
+     右列宽度用 minmax(300px, 400px)：300 是输入框不折行的下限，
+     400 是上限，超过就会把输入框拉成一条过长、眼睛要横扫的横条。
      align-items: start 让两列各自从顶部开始，不互相拉伸。 */
   .blk-identity {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
     grid-template-areas:
       "eyebrow   field"
       "title     field"
@@ -909,17 +2067,32 @@ footer.page-foot {
   .blk-identity > .hint    { grid-area: hint; }
   .blk-identity > .field   { grid-area: field; }
 
-  /* 右列（输入框）与左列内容区顶边对齐：
-     输入框与「01 · 开始之前」这条小标同一水平线起，右列整体不往下沉。
+  /* 通栏区块 1 的说明行放开限宽。
+     为什么：.card .hint 全局限在 62ch（约 31 个汉字），在这个通栏宽卡里
+     会让说明折成两行、第二行只剩「称呼。」两个字挂在左边，
+     而右半边近 600px 全是空的 —— 一眼看上去像排版没对齐。
+     放开后整句落在同一行（约 620px），卡片矮一行、右侧也不再留洞。
+     只在 ≥740px 生效：窄屏卡片本来就窄，两行折行是正常的。 */
+  .blk-identity > .hint {
+    max-width: none;
+  }
+
+  /* 右列（输入框）与左列内容区顶边对齐：「昵称」标签与「01 · 开始之前」
+     这条小标同一水平线起，右列整体不往下沉。
      用 align-self: start 交给栅格排，不写死 margin —— 窄列里标题折行时
      右列会自然跟着走，不会错位。 */
   .blk-identity > .field {
     align-self: start;
   }
 
+  /* 栅格里 .hint 下方若接了别的内容，靠 .card .hint + * 的 16px 统一处理 */
+
   /* ---------- 区块 3｜三条统计横排 ---------- */
 
-  /* 通栏宽卡里让三条统计横着排，避免右半边拖出一大片空白 */
+  /* 通栏宽卡里让三条统计横着排，避免右半边拖出一大片空白。
+     注意这里**没有用卡片盒子**：三条之间只用一道 2px 浅色竖线分隔，
+     数据直接落在空白里。技能第四条对数据区的要求 ——
+     能靠留白和细线说清层级时，不要套盒子。 */
   .blk-overview .stat-list {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -956,197 +2129,17 @@ footer.page-foot {
   }
 }
 
-/* ---------- 区块小标（等宽字体编号，与卡片上的 TOPIC N 同一套语言） ---------- */
-
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  margin-bottom: var(--space-2);
-}
-
-.blk-overview .eyebrow {
-  color: var(--teal);
-}
-
-/* 区块 2 是主内容，自己不是卡片，头部单独排 */
-.blk-topics > .blk-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-5);
-}
-
-.blk-topics > .blk-head h2 {
-  font-size: var(--text-xl);
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.blk-topics .blk-note {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
-/* 区块 2 里的第一个分组标题不要再顶出一段间距 */
-.topics-body > .section-title:first-child {
-  margin-top: 0;
-}
-
-/* ---------- 四种状态：加载中 / 成功 / 空 / 错误 ---------- */
-
-/* 加载中：占位卡片 + 流光条 */
-.skeleton-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--space-4);
-}
-
-.skeleton-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-}
-
-.skeleton-card .bar {
-  height: 12px;
-  border-radius: var(--radius-full);
-  background: linear-gradient(
-    90deg,
-    var(--border-soft) 0%,
-    var(--bg-tint) 50%,
-    var(--border-soft) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-}
-
-.skeleton-card .bar + .bar {
-  margin-top: var(--space-3);
-}
-
-.skeleton-card .bar.w40 { width: 40%; }
-.skeleton-card .bar.w70 { width: 70%; }
-.skeleton-card .bar.w100 { width: 100%; }
-
-@keyframes shimmer {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
-}
-
-.state-hint,
-.mock-note {
-  margin-top: var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* 错误态：复用 .empty 的框，只换强调色；不给报错堆栈（TECH_DESIGN.md §8.2 E9） */
-.state-error {
-  border-style: solid;
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.state-error .big {
-  color: var(--accent);
-}
-
-/* ---------- 区块 3：卡点概览 ---------- */
-
-.stat-list {
-  list-style: none;
-  margin-top: var(--space-4);
-}
-
-.stat-list li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.stat-list li:last-child {
-  border-bottom: none;
-  padding-bottom: var(--space-2);
-}
-
-.stat-list .k {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.stat-list .v {
-  font-size: var(--text-xl);
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--text);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 第二个数字（累计问题条目）用暖色，避免三个数字一样重 */
-.stat-list li:nth-child(2) .v {
-  color: var(--accent);
-}
-
-/* 数值下面的小字拆分（偏题 · 逻辑错误），口径见 PRD.md §8.3 */
-.stat-list .sub {
-  display: block;
-  font-size: var(--text-xs);
-  font-weight: 400;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-/* 概览区底部的「查看错误记录」入口 */
-.navlink.block {
-  display: block;
-  text-align: center;
-  margin-top: var(--space-4);
-}
-
-/* ---------- 主题卡片上的「上次在这里卡过」标记（PRD.md §6.3） ---------- */
-
-.topic .meta {
-  flex-wrap: wrap;   /* 多一枚标记时允许换行，窄卡片不横向溢出 */
-}
-
-.topic .stuck {
-  display: inline-block;
-  padding: 2px var(--space-3);
-  border-radius: var(--radius-full);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 500;
-}
-
-.topic .name,
-.topic .summary {
-  overflow-wrap: break-word;   /* 长英文串不撑破卡片 */
-}
-
 /* ============================================================
-   Day 11 新增：会反馈的按钮（交互反馈的表现层）
+   Day 11：会反馈的按钮（交互反馈的表现层）
    ------------------------------------------------------------
    这一节是**表现层的唯一落点**，对应的状态机在
    frontend/js/components/interact.js（组件头有完整说明）。
    两层只通过 3 个 class + 2 个 data 属性连接：
      .ic-btn / .ic-hint / .is-fav / data-state / aria-pressed
 
-   所以要换一套反馈风格（板块 ④ 搜到别的技能之后），**只改这一节**，
-   JS 一个字不用动。反过来若要换交互本身（收藏改成别的动作），
-   只改 interact.js 的回调，这一节也不用动。
+   所以要换一套反馈风格，**只改这一节**，JS 一个字不用动。
 
-   三个问题各自的答案（板块 ① 的结论，落到具体实现）：
+   三个问题各自的答案（Day 12 复核后不变）：
      「我点到了吗」→ .ic-btn 的按压缩放（瞬态）
      「它在忙吗」  → [data-state="busy"] 变灰 + 禁用（防错）
      「成了吗」    → .is-fav 变色变字 + 一次弹跳（**持久状态，最强的一环**）
@@ -1165,6 +2158,12 @@ footer.page-foot {
 .ic-btn {
   /* 光圈用绝对定位铺满按钮，所以本体要成为定位上下文 */
   position: relative;
+  /* 触控目标下限 44×44px —— 与 .navlink 同一条规矩（见下面 min-height 的说明）。
+     用 inline-flex 而不是靠 padding 撑：加高之后文字要**垂直居中**，
+     光加 padding-block 会让文字视觉偏上。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
@@ -1177,6 +2176,11 @@ footer.page-foot {
   cursor: pointer;
   /* 尺寸固定：文字从「☆ 收藏」变「★ 已收藏」宽度会变，不锁住的话
      整行 meta 会跟着抖一下 —— 那看起来像布局坏了，不像反馈。 */
+  /* 高度也固定，而且是 44px：原先由内边距自然撑出 30~32px，
+     低于触控目标下限（项目里这条规矩原先只落在 .navlink 一处，
+     所以这个按钮从没被验过 —— 见笔记「44px 触控目标」）。
+     副作用已知并接受：主题卡因此长高约 14px、结果页与记录页长高约 12px。 */
+  min-height: 44px;
   min-width: 7.5em;
   text-align: center;
   transition: background var(--fast) var(--ease-out),
@@ -1210,8 +2214,7 @@ footer.page-foot {
 
 /* 按下的那一瞬：缩一下 + 一圈环向外扩。这是回答「我点到了吗」的动作，
    时长刻意比别的过渡更短（--fast 的一半），否则手感发黏。
-   环用 300ms 扩散、比缩放的 75ms 长，这样「按下」这件事有个可见的余韵，
-   而不是一闪就没。 */
+   环用 300ms 扩散、比缩放的 75ms 长，这样「按下」这件事有个可见的余韵。 */
 .ic-btn:active:not(:disabled) {
   transform: scale(0.94);
   transition-duration: 75ms;
@@ -1224,13 +2227,14 @@ footer.page-foot {
 /* ---------- 已收藏 / 已星标（持久状态，最强的一环） ---------- */
 
 .ic-btn.is-fav {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  /* 与主按钮同一套渐变端点，白字对比度 5.02 / 4.87（原端点只有 3.19~3.35） */
+  background: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
   border-color: transparent;
   color: #FFFFFF;
   box-shadow: var(--shadow-sm);
-  /* 双段弹跳（比分段更「蹦」）：让状态变化被「看见」，而不只是「发现」。
+  /* 双段弹跳：让状态变化被「看见」，而不只是「发现」。
      用 --ease-spring（回弹曲线）而不是默认缓动，弹跳感更明确。
-     0.46s 刻意长于普通过渡 —— 这是整个交互里最该被记住的一下，值得多花点时间。 */
+     0.46s 刻意长于普通过渡 —— 这是整个交互里最该被记住的一下。 */
   animation: ic-pop 460ms var(--ease-spring);
 }
 
@@ -1276,12 +2280,10 @@ footer.page-foot {
   100% { opacity: 0;    transform: scale(1.8); visibility: hidden; }
 }
 
-/* 说明（Day 11 板块 ④ 手写加强时踩到的一点）：
-   原本还想让按钮里的 ★ 单独转一下，但**纯 CSS 做不到** ——
+/* 说明：原本还想让按钮里的 ★ 单独转一下，但**纯 CSS 做不到** ——
    ★ 和文字是同一个文本节点，无法只旋它一半；要拆成独立元素就得改
    interact.js 去包裹图标，那就破坏了两层分离（改样式要动 JS）。
-   权衡后放弃，把「成功」的分量压在弹跳 + 光圈上（已经足够醒目）。
-   记录在这里，免得下次又想去加。 */
+   权衡后放弃，把「成功」的分量压在弹跳 + 光圈上（已经足够醒目）。 */
 
 /* ---------- 处理中：不可重复点击 ---------- */
 
@@ -1298,18 +2300,42 @@ footer.page-foot {
 .ic-hint {
   font-size: var(--text-xs);
   line-height: 1.5;
-  color: var(--accent);
-  /* 提示自己会缩进到与按钮文字对齐，不和卡片正文混在一起 */
+  /* 原用 --accent：白底 3.35，12px 不达标 → 换深档 6.37。
+     报错文字是最不能读不清的一类，这里必须够深。 */
+  color: var(--accent-deep);
   padding-left: var(--space-1);
   max-width: 20em;
 }
 
-/* 卡片里放这个按钮时，与上方内容留一道间距（覆盖 .card .hint + * 的 16px） */
+/* 卡片里放这个按钮时，与上方内容留一道间距（覆盖 .card .hint + * 的 16px）。
+   Day 12：星标挪进卡片右下角的独立栅格格，间距改由栅格负责，
+   这条只留给「非卡片容器」里包着按钮的情况，值收成 0 避免重复留白。 */
 .topic .ic-wrap {
-  margin-top: var(--space-3);
+  margin-top: 0;
 }
 
-/* 主题卡上的星标按钮：卡片本身是 <a>，点按钮不该顺带跳转（见 topics.js 的 stopPropagation） */
+/* ---------- 卡片内失败提示：浮起来，不参与排版 ----------
+   为什么必须脱离文档流：.topic 是 5 行栅格，放提示的 star 格是 auto 宽。
+   提示若留在流里，它 20em 的最大宽度会把这一格从 84px 撑到 240px，
+   把左边那排信息胶囊（「上次在这里卡过 / T1 / 预计 3–5 分钟」）挤成竖条，
+   整行卡片跟着长高。改成绝对定位后它完全不参与栅格测量，
+   出现与消失都不让卡片动一下。 */
+.topic .ic-hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  width: max-content;
+  max-width: 15em;            /* 15em × 12px = 180px，不超出卡片内宽 */
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  text-align: left;
+  z-index: 3;
+}
+
+/* 主题卡上的星标按钮：卡片本身是 <a>，点按钮不该顺带跳转
+   （见 topics.js 的 stopPropagation）。 */
 .topic .ic-btn {
   font-size: var(--text-xs);
   min-width: 7em;
@@ -1317,9 +2343,12 @@ footer.page-foot {
 
 /* ---------- 被星标（置顶）的主题卡 ---------- */
 
-/* 左侧一道主色竖条 + 轻微上浮：让「它被标了」在不读文字时也能看见 */
+/* 左侧一道主色竖条 + 更实的阴影：让「它被标了」在不读文字时也能看见。
+   Day 12：竖条与悬停指示条同处左边缘，所以置顶态把悬停指示条一并点亮相呼应；
+   置顶时长条收在上下留白之间，悬停指示条是通高的 —— 两者叠在一起也不打架。 */
 .topic.is-pinned {
   border-color: var(--primary);
+  border-left-color: var(--primary);
   box-shadow: var(--shadow-md);
 }
 
@@ -1332,6 +2361,11 @@ footer.page-foot {
   width: 3px;
   border-radius: var(--radius-full);
   background: linear-gradient(180deg, var(--primary) 0%, var(--accent) 100%);
+}
+
+.topic-list.group-b .topic.is-pinned {
+  border-color: var(--teal);
+  border-left-color: var(--teal);
 }
 
 .topic-list.group-b .topic.is-pinned::after {
@@ -1355,8 +2389,7 @@ footer.page-foot {
               background var(--fast) var(--ease-out);
 }
 
-/* 已收藏的条目整块变暖：反馈不止落在按钮上，条目本身也跟着变 ——
-   这是清单里「点击任意功能，界面发生明显变化」的落点之一 */
+/* 已收藏的条目整块变暖：反馈不止落在按钮上，条目本身也跟着变 */
 .item:has(.ic-btn.is-fav) {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -1372,16 +2405,16 @@ footer.page-foot {
 
 /* 类型胶囊三色。偏题=珊瑚（要提醒的问题）、逻辑错误=蜜橘（问题更重、要纠正）、
    精彩句子=深青（**不是问题，是亮点** —— 用另一个色相，一眼能分开）。
-   为什么不像主题卡那样只靠 --primary/--teal 两个令牌：这里要在一屏里
-   同时区分三类，两色不够用，所以借用第三档强调色 --accent 并配套它的浅底。 */
+   这三处都是 12px 小字压在各自的浅底上，Day 12 全部改用深档：
+   珊瑚原 2.94、蜜橘原 4.47，都不达标；换档后 5.60 / 5.70 / 4.61。 */
 .item-tag-offtopic {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-deep);
 }
 
 .item-tag-logic {
   background: var(--primary-soft);
-  color: var(--primary-dark);
+  color: var(--primary-deep);
 }
 
 .item-tag-good {
@@ -1395,19 +2428,24 @@ footer.page-foot {
   color: var(--text-muted);
 }
 
+/* 引文是整页最长的英文字符串，1100px 通栏会拉出一行过长的英文；
+   限宽到 68ch（英文比中文窄，ch 单位对英文才准）。 */
 .item-quote {
   font-family: var(--font-en);
   font-style: italic;
   font-size: var(--text-base);
   color: var(--text);
   line-height: 1.7;
+  max-width: 68ch;
   margin-bottom: var(--space-2);
+  text-wrap: pretty;
 }
 
 .item-note {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.7;
+  max-width: 68ch;
 }
 
 .item-note b {
@@ -1423,6 +2461,7 @@ footer.page-foot {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.7;
+  max-width: 68ch;
 }
 
 .item-foot {
@@ -1450,9 +2489,48 @@ footer.page-foot {
   line-height: 1.6;
 }
 
-/* ---------- 小屏补充适配 ---------- */
+/* ============================================================
+   小屏适配（≤640px）
+   Day 12 复核：三档宽度各自都有明确形态，不再有「两不靠」区间 ——
+     ≤640px   手机：单列、纵向堆叠、说明不留最小高度
+     641~739  平板竖持 / 手机横放：仍是单列，区块 1 不拆两列（宽度不够）
+     ≥740px   桌面：区块 1 拆两列、区块 3 统计横排、主题卡自动 2~3 列
+   ============================================================ */
 
 @media (max-width: 640px) {
+  body {
+    padding: var(--space-6) var(--space-4) var(--space-10);
+  }
+
+  .topbar h1 {
+    font-size: var(--text-2xl);
+  }
+
+  /* 光球舞台：小屏上左右内边距收窄（.orb 本身靠 clamp 已缩到下限 104px），
+     引导语降一档字号 —— 18px 的「慢慢说，不着急」在 390px 上会折成两行，
+     压着不小的球体显得挤。 */
+  .stage {
+    padding: var(--space-8) var(--space-4);
+    gap: var(--space-5);
+  }
+
+  .orb-line {
+    font-size: var(--text-base);
+  }
+
+  .topic-list {
+    grid-template-columns: 1fr;
+  }
+
+  /* 单列时卡片不再需要等高的最小说明行高 */
+  .topic .summary {
+    min-height: 0;
+  }
+
+  .counter {
+    gap: var(--space-4);
+  }
+
   .skeleton-grid {
     grid-template-columns: 1fr;
   }
@@ -1461,8 +2539,42 @@ footer.page-foot {
     align-items: flex-start;
   }
 
-  /* 窄屏上星标按钮与时长挤在一行会换行，让它整宽独立成行更好点 */
+  .blk-topics > .blk-head h2 {
+    font-size: var(--text-xl);
+  }
+
+  /* 自由对话入口：390px 上一行放不下「球 + 文字 + 时长与按钮」三截，
+     让球与文字占第一行，时长与按钮换到第二行铺满、左右分开。
+     不给它单独一套版式：换行后仍是同一条横条，只是排布收了一层。 */
+  .free-link {
+    flex-wrap: wrap;
+    gap: var(--space-4);
+  }
+
+  .orb.free-orb {
+    width: 48px;
+  }
+
+  .free-meta {
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* 窄屏上星标按钮与信息胶囊挤在一行会换行，让它按内容宽排更好点 */
   .topic .ic-btn {
     min-width: 0;
+  }
+}
+
+/* 动效降级：用户在系统里关掉了动效，就把所有过渡与动画压到近零。
+   注意这只是「时长归零」，动画的**终态**仍然会被应用 ——
+   卡片入场动画的终态是 opacity:1，所以内容不会消失。 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

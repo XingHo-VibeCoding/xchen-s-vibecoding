@@ -20,11 +20,15 @@
     <p class="lede" id="topic-line">本次练习主题：（未选择主题）</p>
 
     <!-- 四个字段：昵称 / 对话时长 / 错误次数 / 精彩句子呈现次数（PRD.md §7.3 P3 要求）
-         Day 10：对话时长改为读取对话页传来的真实秒数（?dur= ），
-         未传参时仍显示 00:00；错误次数与精彩句子的统计尚未接入，保持 0。 -->
+         Day 10：对话时长改为读取对话页传来的真实秒数（?dur= ），未传参时仍显示 00:00。
+         Day 14（F6 · 第 4 步）：错误次数与精彩句子次数**改为真算** —— 从本页渲染出来的
+          条目里数条数（口径 PRD §8.3「错误次数 = 偏题条数 + 逻辑错误条数」、
+          「精彩句子呈现次数 = 条数」）。自由对话下偏题条目已被剔除，
+          所以这个式子自然退化成「错误次数 = 逻辑错误条数」，满足 B26。
+          条目本身仍是本地假数据，这一层没有变。 -->
     <div class="card">
       <h2>本次数据</h2>
-      <p class="hint">错误次数与精彩句子尚未接入统计，先按 0 显示。</p>
+      <p class="hint" id="stat-hint">错误次数 = 本次问题条目的条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。</p>
       <div class="field-grid">
         <div class="cell">
           <div class="label">昵称</div>
@@ -48,10 +52,13 @@
     <!-- 问题清单：偏题（只提醒）与逻辑错误（提醒 + 纠正）两类
          注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2）
          Day 11：改为由 data/mock-items.json 的手写条目渲染，条目上带收藏按钮（线 2-B）。
-         真正的判断功能（AI 读用户原话生成条目）仍属第 3 周，本页的条目是假数据。 -->
+         真正的判断功能（AI 读用户原话生成条目）仍属第 3 周，本页的条目是假数据。
+         Day 14（F6 · 第 4 步）：自由对话（?topic=FREE）下**这一类只剩逻辑错误** ——
+          偏题条目不再渲染，且**页面上不出现「偏题」字样**（PRD §9.2 B25 比 §6.6 更严：
+          不只是不显示条目，是连字样都不许有）。因此 hint 与空态文案都按 isFree 换一版。 -->
     <div class="card">
       <h2>问题清单</h2>
-      <p class="hint">偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。</p>
+      <p class="hint" id="issue-hint">偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。</p>
       <div class="item-list" id="issue-list" aria-live="polite">
         <div class="empty empty-solid">
           <div class="big">正在读取条目…</div>
@@ -87,8 +94,10 @@
     //   ② Day 10：读取对话页传来的对话时长（?dur=秒数）并渲染成 mm:ss
     //   ③ Day 11：渲染问题清单与精彩句子（数据来自 data/mock-items.json 的假条目），
     //      并为每一条挂上收藏按钮（线 2-B）
+    //   ④ Day 14（F6 · 第 4 步）：识别自由对话 —— 去掉偏题条目、页面不出现「偏题」字样、
+    //      错误次数与精彩句子次数改为真算
     //
-    // 口径以 PRD.md §6.2 / §6.4 为准：
+    // 口径以 PRD.md §6.2 / §6.4 / §6.6 / §8.3 为准：
     //   - 偏题条目**没有纠正那一格**，逻辑错误条目才有 —— 这是设计（§6.2 第 343 行）
     //   - 收藏对象就是这两类条目 + 精彩句子（§6.4 第 466 行）
     //   - 收藏状态存 localStorage（Storage.toggleFavorite）。Day 11 的清单要求
@@ -101,6 +110,25 @@
       var params = new URLSearchParams(location.search);
       var topicId = params.get('topic');
       var line = document.getElementById('topic-line');
+
+      /* ---------- 自由对话（F6）判据 ----------
+         `topicId === 'FREE'`，与对话页同一判据（TECH_DESIGN §5.2.1「决定 2」：
+         不加 mode 字段）。它在本页带来三处差异（PRD §6.6、§7.3 P3、B25/B26）：
+           ① 问题清单里不渲染偏题条目
+           ② 页面上不出现「偏题」字样 —— 所以两处文案要换，不是简单少显示一类
+           ③ 错误次数只由逻辑错误条目计算
+         层次说明：TECH_DESIGN §6.3 第 3 条要求**后端在源头丢弃 off_topic 条目**。
+         今天没有后端，所以先在前端拦一道，保证 B25 现在就验得了；
+         接上后端后这一段过滤仍在（前端不假设上游一定干净）。 */
+      var isFree = topicId === 'FREE';
+
+      // 文案按模式换一版（②）：自由对话下「偏题」两个字都不能出现
+      document.getElementById('stat-hint').textContent = isFree
+        ? '错误次数 = 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。'
+        : '错误次数 = 偏题条数 + 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。';
+      document.getElementById('issue-hint').textContent = isFree
+        ? '逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。'
+        : '偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。';
 
       // ---------- 对话时长（秒 → mm:ss） ----------
       var durRaw = params.get('dur');
@@ -177,8 +205,25 @@
           })
           .then(function (data) {
             var all = data.items || [];
-            var issues = all.filter(function (it) { return it.type !== 'good'; });
+            /* 自由对话下先剔掉偏题条目（①）：F6 没有判定锚点，本来就不该判偏题
+               （PRD §6.6 边界与约定第 1 条）。注意判据用的是 type 的**实现值**
+               `'offtopic'`（见 mock-items.json 与 item-card.js）；
+               TECH_DESIGN §5.3 的表里写的是 `"off_topic"`，两处取值不一致 —— **已报给用户待定**。 */
+            var issues = all.filter(function (it) {
+              if (it.type === 'good') return false;
+              if (isFree && it.type === 'offtopic') return false;
+              return true;
+            });
             var goods = all.filter(function (it) { return it.type === 'good'; });
+
+            /* 两个数字改为真算（PRD §8.3）：
+                 错误次数 = 偏题条数 + 逻辑错误条数 —— 也就是上面 issues 的条数。
+                   自由对话下偏题已被剔掉，这个式子自动退化成「= 逻辑错误条数」（B26）。
+                 精彩句子呈现次数 = 精彩句子条数。
+               条数取的是**本页真正渲染出来的条目**，不是另一份统计，
+               这样屏幕上的清单和上面两个数字永远对得上。 */
+            document.getElementById('f-errors').textContent = issues.length;
+            document.getElementById('f-good').textContent = goods.length;
 
             var issueList = document.getElementById('issue-list');
             var goodList = document.getElementById('good-list');
@@ -194,7 +239,8 @@
               var e1 = document.createElement('div');
               e1.className = 'empty empty-solid';
               e1.appendChild(Object.assign(document.createElement('div'), {
-                className: 'big', textContent: '本次没有发现偏题或逻辑错误'
+                className: 'big',
+                textContent: isFree ? '本次没有发现逻辑错误' : '本次没有发现偏题或逻辑错误'
               }));
               issueList.replaceChildren(e1);
             }

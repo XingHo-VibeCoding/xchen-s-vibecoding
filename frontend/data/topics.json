@@ -8,6 +8,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "We're a bit behind. So, what's the status?",
     "followUps": ["具体哪一步没做完", "原因是什么", "什么时候能好"],
+    "followUpsEn": [
+      "Which part is still not done?",
+      "What's holding it up?",
+      "When can we expect it?"
+    ],
     "anchor": "说了进度却给不出原因或时间点；开始讲与本项目无关的事"
   },
   {
@@ -19,6 +24,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "I'm thinking we go with the first option. Thoughts?",
     "followUps": ["你不同意哪里", "你的理由", "有没有替代方案"],
+    "followUpsEn": [
+      "Which part don't you agree with?",
+      "Why do you see it that way?",
+      "Is there another option you'd suggest?"
+    ],
     "anchor": "只表态不给理由；理由与方案本身无关（如谈办公室氛围）"
   },
   {
@@ -30,6 +40,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "So, what do you think?",
     "followUps": ["你的观点", "你凭什么这么想", "举个例子"],
+    "followUpsEn": [
+      "What's your take on it?",
+      "What makes you say that?",
+      "Can you give me an example?"
+    ],
     "anchor": "全程复述别人的话、没有自己的立场；答非所问"
   },
   {
@@ -41,6 +56,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "Can you walk me through it?",
     "followUps": ["从头讲的顺序", "关键节点", "你当时怎么决定的"],
+    "followUpsEn": [
+      "Let's start from the beginning.",
+      "What were the key moments?",
+      "And how did you decide at that point?"
+    ],
     "anchor": "讲一半直接跳到结论；把话题带到别的项目"
   },
   {
@@ -52,6 +72,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "Would your team be able to take this on?",
     "followUps": ["先给结论（能 / 不能）", "条件是什么", "需要谁配合"],
+    "followUpsEn": [
+      "So, is it a yes or a no?",
+      "What would you need?",
+      "Who else would need to be involved?"
+    ],
     "anchor": "只给结论不给条件；把话题转成\"我个人的看法\""
   },
   {
@@ -63,6 +88,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "Nice to meet you. So, tell me about yourself.",
     "followUps": ["你现在做什么", "之前在哪", "为什么来这边"],
+    "followUpsEn": [
+      "So what do you do here?",
+      "Where were you before this?",
+      "What brought you here?"
+    ],
     "anchor": "只报职位名不展开；背简历式罗列而与对话无关"
   },
   {
@@ -74,6 +104,11 @@
     "durationLabel": "3–5 分钟",
     "opening": "Where did you grow up?",
     "followUps": ["在哪长大", "那地方什么样", "一件具体的小事"],
+    "followUpsEn": [
+      "Where exactly was that?",
+      "What was it like?",
+      "Tell me one specific thing you remember."
+    ],
     "anchor": "只回答地名就停住；扯到与成长经历无关的话题"
   },
   {
@@ -85,6 +120,36 @@
     "durationLabel": "3–5 分钟",
     "opening": "Any plans for the weekend?",
     "followUps": ["打算做什么", "和谁 / 为什么", "最近一次类似的经历"],
+    "followUpsEn": [
+      "What are you thinking of doing?",
+      "Who's going with you?",
+      "What did you do last time?"
+    ],
     "anchor": "只答\"没什么计划\"就停住；把话题转回工作项目"
+  },
+  {
+    "topicId": "FREE",
+    "group": "自由",
+    "name": "自由对话",
+    "summary": "说说你这一天——发生了什么、感觉怎么样。AI 会接着聊，不打断、不评判。",
+    "durationLabel": "不限",
+    "opening": "How was your day?",
+    "openerPool": [
+      "Did anything interesting happen today?",
+      "How are you feeling right now?",
+      "Anything from today still on your mind?",
+      "Say whatever you like, I'm listening.",
+      "Was there a moment today that felt hard?"
+    ],
+    "replyPool": [
+      "That sounds like a long day. What was the hardest part?",
+      "Thanks for telling me. How did that leave you feeling?",
+      "I see. What happened next?",
+      "That makes sense. Was it what you expected?",
+      "Mm, I'm following. Anything else from today on your mind?",
+      "That's a lot to carry. Did you get any time for yourself?",
+      "Okay. And how do you feel about it now?",
+      "Good to know. Is there anything you'd do differently?"
+    ]
   }
 ]

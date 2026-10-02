@@ -38,11 +38,62 @@
       </div>
     </div>
 
-    <!-- 对话区：用户转写 + AI 回应 -->
-    <div class="stage" id="stage">
-      这里会显示你说的话和 AI 的回应<br>
-      （语音录音、文字转写与 AI 回应尚未接入）
+    <!-- 对话舞台（Day 13）：AI 在这一页的样子 = 一枚会脉动的光球。
+         四层结构（光晕 / 涟漪 / 轨道弧 / 核心）全在 .orb 里，纯装饰、
+         对屏幕阅读器隐藏 —— 状态由下面那行字传达，不靠图形表达。
+         data-mood 由本页脚本随三态写入：rest（未开始）/ listen（你在说）/ hold（已暂停），
+         三者的长相定义在 main.css 的「对话舞台 + 光球」一节。
+         为什么不做成聊天头像：用户对着「AI」这个名字说话会紧张，
+         对着一枚安静发光的东西说话才放松 —— 这是「陪伴感」的落点。 -->
+    <div class="stage" id="stage" data-mood="rest">
+      <div class="orb" aria-hidden="true">
+        <span class="orb-halo"></span>
+        <span class="orb-ripple"></span>
+        <span class="orb-orbit"></span>
+        <span class="orb-core"></span>
+      </div>
+      <p class="orb-line" id="orb-line">准备好了就说一声，我在这儿。</p>
     </div>
+
+    <!-- 对话记录（Day 14 · F6 第 3 步）
+         PRD §7.3 给 P2 列的必现信息里本来就有「用户转写区、AI 回应区」，
+         但一直没做 —— Day 13 又把原来那个占位虚线框换成了光球舞台，
+         记录区就更没地方放了。这一步补上，**两种模式共用同一套结构**：
+         8 个职场主题与自由对话都走这里。
+         气泡里的字全部由脚本填，台词来自 topics.json，本页不写死文案。
+         语言口径（PRD §6.6、TECH_DESIGN §5.2.1 约定 4）：
+         **AI 的台词是英语**；中文只出现在页面说明文字里（就下面那条 .tr-note）。
+         aria-live 让读屏用户也能听到新出现的那一句。 -->
+    <section class="transcript" id="transcript" aria-labelledby="tr-title">
+      <div class="tr-head">
+        <h2 class="tr-title" id="tr-title">对话记录</h2>
+        <span class="tr-count" id="tr-count">还没有发言</span>
+      </div>
+      <div class="tr-list" id="tr-list" aria-live="polite">
+        <p class="tr-empty" id="tr-empty">
+          点「开始说话」之后，你说的话和 AI 的回应会逐句出现在这里。
+        </p>
+      </div>
+      <!-- 这条说明必须留着：光球会让页面看起来「已经接好了」，
+           但它说的话现在来自本地文案池，不是大模型现场生成的。 -->
+      <p class="tr-note">
+        本轮 AI 的回应来自本地文案池（大模型接口尚未接入）。接上之后，
+        这里会换成它按你说的内容现场生成的回应 —— 界面与流程不变。
+      </p>
+    </section>
+
+    <!-- 提交发言（Day 14 · F6 第 3 步）
+         本期用**文本框 + 「我说完了」**代替开口：语音识别（js/speech.js）
+         尚未接入，PRD §6.6 边界与约定把这一步写死成这个形态。
+         接入之后文本框的内容来源改成转写结果，**结构与流程不变**
+         （PRD §8.2 E3「转写文字允许用户编辑」就是同一个位置）。
+         只在录音中出现；未开始与已暂停时整块隐藏。 -->
+    <form class="composer" id="composer" hidden>
+      <textarea class="say-input" id="say-input" rows="2"
+                aria-label="你想说的话，用英语"
+                placeholder="用英语说说你想说的……"></textarea>
+      <button class="primary" id="btn-say" type="submit">我说完了</button>
+    </form>
 
     <!-- 语音状态区：三态切换（未录音 / 正在录音 / 已暂停）
          由 dialogue.js 统一管理 state + 文案，HTML 只提供挂载点。
@@ -89,6 +140,13 @@
     //   ③ 真计时：从第一次点「开始说话」起算，暂停时停住，继续后累计
     //   ④ 「结束对话」= 本轮说完：把该主题的练习次数 +1 存进 localStorage
     //      （跨页面记忆），再把轮次与时长带到结果页
+    //   ⑤ Day 13：对话舞台的光球随三态变化（rest / listen / hold），
+    //      并同步它上方那行引导语 —— 图形与文字两处都写，
+    //      只改图形会漏掉读屏用户（光球对辅助技术是隐藏的）
+    //   ⑥ Day 14 · F6 第 3 步：本页开始承载**两种模式** ——
+    //      8 个职场主题（F1）与自由对话（F6），靠 topicId 判别。
+    //   ⑦ Day 14 · F6 第 3 步：对话记录区（转写 + AI 回应）+ 提交发言，
+    //      以及「用户沉默 N 秒由 AI 先开口」（自由对话 5 秒 / 8 主题 8 秒）。
     //
     // 口径说明（以 PRD.md / TECH_DESIGN.md 为准）：
     //   - 「第 N 轮」的含义：这是**该主题第几次练习**，不是一场对话里的第几个回合。
@@ -106,12 +164,49 @@
       var nameEl = document.getElementById('topic-name');
       var roleEl = document.getElementById('topic-role');
 
+      /* ---------- 模式：8 个职场主题（F1）/ 自由对话（F6）----------
+         判据用 topicId === 'FREE'，不新增数据字段
+         （TECH_DESIGN.md §5.2.1 约定 2：本期只有一条自由类条目，
+         加 mode 字段要连带改 8 条既有数据，收益不抵风险）。
+
+         两种模式的三处差别（PRD.md §6.6 的对照表）：
+           ① 沉默后由 AI 先开口的秒数：自由对话 5 秒 / 8 主题 8 秒
+           ② 台词来源：自由对话取 opening + openerPool / replyPool；
+                       8 主题取 opening（开场）+ followUpsEn（追问）
+           ③ 8 主题一进对话就由对方先开口（场景本身就是"被当场问到"），
+              自由对话**不先说话** —— 用户没说话，才由 AI 递一句
+
+         本期没有后端（backend/ 尚未创建），所以 8 主题那句"催促"
+         也先由前端从 followUpsEn 取（见 TECH_DESIGN.md §6.2 的说明）。
+         接上 /api/chat 后，把 takeLine() 换成网络请求即可，
+         界面与流程一个字不用改。 */
+      var isFree = topicId === 'FREE';
+
+      /* 用户沉默多久由 AI 先开口。两条线并存、互不影响
+         （PRD.md §6.6 边界与约定、§9.2 B27 专门验这一条）：
+           自由对话 5 秒 —— 用户拍板值
+           8 个职场主题 8 秒 —— PRD §10.1 Q2 的暂定值，没有动过 */
+      var SILENCE_MS = isFree ? 5000 : 8000;
+
+      /* AI 说完之后隔多久上屏。这点延迟不是为了装慢，是让「它在回应」
+         这件事被看见 —— 立刻出现会像页面闪了一下。520ms 短于一次呼吸。 */
+      var AI_DELAY_MS = 520;
+
+      /* 池子取空时的内置兜底（TECH_DESIGN.md §8.2 E12）。
+         **必须是英语** —— 与池子语言一致，中文会打断英语语境。 */
+      var FALLBACK_LINE = "I'm here. Take your time.";
+
       // ---------- 元素 ----------
       var el = {
         turnState: document.getElementById('turn-state'),
         turnRounds: document.getElementById('turn-rounds'),
         turnCount: document.getElementById('turn-count'),
         duration: document.getElementById('duration'),
+        /* Day 13：对话舞台与光球上方那行字。状态同时写两处 ——
+           图形（data-mood 驱动光球）与文字（orb-line）。
+           两处都写是刻意的：光球 aria-hidden，只靠它会漏掉屏幕阅读器用户。 */
+        stage: document.getElementById('stage'),
+        orbLine: document.getElementById('orb-line'),
         recorder: document.getElementById('recorder'),
         recLabel: document.getElementById('rec-label'),
         recLive: document.getElementById('rec-live'),
@@ -120,11 +215,35 @@
         recHint: document.getElementById('rec-hint'),
         btnTalk: document.getElementById('btn-talk'),
         btnPause: document.getElementById('btn-pause'),
-        btnEnd: document.getElementById('btn-end')
+        btnEnd: document.getElementById('btn-end'),
+        /* Day 14 · F6：对话记录区与提交发言（见页面里那两段注释） */
+        trList: document.getElementById('tr-list'),
+        trEmpty: document.getElementById('tr-empty'),
+        trCount: document.getElementById('tr-count'),
+        composer: document.getElementById('composer'),
+        sayInput: document.getElementById('say-input')
       };
 
       // ---------- 状态 ----------
       var state = 'idle';   // idle | recording | paused
+
+      /* 用户在本次对话里说过几句。**与下面的 rounds 不是一回事**：
+         rounds 是「这个主题练过几次」（点结束对话才 +1 的练习次数），
+         turns 是「这一场里我说了几句」—— 它是 TECH_DESIGN.md §5.3
+         里 sessions.turnCount 的原始材料。两个数分开放，别混。 */
+      var turns = 0;
+
+      /* AI 的三串台词（全部来自 topics.json，本页不写死句子）。
+         open    —— 8 主题一进对话就说的第一句
+         silence —— 用户沉默时 AI 先开口的接话
+         reply   —— 用户说完一句之后 AI 的回应
+         8 主题的 silence 与 reply **指向同一个对象**：它的追问只有
+         followUps 一串，共用一个游标才不会出现"同一句被问两遍"。 */
+      var pools = {
+        open:    { lines: [], at: 0 },
+        silence: { lines: [], at: 0 },
+        reply:   { lines: [], at: 0 }
+      };
       /* rounds 的起点不是 0 而是「该主题已完成的次数」：
          进来时若之前练过 1 次，本轮就是第 2 轮，显示「第 2 轮」；
          没练过则保持 0 → 由 render() 显示「准备开始」。 */
@@ -163,26 +282,45 @@
 
       // ---------- 状态渲染 ----------
       // 三态的文案与显隐集中在这里，避免散落在各个事件里。
+      // Day 13 起这里还多管一件事：光球的状态（mood）与它上方那行引导语（line）。
+      // 两者和三态一一对应，所以并入同一张表 —— 加第四个状态时只需在这里补一行，
+      // 不会出现「改了文案忘了改光球」这种错位。
+      //
+      // line 的写法有口径约束（对齐 PRD.md §4.1 H1「用户怕被评判」）：
+      // 只说陪伴与鼓励，**不承诺功能、不评价用户说的话**。
+      //
+      // composer（Day 14 · F6 第 3 步）：提交发言那块的显隐。
+      // 只在录音中出现 —— 未开始时还没轮到说，已暂停时用户明确要歇一下，
+      // 两种情况下摆一个输入框在那里都是在催他。
       var VIEW = {
         idle: {
+          mood: 'rest',
+          line: '准备好了就说一声，我在这儿。',
           label: '未录音',
           live: false,
+          composer: false,
           hint: '点「开始说话」进入对话状态，计时会从第一次发言开始走。',
           talk: { text: '🎙 开始说话', show: true },
           pause: { show: false }
         },
         recording: {
+          mood: 'listen',
+          line: '慢慢说，不着急，我听着。',
           label: '正在录音',
           live: true,
           text: '正在听……',
-          hint: '点击「暂停」可停表，或「结束对话」收尾。',
+          composer: true,
+          hint: '在下面的框里写下你说的话，点「我说完了」提交；也可以「暂停」停表或「结束对话」收尾。',
           talk: { show: false },
           pause: { text: '暂停', show: true }
         },
         paused: {
+          mood: 'hold',
+          line: '先歇一下，随时接着说。',
           label: '已暂停',
           live: true,
           text: '已暂停',
+          composer: false,
           hint: '点「继续」接着计时，或「结束对话」收尾。',
           talk: { show: false },
           pause: { text: '继续', show: true }
@@ -191,6 +329,10 @@
 
       function render() {
         var v = VIEW[state];
+        // 光球与引导语先写：它们的变化最显眼，放在前面便于核对状态是否真切过去了
+        el.stage.setAttribute('data-mood', v.mood);
+        el.orbLine.textContent = v.line;
+
         el.recorder.setAttribute('data-state', state);
         el.recLabel.textContent = v.label;
         el.recLive.hidden = !v.live;
@@ -201,6 +343,9 @@
         if (v.talk.text) el.btnTalk.textContent = v.talk.text;
         el.btnPause.hidden = !v.pause.show;
         if (v.pause.text) el.btnPause.textContent = v.pause.text;
+
+        /* 提交发言：只在录音里出现（理由见 VIEW 里 composer 的注释） */
+        el.composer.hidden = !v.composer;
 
         // 轮次：未开始（idle）显示「准备开始」；一旦开始进入对话就显示「第 N 轮」。
         // 注意两件事：
@@ -215,6 +360,97 @@
         el.recTimer.textContent = fmt(elapsed);
       }
 
+      // ---------- 对话记录（Day 14 · F6 第 3 步）----------
+      // 这里管三件事：取台词、往记录区加一条、「用户沉默则由 AI 先开口」。
+      // 台词一句都不写死在本页 —— 全部来自 topics.json（TECH_DESIGN.md §5.2），
+      // 将来换措辞只动数据。
+
+      /* 按顺序取一句，取完从头循环（TECH_DESIGN.md §8.2 E12：不走进度、不空转）。
+         池子取不到（topics.json 没读上来）时给内置兜底，
+         保证 B24「沉默 5 秒必有接话」在任何情况下都成立。 */
+      function takeLine(name) {
+        var p = pools[name];
+        if (!p || !p.lines.length) return FALLBACK_LINE;
+        var line = p.lines[p.at % p.lines.length];
+        p.at += 1;
+        return line;
+      }
+
+      function updateCount() {
+        el.trCount.textContent = turns ? ('你说了 ' + turns + ' 句') : '还没有发言';
+      }
+
+      /* 往记录区加一条。who 只有两个值：'user' / 'ai'。
+         AI 那一侧的署名就写 "AI"：这一版没给它起人格化的名字，
+         页面别处（主题卡、光球）也一律只叫它 AI，保持一致，
+         不在这里单独给它一个名字。 */
+      function appendLine(who, text) {
+        // 第一条真发言到了，空态那句话就该退场
+        if (el.trEmpty && el.trEmpty.parentNode) el.trEmpty.parentNode.removeChild(el.trEmpty);
+
+        var row = document.createElement('div');
+        row.className = 'tr-row' + (who === 'ai' ? ' is-ai' : '');
+
+        var bubble = document.createElement('div');
+        bubble.className = 'tr-bubble';
+
+        var byline = document.createElement('span');
+        byline.className = 'tr-who';
+        byline.textContent = (who === 'ai') ? 'AI' : '你';
+
+        var line = document.createElement('p');
+        line.className = 'tr-text';
+        /* 整行都是 ASCII 才套衬线斜体（main.css 的 --font-en）。
+           现在两条线的台词都是英语了（FREE 的 openerPool / replyPool、
+           8 主题的 followUpsEn），所以正常情况下每句都会套上。
+           这道判断仍然留着当防线 —— followUpsEn 缺失时会回退显示中文的
+           followUps，中文落进 --font-en 会退到宋体 + 伪斜体，很难看。
+           与其相信"数据里一定有英文"，不如让渲染层自己判。 */
+        if (/^[\x20-\x7E]+$/.test(text)) line.className += ' en';
+        line.textContent = text;
+
+        bubble.appendChild(byline);
+        bubble.appendChild(line);
+        row.appendChild(bubble);
+        el.trList.appendChild(row);
+        // 新的一句永远留在视线内：记录区自己滚，不推着整页跑
+        el.trList.scrollTop = el.trList.scrollHeight;
+      }
+
+      /* ---------- 沉默计时：轮到用户说的时候才走 ----------
+         起算点（PRD.md §6.6 边界与约定）：进入对话状态时、
+         以及**每次 AI 说完之后**；用户提交发言即重置。
+         两条线的秒数不同，见文件开头的 SILENCE_MS。 */
+      var silenceTimer = null;
+      var aiTimer = null;
+
+      function clearSilence() {
+        if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      }
+
+      function armSilence() {
+        clearSilence();
+        // 没在对话（未开始 / 已暂停）就不计时 —— 停表要连沉默一起停
+        if (state !== 'recording') return;
+        silenceTimer = setTimeout(function () {
+          silenceTimer = null;
+          aiSay('silence', 0);
+        }, SILENCE_MS);
+      }
+
+      /* AI 说一句。delay 见文件开头的 AI_DELAY_MS。
+         说完之后**重新起算沉默计时** —— 这正是 PRD §6.6 那句
+         "每次 AI 说完之后"：所以自由对话里 AI 会一直递话，
+         而不是只在第一次递一句。 */
+      function aiSay(name, delay) {
+        if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+        aiTimer = setTimeout(function () {
+          aiTimer = null;
+          appendLine('ai', takeLine(name));
+          armSilence();
+        }, delay || 0);
+      }
+
       // ---------- 事件 ----------
       // 开始说话：本轮正式起步，起表。
       // 轮次不在这里 +1 —— 轮次表示「这个主题练过几次」，由「结束对话」完成一轮时才累加。
@@ -222,6 +458,15 @@
         state = 'recording';
         render();
         startTimer();
+
+        /* 谁先开口，两种模式不同（见文件开头 isFree 那段）：
+             8 个职场主题 —— 场景本身就是"被同事 / 上司当场问到"，
+                             所以一进来由对方说第一句（topics.json 的 opening）
+             自由对话     —— **不先说话**。PRD.md §6.6 的规则是"点开始后
+                             5 秒内用户没说话，AI 才先开口"，
+                             这里只把沉默计时挂上，让 opening 在第 5 秒出现 */
+        if (isFree) armSilence();
+        else aiSay('open', 0);
       });
 
       // 暂停 / 继续：只切换计时，不改轮次
@@ -229,9 +474,11 @@
         if (state === 'recording') {
           state = 'paused';
           stopTimer();
+          clearSilence();     // 停表就连沉默一起停，别在暂停里冒出 AI 的一句
         } else if (state === 'paused') {
           state = 'recording';
           startTimer();
+          armSilence();       // 接着算：用户还没说话，AI 仍然会递话
         }
         render();
       });
@@ -241,6 +488,10 @@
       // 一进页面就直接点结束不算练过，避免次数虚高。
       el.btnEnd.addEventListener('click', function () {
         stopTimer();
+        /* 收尾时把两个计时器都停掉：不然在跳转出去之前，
+           还可能弹出一句迟到的 AI 台词（用户已经按了结束）。 */
+        clearSilence();
+        if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
         if (window.Storage && topicId && state !== 'idle') {
           rounds = window.Storage.bumpPracticeCount(topicId);
         }
@@ -251,7 +502,30 @@
         location.href = 'result.html?' + q.join('&');
       });
 
-      // ---------- 主题名与职场角色 ----------
+      /* 提交一句发言（Day 14 · F6 第 3 步）。
+         本期用文本框代替开口（PRD.md §6.6 边界与约定）；接入语音识别后
+         内容来源改成转写结果，这里一行都不用动。
+         顺序是刻意的：先让用户的话出现在记录区，再让 AI 延迟一点回应 ——
+         反过来会变成 AI 抢在用户前面说话。 */
+      el.composer.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var text = (el.sayInput.value || '').trim();
+        if (!text) return;               // 空的一句不算发言，也不重置沉默计时
+
+        clearSilence();                  // 用户开口了，沉默计时停
+        appendLine('user', text);
+        turns += 1;
+        updateCount();
+        el.sayInput.value = '';
+        aiSay('reply', AI_DELAY_MS);     // 先接住，再轻轻往下问
+      });
+
+      // ---------- 主题名、职场角色、AI 台词池 ----------
+      // 三样都来自同一份 topics.json：一次请求取完，不打三次。
+      // 池子按模式装配（见文件开头 isFree 那段）：
+      //   自由对话：silence = opening + openerPool；reply = replyPool
+      //   8 主题　：open = opening；silence 与 reply **共用** followUpsEn
+      //             （同一个对象、同一个游标，避免同一句被问两遍）
       if (topicId) {
         fetch('../../data/topics.json')
           .then(function (res) { return res.json(); })
@@ -260,17 +534,42 @@
             nameEl.textContent = hit
               ? hit.name + '（' + topicId + '）'
               : topicId + '（主题数据里没有这个编号）';
-            // 职场角色：拿到才显示，拿不到保持隐藏（不留空行）
+            // 职场角色：拿到才显示，拿不到保持隐藏（不留空行）。
+            // 自由对话没有 role 字段，所以这一行对它是天然不执行的。
             if (hit && hit.role) {
               roleEl.textContent = '你的角色：' + hit.role;
               roleEl.hidden = false;
             }
+            if (!hit) return;
+
+            if (isFree) {
+              pools.silence.lines = [hit.opening].concat(hit.openerPool || []).filter(Boolean);
+              pools.reply.lines = (hit.replyPool || []).slice();
+            } else {
+              pools.open.lines = hit.opening ? [hit.opening] : [];
+              /* 8 主题的追问：用 followUpsEn（AI 实际说出口的英语句子），
+                 回退到 followUps（中文的「追问意图」）。
+                 两个字段用途不同、都要留着 ——
+                   followUps　 描述"该追问什么"，将来给 /api/chat 限定追问范围
+                   followUpsEn 是台词语料，页面气泡里显示的就是它
+                 （TECH_DESIGN.md §5.2 字段表）。
+                 回退不是摆设：万一某条数据漏了 followUpsEn，页面会退回显示
+                 中文意图句，而不是让 AI 一句话都不说（宁可难看，不能失语）。 */
+              var lines = hit.followUpsEn && hit.followUpsEn.length
+                ? hit.followUpsEn
+                : (hit.followUps || []);
+              var followUps = { lines: lines.slice(), at: 0 };
+              pools.silence = followUps;
+              pools.reply = followUps;
+            }
           })
           .catch(function () {
             nameEl.textContent = topicId + '（主题数据没能加载）';
+            // 池子取不到就靠 takeLine() 的兜底（TECH_DESIGN.md §8.2 E12）
           });
       }
 
+      updateCount();
       render();
     })();
   </script>

@@ -38,6 +38,7 @@
 | 下游 | Day 6 起开发；Day 6 实测校准（见 [11.1](#t11)） |
 | 本版选定的技术路线 | **路线乙：前端 + 轻后端 + 浏览器本地存储**（见 [第三节](#t3)） |
 | 本文档不含 | 代码、界面视觉稿、AI 提示词的完整措辞 |
+| 最近修订 | **Day 14**：承接 PRD 新增的 F6 自由对话——§4.1（`topics.json` 加一条特殊条目，**不新增文件**）、§5.2/§5.3/§5.7（`FREE` 与 8 个职场主题共用同一套结构）、§6.2/§6.3（自由对话模式下两个接口的差异）、§8.2 E12、§9.1 `FREE_SILENCE_SECONDS`、§11.1 Q-T7；**第 3 步补充**：§5.2 新增 `replyPool` 字段、§5.2.1 补「AI 什么时候取哪一串」与第 4 条约定（**池子里的句子一律英语**）、§6.2 补「8 主题的催促本期也先走本地」；**第 3 步续（补英文追问）**：§5.2 新增 `followUpsEn` 字段、`followUps` 语义收窄为"追问意图"，两者为什么不能合并写在字段表下方；8 个职场主题的英文追问句同步补齐，前端取不到时回退中文 |
 
 ### 1.1 本版技术的三条底线
 
@@ -167,9 +168,11 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │   ├── js/
 │   │   ├── speech.js              ← 录音与转写、AI 语音播放
 │   │   ├── api.js                 ← 统一封装对后端的请求（唯一出口）
-│   │   ├── storage.js            ← localStorage 读写（唯一出口）
+│   │   ├── storage.js             ← 【Day 10 新增】localStorage 读写（唯一出口）
 │   │   ├── components/            ← 【Day 8 新增】跨页面复用的 UI 组件
-│   │   │   └── topic-card.js      ← 主题卡片（P1 在用；P4 按主题分组时可直接复用）
+│   │   │   ├── topic-card.js      ← 主题卡片（P1 在用；P4 按主题分组时可直接复用）
+│   │   │   ├── item-card.js       ← 【Day 11 新增】条目 + 收藏按钮（P3、P4 在用）
+│   │   │   └── interact.js        ← 【Day 11 新增】按钮状态机（星标 / 收藏共用，失败要提示）
 │   │   └── pages/                 ← 每个页面各自的逻辑
 │   │       ├── topics.js
 │   │       ├── dialogue.js
@@ -177,8 +180,13 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │   │       └── records.js
 │   ├── styles/
 │   │   └── main.css               ← 全站样式
-│   └── data/
-│       └── topics.json            ← 8 个主题的配置（内容，不是机制）
+│   ├── data/
+│   │   ├── topics.json            ← 主题配置（内容，不是机制）：
+│   │   │                             T1–T8 八个职场主题 + 一条 FREE（自由对话，见 §5.2）
+│   │   ├── mock-items.json        ← 【Day 11 新增】P3 / P4 的条目与精彩句子（本地假数据）：
+│   │   │                             第 3 周接上 /api/analyze 后整体删除
+│   │   └── mock-sessions.json     ← 【Day 8 新增】P1「你的卡点」的历次练习概览（本地假数据）
+│   └── serve.py                   ← 【Day 14 新增】开发用静态服务：每个响应加 no-store
 │
 ├── backend/                       ← 【Day 6 起新增】后端，独立部署
 │   ├── server.js                  ← 唯一入口：托管静态文件 + 提供 API
@@ -213,6 +221,14 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 > **说明（Day 8 修订）**：本表原未规划 `frontend/js/components/`，Day 8 余力加练新增该目录，用于存放**跨页面复用的 UI 组件**（当前只有 `topic-card.js` 一个）。**加它的理由**：主题卡片的呈现方式集中在一处，P1 与将来的 P4 用同一个组件，避免同一种卡片在两个页面各写一遍 —— 这与 [4.2](#t4) 三条规矩同一思路（唯一出口）。
 >
 > 组件以经典 `<script>` 加载、挂在全局 `window.Components` 下：本页项目未引入打包工具与 ES 模块（沿用 [3.3](#t3) 的取舍原则：能用浏览器原生能力解决的先不引入外部依赖）。**因此加载顺序有意义** —— 组件在前、页面逻辑在后；`frontend/pages/topics.html` 里两行 `<script>` 的顺序不能对调。
+>
+> **说明（Day 14 修订）**：PRD 新增 F6 自由对话后，本表**不新增文件**。理由：自由对话需要的全部配置（名称、接话池、沉默秒数）都是**内容**，而内容归 `topics.json` 管（PRD §6.3「主题是内容，可以随时增删，不影响机制」）。它作为 `topics.json` 里的**一条特殊条目**（`topicId = "FREE"`、`group = "自由"`）存在，由 `topics.js` 在渲染 8 个职场主题时**跳过**（[详见 §5.2](#t5)）。
+>
+> 为什么不单开一个 `free-mode.json`：那样会让**三个页面**各多一次"该读哪份数据"的分支（P1 渲染入口、P2 取名称与接话池、P3 取主题名），而集中在一份文件里只需要 `topics.js` 一处过滤。**用一处过滤换三处分支**，同时保住 B12（8 个主题分两组）不受影响。
+>
+> **说明（Day 14 修订 · 第 5 步）**：本表补上 `frontend/serve.py`。**开发时用它起服务，不用 `python -m http.server`**。原因：`http.server` 只发 `Last-Modified`、不发 `Cache-Control`，浏览器会对它启用**启发式缓存**（有效期约「距上次修改时间的 10%」），结果是「新样式表 + 旧 HTML」混搭 —— Day 13 用户报"暗场在、光球不在"、Day 14 报"自由对话显示成绿色卡片 + 标题写着组 undefined"，两次都是它。`serve.py` 在 `end_headers()` **一处**给所有响应（含 304 / 404）加 `Cache-Control: no-store`，改完刷新即可见。
+>
+> 两点边界：① 它是**开发用**服务，不进部署产物 —— 上线时由托管平台自己发缓存头；② 它只绑 `127.0.0.1`，不对外开端口、不弹防火墙。启动方式（含换端口、`FREE` 的地址）统一写在 `README.md`，本文档不重复。
 
 ---
 
@@ -242,16 +258,71 @@ sessions（会话）
 
 | 字段 | 类型 | 说明 | 示例 |
 |---|---|---|---|
-| `topicId` | string | 主题编号，F3 的 8 个主题之一 | `"T1"` |
-| `group` | string | 分组，对应 PRD 的两个组标题 | `"会议上"` / `"同事间"` |
+| `topicId` | string | 主题编号：F3 的 8 个职场主题取 `"T1"`–`"T8"`；自由对话（F6）取固定值 **`"FREE"`** | `"T1"` / `"FREE"` |
+| `group` | string | 分组，对应 PRD 的两个组标题；自由对话取 `"自由"` | `"会议上"` / `"同事间"` / `"自由"` |
 | `name` | string | 主题名 | `"项目进度被追问"` |
+| `role` | string | 用户在这一轮扮演的职场角色（Day 10 新增）；**自由对话没有角色，该字段省略** | `"项目负责人"` |
 | `summary` | string | 一句话说明（卡片上显示） | `"What's the status? Why the delay?"` |
-| `durationLabel` | string | 预计时长（本版统一 3–5 分钟，见 PRD §6.3） | `"3–5 分钟"` |
-| `opening` | string | AI 的第一句（每个主题不同，禁止万能开场） | `"We're a bit behind. So, what's the status?"` |
-| `followUps` | string[] | 会被追问什么（3 条，即兴压力的来源） | `["具体哪一步没做完","原因是什么","什么时候能好"]` |
-| `anchor` | string | **偏题判定锚点**：什么算跑题，同时也是追问边界 | `"说了进度却给不出原因或时间点"` |
+| `durationLabel` | string | 预计时长（本版统一 3–5 分钟，见 PRD §6.3）；自由对话为 `"不限"` | `"3–5 分钟"` |
+| `opening` | string | AI 的第一句（每个主题不同，禁止万能开场）。**自由对话（F6）的第一句同样是英语** —— 用户全程说英语（PRD §6.6 用户动作第 3 条），AI 用中文接话会把英语语境打断 | `"We're a bit behind. So, what's the status?"` / `"How was your day?"` |
+| `followUps` | string[] | **追问意图**（3 条，即兴压力的来源）—— 中文描述，回答的是"**该往哪儿问**"。给 `/api/chat` 限定追问范围用（[6.2 硬约束 3](#t6)），**不是台词语料**；**自由对话不使用**（F6 顺着用户说，不逼） | `["具体哪一步没做完","原因是什么","什么时候能好"]` |
+| `followUpsEn` | string[] | **仅 8 个职场主题有**（Day 14 第 3 步新增）：与 `followUps` **一一对应**的英语台词，回答的是"**这句话怎么说**"——界面上 AI 气泡里显示的就是这三句。前端取它上屏，**取不到时回退显示 `followUps`**（宁可难看，不能让 AI 失语）；**自由对话不使用**（它用 `openerPool` / `replyPool`） | `["Which part is still not done?", "What's holding it up?", "When can we expect it?"]` |
+| `anchor` | string | **偏题判定锚点**：什么算跑题，同时也是追问边界；**自由对话不使用**（F6 不判偏题，见 §5.2.1） | `"说了进度却给不出原因或时间点"` |
+| `openerPool` | string[] | **仅 `"FREE"` 有此字段**：用户沉默时 AI 依次取用的接话句，**英语**（见 §5.2.1）。`opening` 是这串的第一句 | `["Did anything interesting happen today?", …]` |
+| `replyPool` | string[] | **仅 `"FREE"` 有此字段**（Day 14 第 3 步新增）：用户说完一句后 AI 的**回应**池，**英语**（见 §5.2.1） | `["That sounds like a long day. What was the hardest part?", …]` |
 
 > `anchor` 有双重作用（PRD §6.3）：既给 [t6](#t6) 的 `/api/analyze` 判断偏题用，也给 `/api/chat` 限定追问范围用。
+>
+> **`followUps` 与 `followUpsEn` 为什么不合并成一个字段**（Day 14 记录）：两者回答的是两个不同问题 —— 前者是"**该往哪儿问**"（给模型的**范围约束**），后者是"**这句话怎么说**"（给用户看的**台词**）。若把 `followUps` 直接换成英文，`/api/chat` 的追问范围约束就只剩措辞、丢了意图；而中文那三条里有些本来就不是问句（T5 的「先给结论（能 / 不能）」是一条**要求**，T4 的「从头讲的顺序」是一条**顺序提示**），把它们逐字翻成英语会很生硬。这与 FREE 条目的做法一致：`summary` 是描述，`opening` / `openerPool` / `replyPool` 是台词，本来就分开存。
+
+#### 5.2.1 `topics.json` 里的自由对话条目（Day 14 新增）
+
+PRD §6.6 定义了 F6。它的配置**也放在 `topics.json` 里，作为一条 `group = "自由"` 的特殊条目**：
+
+```json
+{
+  "topicId": "FREE",
+  "group": "自由",
+  "name": "自由对话",
+  "summary": "说说你这一天——发生了什么、感觉怎么样。AI 会接着聊，不打断、不评判。",
+  "durationLabel": "不限",
+  "opening": "How was your day?",
+  "openerPool": [
+    "Did anything interesting happen today?",
+    "How are you feeling right now?",
+    "Anything from today still on your mind?",
+    "Say whatever you like, I'm listening.",
+    "Was there a moment today that felt hard?"
+  ],
+  "replyPool": [
+    "That sounds like a long day. What was the hardest part?",
+    "Thanks for telling me. How did that leave you feeling?",
+    "I see. What happened next?",
+    "That makes sense. Was it what you expected?",
+    "Mm, I'm following. Anything else from today on your mind?",
+    "That's a lot to carry. Did you get any time for yourself?",
+    "Okay. And how do you feel about it now?",
+    "Good to know. Is there anything you'd do differently?"
+  ]
+}
+```
+
+**AI 什么时候取哪一串**（写在这里，避免实现时把两个池子的用途搞反）：
+
+| 时机 | 取自 | 说明 |
+|---|---|---|
+| 进入对话状态后用户**沉默 5 秒** | `opening`（第一次）→ 之后 `openerPool` | 首次**不直接开口**：PRD §6.6 的规则是"点开始后 5 秒内用户没说话，AI 才先开口"。所以 `opening` 是这串接话的**第一句**，不是"一进来就说" |
+| 用户**提交一句发言之后** | `replyPool` | 先接住（"That sounds like a long day."）再轻轻往下问。与 `openerPool` 分开：沉默时是**递话**，接话时是**先接住**，两种语气不能混用 |
+| 任何一串取完 | 从头循环 | 见 §8.2 E12（不走进度、不空转） |
+
+**四条实现约定**（写在这里，避免实现时各写一套）：
+
+| # | 约定 | 为什么 |
+|---|---|---|
+| 1 | **`topics.js` 渲染 8 个职场主题时跳过 `group === "自由"` 的条目** | 保住 PRD §9.2 B12（8 个主题、分两组）。跳过按 `group` 而不是按 `topicId`，将来若再加自由类条目不用改这行 |
+| 2 | **判据用 `topicId === "FREE"`，不新增 `mode` 字段** | 本期只有一条自由类条目，加 `mode` 字段要连带改 8 条既有数据（或依赖默认值），收益不抵风险。将来若自由类条目变多，再抽 `mode` |
+| 3 | **自由对话的练习次数照常计入 `vibecoding.practiceCount`（键 `"FREE"`）** | 与 8 个主题共用同一套记录机制，**不为它新造存储键**（PRD §6.6 边界与约定） |
+| 4 | **两个池子里的句子一律英语**（Day 14 第 3 步） | 用户全程说英语（PRD §6.6 用户动作第 3 条），AI 用中文接话会直接打断英语语境；8 个主题的 `opening` 也全是英语。**中文只出现在页面说明文字里**（如"会追问：""本轮回应来自本地文案池"），不出现在 AI 的台词里 |
 
 ### 5.3 表二：`sessions`　会话（一次练习 = 一条）
 
@@ -259,7 +330,7 @@ sessions（会话）
 |---|---|---|---|
 | `sessionId` | string | 会话唯一标识 | §8.4 会话 ID |
 | `nickname` | string | 昵称；未填写时为 `""`，界面用"你"称呼 | 字段① |
-| `topicId` | string | 本次练的主题 | §8.4 主题 ID |
+| `topicId` | string | 本次练的主题；**自由对话（F6）为 `"FREE"`** | §8.4 主题 ID |
 | `startedAt` / `endedAt` | string | 起止时间（ISO 8601） | §8.4 时间戳 |
 | `durationSeconds` | number | **对话时长**（墙钟时间，从第一次发言到点"结束对话"，含停顿与 AI 说话时间） | 字段②　PRD §8.2 |
 | `errorCount` | number | **错误次数** = 偏题条数 + 逻辑错误条数 | 字段③　PRD §8.3 |
@@ -298,7 +369,7 @@ sessions（会话）
 | `issueId` | string | 条目唯一标识 | 必有 | 必有 |
 | `sessionId` | string | 所属会话 | 必有 | 必有 |
 | `topicId` | string | 所属主题 | 必有 | 必有 |
-| `type` | string | 类型，只允许两个值 | `"off_topic"` | `"logic_error"` |
+| `type` | string | 类型，只允许两个值（**取值拼写用实现侧写法，见下方 Day 14 修订**） | `"offtopic"` | `"logic"` |
 | `turn` | number | 出现在第几轮 | 必有 | 必有 |
 | `originalText` | string | **用户原句**，从 `transcript[].userText` 原样取出 | 必有 | 必有 |
 | `reminder` | string | 提醒：偏题→说明偏离了主题哪一点；逻辑错→说明哪里不成立 | 必有 | 必有 |
@@ -309,6 +380,10 @@ sessions（会话）
 | `createdAt` | string | 条目生成时间，用于记录页时间倒序（B19） | 必有 | 必有 |
 
 > **为什么把 `type` 限制为两个值**：PRD §5.2 D13 砍掉了「表达可简化」类建议。类型只有两种，`errorCount` 才能等于两类条目数之和（B22 逐条核对）。
+
+> **Day 14 修订 · 取值拼写改为实现侧写法**：本节原先写的是 `"off_topic"` / `"logic_error"`，而实现里用的是 `"offtopic"` / `"logic"`（见 `frontend/data/mock-items.json`、`frontend/js/components/item-card.js`、`frontend/js/storage.js`）。现统一为**实现侧写法** —— 这几个字面量已经落进 CSS 类名（`.item-tag-offtopic`）、localStorage 的收藏记录与页面判断分支，改实现比改文档的代价大得多。语义与上面「只允许两个值」的约定一字未变。
+
+> **另有一个 `"good"`，不在本表但在实现里**：精彩句子（[表五](#t5)）在实现中与问题条目**放在同一个 `items` 数组**里，靠 `type: "good"` 区分；收藏记录 `vibecoding.favoriteItems` 里也存这个值。所以实现侧的 `type` 实际会出现三个值。`"good"` 归表五那一类，**不进入 `errorCount`**（B22 仍只数 `offtopic` + `logic` 两类）。
 
 ### 5.6 表五：`goodSentences`　精彩句子
 
@@ -328,8 +403,12 @@ sessions（会话）
 | `vibecoding.sessions` | `sessions` 数组 | **点"结束对话"时**（关键：不是中途写，避免半截数据） |
 | `vibecoding.issues` | `issues` 数组 | 会话结束后拿到判断结果时 |
 | `vibecoding.goodSentences` | `goodSentences` 数组 | 同上 |
-| `vibecoding.practiceCount` | `{ "T1": 2, "T5": 1 }`，某主题**已练完的轮数** | 点"结束对话"完成一轮时 +1 |
+| `vibecoding.practiceCount` | `{ "T1": 2, "FREE": 3 }`，某主题**已练完的轮数**；自由对话用键 `"FREE"` | 点"结束对话"完成一轮时 +1 |
 | `vibecoding.schemaVersion` | 数字，当前 `1` | 首次运行时写入 |
+| `vibecoding.pinnedTopics` | `{ "T1": true }`，被星标（置顶）的主题（Day 11） | 点星标时（**临时键，第 3 周接库后迁走**） |
+| `vibecoding.favoriteItems` | `{ "<itemId>": { type, at } }`，收藏的条目（Day 11） | 点收藏时（**临时键，同上**） |
+
+> **自由对话（F6）不新增任何键**（Day 14）：它的会话、条目、收藏、练习次数**全部落在上面这几个键里**，只是 `topicId` 取 `"FREE"`。理由是 PRD §6.6 明确要求"与 8 个主题共用同一套记录机制"——多一个键就多一处将来要同步、要迁移的地方。
 
 > **`practiceCount` 与 `sessions.turnCount` 不是一回事**（Day 10 新增，别把两个"轮"混用）：
 > - `sessions.turnCount`（见 [5.3](#t5)）是**一场对话内**的轮数，一轮 = 用户一次发言 + AI 一次回应；
@@ -376,7 +455,22 @@ sessions（会话）
 | `topicId` | 是 | 用于取该主题的 `opening` / `followUps` / `anchor` |
 | `history` | 是 | 已有轮次（**只传文本**，不传音频），用于保持上下文连贯 |
 | `userText` | 是 | 用户本轮说的话（转写结果） |
-| `silenceSeconds` | 否 | 用户上一轮前的沉默秒数；大于约定值（PRD 暂定 8 秒）时，后端在回应前先加一句催促（F1、B5） |
+| `silenceSeconds` | 否 | 用户上一轮前的沉默秒数；大于约定值（8 秒）时，后端在回应前先加一句催促（F1、B5）。**自由对话的阈值是 5 秒**，见下表 |
+
+**自由对话模式（`topicId = "FREE"`）下的差异**（Day 14 新增）：
+
+| 项 | 8 个职场主题（F1） | 自由对话（F6） |
+|---|---|---|
+| 沉默阈值 | 8 秒（`SILENCE_SECONDS`，PRD Q2 暂定值） | **5 秒**（`FREE_SILENCE_SECONDS`，PRD §6.6 用户拍板） |
+| 沉默时怎么做 | 前端传 `silenceSeconds`，由后端生成**催促**（`kind: "nudge"`） | 前端**直接取 `topics.json` 里 `opening` / `openerPool` 的下一句上屏** |
+| 追问方向约束 | 只允许落在该主题的 `anchor` 与 `followUps` 范围内（[6.2 硬约束 3](#t6)） | **无 anchor 约束**（F6 不判偏题，所以也没有追问边界）：顺着用户说的话题走 |
+| 提示词的取向 | "不迁就"三条硬规则（[6.2 硬约束 2](#t6)） | **不评价、不替用户下结论、不灌鸡汤**；追问是为了"让用户愿意继续说"，不是"逼用户说完整" |
+
+> **本期（Day 14）自由对话不调 `/api/chat`**：大模型接口尚未接入（按用户决定"过几天接"），自由对话的 AI 回应**全部来自 `topics.json` 的本地文案池**。上表描述的是**第 3 周接入后**的行为，先写下来是为了接入时不用回头改口径。
+>
+> **接入后的接线方式**：前端把本地文案池换成 `/api/chat`，**界面与流程一个字不用改**（PRD §6.6 边界与约定）。
+
+> **本期（Day 14 第 3 步）8 个职场主题的催促也先走本地**：`backend/` 还没建，8 秒到点时没有后端可以生成催促话术，所以这一句本期由**前端取 `followUps` 的下一句**上屏（`followUps` 本来就是中文的"会被追问什么"，所以它显示为中文）。它是**占位**，不是最终形态：接上 `/api/chat` 后，8 主题的催促改由后端返回英文原句，前端这一行删掉即可。PRD §9.2 B27 要验的是**两条线的计时与触发互不干扰**（5 秒 vs 8 秒），本期就能验 —— 验的不是话术从哪里来。
 
 **响应（成功）**
 
@@ -427,14 +521,14 @@ sessions（会话）
   "ok": true,
   "issues": [
     {
-      "type": "logic_error",
+      "type": "logic",
       "turn": 2,
       "originalText": "We have some issues but I think it's ok.",
       "reminder": "先说\"有问题\"又说\"没问题\"，前后不一致",
       "correction": "We're two days behind on the API, but we can still make Friday."
     },
     {
-      "type": "off_topic",
+      "type": "offtopic",
       "turn": 3,
       "originalText": "By the way, I really like the coffee here.",
       "reminder": "这一句偏离了\"解释进度和原因\"这个主题",
@@ -450,16 +544,19 @@ sessions（会话）
 
 | 字段 | 说明 |
 |---|---|
-| `issues[].type` | 只允许 `"off_topic"` / `"logic_error"` 两个值 |
+| `issues[].type` | 只允许 `"offtopic"` / `"logic"` 两个值 |
 | `issues[].correction` | **偏题条目必须为 `null`**；逻辑错误条目必须有值（B7） |
 | `issues.length` | 前端据此算出 `errorCount`（B22 要能对上） |
 | `goodSentences[].originalText` | 只含用户说的句子，不含 AI 的 |
 | `noIssueFound` | 为 `true` 时界面显示"本次没有发现偏题或逻辑错误"，**不硬凑条目**（B10） |
 
-**这一接口的两条硬约束**：
+**这一接口的三条硬约束**：
 
 1. **`originalText` 必须从请求的 `transcript[].userText` 原样取出**，禁止由模型重新生成——这是 B8 的技术保障。实现方式：让模型只返回 `turn` 编号，**原文由后端按编号从 `transcript` 里取回**，模型碰不到原句字符串
 2. **偏题条目若返回了 `correction`，后端强制置为 `null`**（不依赖模型自觉），保证偏题只提醒不纠正
+3. **自由对话（`topicId = "FREE"`）时，后端强制丢弃所有 `type = "offtopic"` 的条目**——PRD §6.6 规定 F6 不判偏题。这一条与第 2 条同一思路：**在源头拦掉，不依赖模型自觉，也不靠前端隐藏**。同理，该模式下 `errorCount` **只由逻辑错误条目计算**（PRD §8.3 的差异说明）
+
+> 第 3 条为什么必须做成后端强约束而不是前端过滤：前端过滤会让"偏题条目确实被生成过"这个事实留在链路里，将来换前端、加导出功能时它就漏出来了。**口径要卡在最靠数据源头的那一层。**
 
 ### 6.4 `POST /api/speech-to-text`（预留）
 
@@ -577,7 +674,8 @@ flowchart TD
 | **E8** | **localStorage 写满 / 不可用** | 记录存不进去（无痕模式、配额满） | 明确提示："本次记录没能保存——浏览器隐私模式可能不支持"，**功能继续可用** | 写入前后各校验一次；失败不清空已有数据，只提示 |
 | **E9** | **localStorage 数据损坏** | 打开记录页空白或报错 | 显示空状态文案（B20 的要求），不显示报错堆栈 | 读取时做 try/catch + JSON 解析校验；解析失败时按空数据渲染，并保留原数据不覆盖 |
 | **E10** | **AI 回应了但没声音** | 有文字，没声音 | 文字正常显示；播放区显示"点这里重听" | `SpeechSynthesis` 失败时降级为纯文字，**不阻塞对话**（B2 要求有文字+语音，语音失败时至少文字可用） |
-| **E11** | **用户沉默过久** | 页面一直静默 | 出现一句催促（B5） | 前端计时到约定秒数（PRD 暂定 8 秒）触发 `silenceSeconds` 参数，由后端生成催促话术 |
+| **E11** | **用户沉默过久** | 页面一直静默 | 出现一句催促（B5） | 前端计时到约定秒数（8 秒）触发 `silenceSeconds` 参数，由后端生成催促话术 |
+| **E12** | **自由对话的接话池取不到 / 已取完** | 用户沉默 5 秒，AI 却没开口 | 屏幕上**仍会出现一句接话**，不静默 | `openerPool` / `replyPool` 取完时**从头循环**，不走进度、不空转；读不到 `topics.json` 时用一句**内置兜底文案**（`"I'm here. Take your time."`，**英语**，与池子语言一致），保证 B24 在任何情况下都成立 |
 
 ### 8.3 三类错误的不同处置强度
 
@@ -605,6 +703,7 @@ flowchart TD
 | `LLM_MODEL_ANALYZE` | 否 | 判断用模型，不填则同 `LLM_MODEL` | `gpt-4o` | `backend/routes/analyze.js` |
 | `PORT` | 否 | 后端监听端口，默认 `3000` | `3000` | `backend/server.js` |
 | `SILENCE_SECONDS` | 否 | 沉默多久触发催促，默认 `8`（PRD §6.1 暂定值，Q2 待实测定稿） | `8` | `backend/routes/chat.js` |
+| `FREE_SILENCE_SECONDS` | 否 | **自由对话（F6）**沉默多久由 AI 先开口，默认 `5`（PRD §6.6，用户拍板） | `5` | 接入后由 `backend/routes/chat.js` 使用；**本期前端用同名常量**（值 `5`），不读环境变量 |
 | `MAX_RETRY` | 否 | 接口失败重试次数，默认 `1`（**不要调大**，避免重复扣费，R2） | `1` | `backend/services/llm.js` |
 
 ### 9.2 密钥安全的三条硬规矩
@@ -681,6 +780,7 @@ flowchart TD
 | **Q-T4** | **沉默催促秒数** | 与 PRD Q2 同一批实测定稿，暂定 8 秒 |
 | **Q-T5** | **问题清单一次最多列几条** | 与 PRD Q5 同一批实测定稿，PRD 建议最多前 3 条 |
 | **Q-T6** | **部署平台定稿** | Day 6 按"免费额度 + 报错可读性"选一个 |
+| **Q-T7** | **自由对话接话池的规模与更新方式**：池子多大，用户才不会听出"又是这句" | 本期先备 5 句（[5.2.1](#t5)），能撑住流程即可；接上大模型后池子整体废弃（PRD Q6 同一批定稿） |
 
 ### 11.2 本文档承接的技术风险
 
@@ -702,6 +802,7 @@ flowchart TD
 | 3 | 前端框架、构建工具（Webpack/Vite 等） | PRD 只有 4 个页面，不必要 |
 | 4 | 服务端音频存储 | R1 未要求；音频不出设备更省成本、更好讲隐私 |
 | 5 | 发音评分相关的一切 | D1 |
+| 6 | **为自由对话单开存储结构、另建"日记页"** | PRD D14 / §6.6：自由对话与 8 个主题**共用同一套键与同一条收尾流程**，只是 `topicId` 取 `"FREE"` |
 
 ---
 
@@ -714,6 +815,8 @@ flowchart TD
 | [5.3](#t5) `sessions` 四个字段 | §8.1 字段①②③④、§8.2 口径、§8.3 错误次数口径 |
 | [5.5](#t5) `issues` 结构 | §6.2 一条条目长什么样、B7、B22 |
 | [6.2](#t6) `/api/chat` | §6.1 追问三类触发、三条硬规则、B2–B5 |
+| [5.2.1](#t5) 自由对话条目 | PRD §6.6、D14、B23–B27（Day 14 新增） |
+| [6.2](#t6) / [6.3](#t6) 自由对话模式的差异 | PRD §6.6（不判偏题）、§8.3（错误次数的差异）、B24–B26（Day 14 新增） |
 | [6.3](#t6) `/api/analyze` | §6.2 两类处理方式、B7–B11 |
 | [7.3](#t7) 写入时机 | A3、B6 |
 | [8.2](#t8) 错误清单 | B8、B9、B20、R1、R5 |

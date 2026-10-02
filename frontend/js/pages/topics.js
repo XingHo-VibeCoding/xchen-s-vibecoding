@@ -12,6 +12,15 @@
      pages/topics.html?state=loading    加载中
      pages/topics.html?state=empty      空
      pages/topics.html?state=error      错误
+
+   Day 14（F6 自由对话 · 第 2 步）：本文件多了一件事 ——
+     把 topics.json 里 group 为「自由」的那一条**从 8 个职场主题里摘出来**，
+     渲染成独立入口（见下方 freeEntry）。
+     8 张主题卡与两个分组一个字没动，B12「8 个主题、分两组」照旧成立。
+     口径见 PRD.md §6.6、TECH_DESIGN.md §5.2.1。
+   Day 14 修订（用户拍板）：这个入口由「主题列表**末尾**」搬到「主题列表**之上**」，
+     成为页面上的**区块 02**（自成一节，不再是 #topics-body 里的一项）。
+     渲染落点随之改为 #free-slot，四态处理见 renderLoading/Empty/Error 与 renderTopics。
    ------------------------------------------------------------- */
 
 (function () {
@@ -24,9 +33,28 @@
   var topicsBody = document.getElementById('topics-body');
   var overviewBody = document.getElementById('overview-body');
 
+  /* 自由对话那一节（区块 02，Day 14 修订）：入口从主题列表里搬出来后自成一节。
+     blockFree 是整节（自带 hidden），freeSlot 是节内的渲染落点。
+     两者都判空再动 —— 少一个 id 不该让整页逻辑炸掉。 */
+  var blockFree = document.getElementById('block-free');
+  var freeSlot = document.getElementById('free-slot');
+
+  /* 整节的开合开关：数据没读到 / 出错 / 数据里没有自由类条目时，连小标一起收起来，
+     不留下一个底下没有内容的空编号。 */
+  function showFreeBlock(on) {
+    if (blockFree) blockFree.hidden = !on;
+    if (!on && freeSlot) freeSlot.replaceChildren();
+  }
+
   // 固定组序：先「会议上」后「同事间」（PRD.md §6.3 的分组顺序）
   var GROUP_ORDER = ['会议上', '同事间'];
   var GROUP_LABEL = { '会议上': 'A', '同事间': 'B' };
+
+  /* 自由对话（F6）在 topics.json 里的分组名。它**不在 GROUP_ORDER 里** ——
+     这个数组是「8 个职场主题的组」，加进它等于把自由对话算成职场主题。
+     渲染时按这个值把它摘出来，另行处理（TECH_DESIGN.md §5.2.1 约定 1：
+     跳过按 group 而不是按 topicId，将来再加自由类条目不用改这行）。 */
+  var FREE_GROUP = '自由';
 
   /* 建节点的小工具，省掉一堆 createElement/appendChild */
   function el(tag, cls, text) {
@@ -55,6 +83,9 @@
     topicsBody.replaceChildren(frag);
 
     overviewBody.replaceChildren(el('p', 'hint', '正在读取练习记录…'));
+
+    // 加载中不放出自由对话那一节：它是数据驱动的（group="自由" 那一条），内容还没到
+    showFreeBlock(false);
   }
 
   function renderEmpty() {
@@ -65,6 +96,9 @@
     topicsBody.replaceChildren(box);
 
     overviewBody.replaceChildren(el('p', 'hint', '还没有练习记录。练过一次之后，这里会显示你被卡住的地方。'));
+
+    // 一条主题也没有时，自由对话那一条同样读不到 —— 整节收起来
+    showFreeBlock(false);
   }
 
   function renderError(detail) {
@@ -85,6 +119,7 @@
 
     topicsBody.replaceChildren(box);
     overviewBody.replaceChildren(el('p', 'hint', '练习记录也没能读上来。'));
+    showFreeBlock(false);
   }
 
   /* ---------- 2. 成功态：区块 2（主题列表） ---------- */
@@ -104,10 +139,18 @@
       if (p && p.issueCount > 0) stuckMap[p.topicId] = p;
     });
 
-    // 按分组归拢，组的先后顺序固定
+    // 按分组归拢，组的先后顺序固定。
+    // 自由对话（group = "自由"）在这一步被摘出来单独存 —— 它不参与分组，
+    // 也不计入任何一组的数量（B12 数的是 8 个职场主题）。
     var byGroup = {};
     GROUP_ORDER.forEach(function (g) { byGroup[g] = []; });
+    var freeTopic = null;
     topics.forEach(function (t) {
+      if (t.group === FREE_GROUP) {
+        // 只认第一条：本期只有一条自由类条目（TECH_DESIGN.md §5.2.1 约定 2）
+        if (!freeTopic) freeTopic = t;
+        return;
+      }
       if (!byGroup[t.group]) byGroup[t.group] = [];
       byGroup[t.group].push(t);
     });
@@ -150,6 +193,62 @@
     });
 
     topicsBody.replaceChildren(frag);
+
+    /* 自由对话入口（F6）**不在这一节里了** —— 它是页面上的区块 02，自己一节，
+       位置在 8 个主题之上（Day 14 修订，用户拍板），落点是 #free-slot。
+       它仍然由这份数据产出：数据里没有 group="自由" 的条目时，
+       这一节连小标一起不出现，而不是留一个底下没内容的空壳。 */
+    if (freeTopic) {
+      if (freeSlot) freeSlot.replaceChildren(freeEntry(freeTopic));
+      showFreeBlock(true);
+    } else {
+      showFreeBlock(false);
+    }
+  }
+
+  /* ---------- 2.2 自由对话入口（Day 14 · F6；Day 14 修订：入口已搬到区块 02） ----------
+
+     它的形状与 8 张主题卡**故意不同** —— 因为它不是「第 9 个主题」，
+     而是一个去处（做成第 9 张卡会让 PRD §9.2 B12「8 个主题分两组」不成立）：
+     一条**暗场横条**，配色与对话页的舞台同一套（--night 一族），
+     左侧一颗缩小版光球 —— 点进去看到的就是这颗球在等他。
+     文字说明由数据给（topics.json 的 name / summary / durationLabel），
+     这里不写死文案，将来改说法只动数据。
+
+     返回值就是这条横条本身（<a class="free-link">），外面不再套 .free-entry 壳：
+     那层壳只为「在列表末尾拉一道分隔线 + 入场晚一拍」而存在，
+     入口搬成独立一节之后，两件事都不成立了。 */
+  function freeEntry(topic) {
+    var a = el('a', 'free-link');
+    a.href = 'dialogue.html?topic=' + encodeURIComponent(topic.topicId);
+
+    /* 缩小版光球：与对话页 .orb 同一个组件、同样四层结构，
+       尺寸与光晕由 .free-orb 收小（样式在 main.css）。
+       aria-hidden —— 它只是「AI 在这儿」的视觉提示，
+       正文里已经有文字说明，读屏用户不需要知道这颗球。 */
+    var orb = el('span', 'orb free-orb');
+    orb.setAttribute('aria-hidden', 'true');
+    ['orb-halo', 'orb-ripple', 'orb-orbit', 'orb-core'].forEach(function (c) {
+      orb.appendChild(el('span', c));
+    });
+    a.appendChild(orb);
+
+    var body = el('span', 'free-body');
+    /* 小标文案（Day 14 修订）：原「说点别的 · 不用挑主题」换成用户给的一句英语。
+       逐字照抄，包括句号后**没有空格**这一处 —— 要改成「Don't be shy. Just go for it」
+       就改这一行。 */
+    body.appendChild(el('span', 'free-kicker', "Don't be shy.Just go for it"));
+    body.appendChild(el('span', 'free-name', topic.name));
+    body.appendChild(el('span', 'free-sum', topic.summary));
+    a.appendChild(body);
+
+    var meta = el('span', 'free-meta');
+    // durationLabel 在 FREE 上是「不限」，读作「不限时长」
+    meta.appendChild(el('span', 'free-dur', topic.durationLabel + '时长'));
+    meta.appendChild(el('span', 'free-go', '开始聊 →'));
+    a.appendChild(meta);
+
+    return a;
   }
 
   /* ---------- 2.1 Day 11 线 2-A：星标（置顶）的回调 ----------
