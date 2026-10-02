@@ -2490,6 +2490,59 @@ footer.page-foot {
 }
 
 /* ============================================================
+   P4 筛选条（Day 12新增）
+   ------------------------------------------------------------
+   口径见 PRD.md §7.4：一个输入框同时筛「收藏区」与「全部条目」两块。
+
+   为什么放成「两区块上方通栏」而不是各区块一个：
+     收藏区与全部条目是**同一份数据的两种排法**（都出自records.html 的
+     flatten()），一个输入框两处同步变才符合「搜整个页面」的预期。
+     两个框不仅多一个控件，还会出现「两个框结果不一样」的困惑。
+
+   为什么复用 .field 而不是新写一套：
+     .field 已经是「标签在上、输入框在下」的纵向表单块（见上文昵称区），
+     标签与控件的关系在任何宽度下都不歧义。这里只多给一个筛选结果计数行。
+
+   颜色：全部用现有令牌，**不新增任何颜色**。计数行用 --text-muted
+   （4.67~5.31，已达标，见 :root 注释）—— 它是解释性文字不是正文。
+
+   触控目标：输入框高度由 .field input 的 padding 决定，44px 要求由下面
+   显式 min-height 保证（.ic-btn 已有同类修法，见 checks.md §6）。
+   ============================================================ */
+
+.filter-bar {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+/* 计数行：筛完显示「显示 N /共 M 条」，让用户知道「没找到」与「本来就没有」
+   是两回事。role=status 让读屏软件在筛选结果变化时播报这一行。
+   min-height 预留一行高度：数字从 2 位变3 位时整块不会跳。 */
+.filter-count {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  min-height: 1.6em;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-bar .field input {
+  /* ≥44px 触控目标：与 .ic-btn 同一类修法，用 min-height 而不是加 padding-block，
+     否则文字会视觉偏上（checks.md §6 记着这个坑）。 */
+  min-height: 44px;
+}
+
+/* 小屏：筛选条收紧内边距，输入框占满整宽（≤640px 单列，layout.md §4） */
+@media (max-width: 640px) {
+  .filter-bar {
+    padding: var(--space-4);
+  }
+}
+
+/* ============================================================
    小屏适配（≤640px）
    Day 12 复核：三档宽度各自都有明确形态，不再有「两不靠」区间 ——
      ≤640px   手机：单列、纵向堆叠、说明不留最小高度

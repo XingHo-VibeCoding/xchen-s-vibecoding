@@ -15,6 +15,20 @@
     </div>
     <p class="lede">这里汇总你历次练习里的问题条目，按时间倒序排列。</p>
 
+    <!-- 筛选条（Day 12）· 口径见 PRD.md §7.4
+         一个输入框同时筛下面两块（收藏区 + 全部条目），因为两块是同一份数据的
+         两种排法。匹配 quote / fix / reminder / typeLabel / 主题名，大小写无关。
+         label 用 .field 的「标签在上」纵向表单块，样式复用 main.css 的 .filter-bar。 -->
+    <div class="filter-bar">
+      <div class="field">
+        <label for="flt-q">筛选条目</label>
+        <input id="flt-q" type="search" autocomplete="off"
+               placeholder="输入英文关键词，或中文意思（如「咖啡机」）"
+               aria-describedby="flt-count">
+      </div>
+      <p class="filter-count" id="flt-count" role="status"></p>
+    </div>
+
     <!-- 【Day 8 余力加练留下的接缝】主题卡片组件
          frontend/js/components/topic-card.js 是跨页面复用的组件（P1 正在用）。
          将来若在本页做「按主题归类」——把问题条目按所属主题分组、每组以主题卡开头——
@@ -74,6 +88,7 @@
     //   ① 按时间倒序列出历次会话的条目（数据来自 data/mock-items.json 的假条目）
     //   ② 收藏区：只列已收藏的条目，**按收藏时间倒序**（PRD.md §6.4 第 468 行）
     //   ③ 两处都能收藏 / 取消收藏，并且**改一处两处同时更新**
+    //   ④ 筛选条（Day 12）：一个输入框同时筛两块，口径见 PRD.md §7.4
     //
     // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
     //   收藏状态只有一份，存在 localStorage（Storage 的 favoriteItems 键）。
@@ -87,6 +102,85 @@
 
     (function () {
       var FAV_DELAY_MS = 320;
+
+      /* ---------- 筛选相关（Day 12） ----------
+         为什么要缓存 + 分「重取」与「重画」两层：
+           筛选是**纯前端**的（数据已经在内存里），每敲一个字就重新 fetch 一遍
+           mock-items.json 属于把简单事做复杂，还会打断输入。
+           所以 render() 只在首次/收藏变化时取数据并缓存 rows，
+           输入关键词时走 paint() —— 只重画，不重取。
+           （这与 checks.md §收藏同步 是同一个思路：状态一份，视图现场算。）
+
+         match() 为什么用「全部字段拼成一段小写文本」而不是逐字段判断：
+           五个字段任一命中即为匹配，逐字段写是五遍几乎相同的 indexOf；
+           拼起来一次includes 就够，且加字段时只要往数组里加一项。
+           小写化放在 match 里做，调用方传原始关键词即可。 */
+      var CACHE = { rows: null };      // 首次 fetch 之后存下来
+      var KEY = '';                    // 当前筛选词（小写、已trim）
+
+      /* 参与匹配的字段。口径见 PRD.md §7.4 的字段表：
+         quote 原句（英文）/ fix 纠正（英文）/ reminder 提醒（中文）/
+         typeLabel 类型（中文）/ 所属主题名与编号（中文）。 */
+      function match(row, key) {
+        if (!key) return true;                 // 空关键词 = 全部显示
+        var it = row.item || {};
+        var hay = [
+          it.quote, it.fix, it.reminder, it.typeLabel,
+          row.topicName, row.topicId
+        ].join(' ').toLowerCase();
+        return hay.indexOf(key) !== -1;
+      }
+
+      function paint(rows) {
+        var favList = document.getElementById('fav-list');
+        var allList = document.getElementById('all-list');
+        var countEl = document.getElementById('flt-count');
+        var hitAll = rows.filter(function (r) { return match(r, KEY); });
+
+        // ---------- 全部条目（时间倒序 + 筛选） ----------
+        if (hitAll.length) {
+          var f = document.createDocumentFragment();
+          hitAll.forEach(function (r) { f.appendChild(recordRow(r)); });
+          allList.replaceChildren(f);
+        } else if (KEY) {
+          // 筛过了但一条没命中 → 实线框：这是「跑完了、结果确实为空」
+          allList.replaceChildren(notFoundBox());
+        } else {
+          allList.replaceChildren(emptyBox(
+            '还没有任何记录', '完成一次练习之后，这里会按时间倒序列出你的问题条目。'));
+        }
+
+        /* ---------- 收藏区（**按收藏时间倒序**，不是按会话时间） ----------
+           两次排序的差别：全部条目按会话时间排，收藏区按「你什么时候标的」排。
+           所以同一屏里两块的顺序可能不同 —— 这是对的，PRD §6.4 第 468 行
+           要求收藏区「最近标的在最上面」。顺序由 Storage.favoriteIds() 给。 */
+        var favOrder = window.Storage ? window.Storage.favoriteIds() : [];
+        var byId = {};
+        rows.forEach(function (r) { byId[r.item.itemId] = r; });
+
+        var favRows = favOrder
+          .map(function (id) { return byId[id]; })
+          .filter(function (r) { return !!r; })   // 收藏了但列表里没有的忽略掉
+          .filter(function (r) { return match(r, KEY); });
+
+        if (favRows.length) {
+          var f2 = document.createDocumentFragment();
+          favRows.forEach(function (r) { f2.appendChild(recordRow(r)); });
+          favList.replaceChildren(f2);
+        } else if (KEY) {
+          favList.replaceChildren(notFoundBox());
+        } else {
+          favList.replaceChildren(emptyBox(
+            '还没有收藏任何条目', '在会话结果页对某一条点「收藏」，它就会出现在这里。'));
+        }
+
+        // 计数行：让用户分得清「没找到」与「本来就没有」—— 前者有筛选词，后者没有
+        var favHit = favRows.length;
+        countEl.textContent = KEY
+          ? '显示 ' + (hitAll.length + favHit) + ' / 共 ' + rows.length + ' 条（收藏区 ' +
+            favHit + ' 条）· 关键词「' + KEY + '」'
+          : '共 ' + rows.length + ' 条（收藏区 ' + favHit + ' 条）';
+      }
 
       /* 本页没有 ?favfail 这种演示开关，失败只来自真实原因（浏览器不允许本地存储）。
          为什么不做随机失败：本页是「回看」场景，用户在检查自己的收藏是否还在，
@@ -112,7 +206,7 @@
              若不先通知，重渲染前那一瞬两块会显示不一致的状态。 */
           document.dispatchEvent(new CustomEvent('ic-sync'));
           // 收藏状态变了 → 两个列表都要重算（收藏区可能多一条、也可能少一条）
-          render();
+          if (CACHE.rows) paint(CACHE.rows);
         }, FAV_DELAY_MS);
       }
 
@@ -191,6 +285,18 @@
         return e;
       }
 
+      /* 「筛选跑完了、一条没命中」的空态—— 与「本来就没有记录」区分开：
+         前者是确定的结论（筛过了，确实没有）→ 实线框 .empty-solid；
+         后者表示「这条还没接上」→ 虚线框 .empty。
+         口径见 PRD.md §7.4 末段，与 main.css 里 .empty-solid 的注释同源。 */
+      function notFoundBox() {
+        var e = emptyBox('未找到', '换个关键词试试，或清空输入框看全部条目。');
+        e.className = 'empty empty-solid';
+        return e;
+      }
+
+      /* render 只做两件事：取一次数据、缓存起来、交给 paint。
+         筛选词变化时不走这里（见paint 上方注释）。 */
       function render() {
         fetch('../../data/mock-items.json', { cache: 'no-store' })
           .then(function (res) {
@@ -198,43 +304,10 @@
             return res.json();
           })
           .then(function (data) {
-            var rows = flatten(data);
-            var favList = document.getElementById('fav-list');
-            var allList = document.getElementById('all-list');
-
-            // ---------- 全部条目（时间倒序） ----------
-            if (rows.length) {
-              var f = document.createDocumentFragment();
-              rows.forEach(function (r) { f.appendChild(recordRow(r)); });
-              allList.replaceChildren(f);
-            } else {
-              allList.replaceChildren(emptyBox(
-                '还没有任何记录', '完成一次练习之后，这里会按时间倒序列出你的问题条目。'));
-            }
-
-            /* ---------- 收藏区（**按收藏时间倒序**，不是按会话时间） ----------
-               两次排序的差别：全部条目按会话时间排，收藏区按「你什么时候标的」排。
-               所以同一屏里两块的顺序可能不同 —— 这是对的，PRD §6.4 第 468 行
-               要求收藏区「最近标的在最上面」。顺序由 Storage.favoriteIds() 给。 */
-            var favOrder = window.Storage ? window.Storage.favoriteIds() : [];
-            var byId = {};
-            rows.forEach(function (r) { byId[r.item.itemId] = r; });
-
-            var favRows = favOrder
-              .map(function (id) { return byId[id]; })
-              .filter(function (r) { return !!r; });   // 收藏了但列表里没有的忽略掉
-
-            if (favRows.length) {
-              var f2 = document.createDocumentFragment();
-              favRows.forEach(function (r) { f2.appendChild(recordRow(r)); });
-              favList.replaceChildren(f2);
-            } else {
-              favList.replaceChildren(emptyBox(
-                '还没有收藏任何条目', '在会话结果页对某一条点「收藏」，它就会出现在这里。'));
-            }
-
+            CACHE.rows = flatten(data);
+            paint(CACHE.rows);
             document.getElementById('rec-mock').textContent =
-              '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json），' +
+              '以上 ' + CACHE.rows.length + ' 条是本地假条目（data/mock-items.json），' +
               '不是你真练出来的。收藏状态存在本机浏览器里，刷新后仍在。';
           })
           .catch(function (err) {
@@ -246,6 +319,15 @@
             box.replaceChildren(e);
           });
       }
+
+      // 筛选输入：改 KEY → 只重画，不重取。
+      // 用 'input' 事件而不是 'change'/'keyup'：后者在粘贴、鼠标选中删除、
+      // 手机输入法上屏时都不触发，'input' 这三种情况都会触发。
+      var input = document.getElementById('flt-q');
+      input.addEventListener('input', function () {
+        KEY = input.value.trim().toLowerCase();
+        if (CACHE.rows) paint(CACHE.rows);
+      });
 
       render();
     })();
