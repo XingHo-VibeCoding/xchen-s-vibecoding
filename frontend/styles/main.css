@@ -113,7 +113,13 @@
   --text-lg: 1.125rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
-  --text-3xl: 1.875rem;
+  /* Day 14 第 4 板块删掉了 --text-3xl：全站 0 处引用（实测 grep -c = 0），
+     是一条死令牌。留着无害，但会让下一个读令牌表的人以为有个 30px 的档位可用，
+     于是拿它去"加大标题"——那正好是项目注释里禁止的「靠字号喊话」。
+     真正要更大时用 .topbar h1 的 clamp，不用新加令牌。
+     字号分布实测（grep计数）：xs 23 / sm 21 / base 7 / lg 4 / xl 6 / 2xl 4。
+     xs+sm 占八成是对的——小字是界面的主力，标题层只该占少数，
+     层级差得开才叫层级，全挤在 12~14px 才是"层级糊了"。 */
 
   /* ---- 间距（4px 网格）---- */
   --space-1: 0.25rem;
@@ -284,13 +290,18 @@ body::before {
      为什么：30px 的页头标题与区块 2 的标题（24px）只差 6px，
      在 1440px 的宽屏上页头压不住场面，两级标题看着差不多大。
      改成流式后窄屏不溢出、宽屏撑得起页头，层级一眼分明。
-     上限 38px 是刻意的 —— 再往上就成营销页的喊话体了（技能第七条禁「靠字号喊话」）。 */
-  font-size: clamp(1.75rem, 3.4vw, 2.375rem);
+     Day 14 第 3 板块：上限 38 → 44px，下限 1.75rem 不动。
+     为什么不改下限：窄屏（390px）上 28px 已经够压场，再大必溢出。
+     为什么上限敢加到 44：原注释担心的「喊话体」风险，
+     真正的解法是把**信息量补足**（见下面 .lede 提亮 + h1 下方新增的品牌副题），
+     而不是把标题空放大 —— 44px 配一句说清用途的话，是「有主语」，
+     38px 配空标题才是「喊」。 */
+  font-size: clamp(1.75rem, 3.8vw, 2.75rem);
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.2;
   /* 中文标题收紧字距会显得局促，只收一点点（-0.01em）；
      真正拉开层级的是下面的说明文字与发丝线，不是字号。 */
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   /* 标题折行时按语义均衡分配，避免「口语对话实 / 战器」这种断法 */
   text-wrap: balance;
 }
@@ -303,8 +314,7 @@ body::before {
 
    呼吸 3.2s 是全站唯一的持续微动（技能第四条要求 MOTION_INTENSITY > 5 时埋一枚），
    幅度刻意小：1 → 1.18 倍。它同时充当「AI 在线」的活体信号。 */
-.topbar h1::after {
-  content: "";
+.topbar h1::after {  content: "";
   display: inline-block;
   width: 10px;
   height: 10px;
@@ -445,13 +455,98 @@ body::before {
    可以做浏览器，写在 .lede 的 border-bottom 上等于给整个页头收口，
    且不需要改 HTML 结构。 */
 .lede {
-  color: var(--text-secondary);
-  font-size: var(--text-base);
+  /* Day 14 第 3 板块：16px → 19px，--text-secondary → --text。
+     为什么改这里而不是只改 h1：用户反馈是「不知道这个网站是干什么的」，
+     而**回答这个问题的是这段说明，不是标题**——标题只有产品名，
+     光把「口语对话实战器」放到 60px 也还是不知道能干什么。
+     提亮 + 放大让它在首屏成为第二强的阅读落点（第一是 h1）。
+     19px 是刻意停在「正文偏大」而不是「标题级」：
+     它仍需与下面的 .card 标题（24px）拉开层级差。
+     对比度：--text 2B2622 压奶油底 FDFBF6 = 14.6:1（原 --text-secondary 为 5.31）。 */
+  color: var(--text);
+  font-size: clamp(1.0625rem, 0.95rem + 0.6vw, 1.1875rem);
+  font-weight: 500;
+  line-height: 1.65;
   max-width: 62ch;                 /* 技能：正文行宽不超过 65ch */
   text-wrap: pretty;               /* 末行不留单字 */
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-8);
+}
+
+/* 说明段里的语义重音（Day 14 第 4 板块）。
+   「它不给你台阶」这句是整个产品的性格所在——AI 不迁就你，
+   这是与普通练习类产品的分水岭，值一个视觉重音。
+   不用珊瑚色：珊瑚在本项目被定为**警示色专管**（偏题、卡点、失败），
+   用在这里会让「产品的个性」被读成「这里有警告」。
+   改用墨色加重：强调靠重量，不靠颜色。 */
+.lede strong {
+  font-weight: 700;
+  color: var(--text);
+  /* 不加底色块：说明段里已经有一个 .eyebrow 徽章，再加一块会变成两块色块打架 */
+}
+
+/* ---------- 页头品牌副题（Day 14 第 3 板块新增） ----------
+   加它是因为用户反馈「不知道这个网站是干什么的」。
+   只放大 h1 解决不了：产品名「口语对话实战器」本身不回答「能干什么」，
+   而 P2/P3/P4 的 h1（对话 / 会话结果 / 错误记录）是**页面名**，
+   在那种页面里更需要一句「你在哪、接下来干什么」。
+
+   【结构上的一个坑，改版时踩过】标签必须是 h1 的**兄弟节点、排在 h1 前面**，
+   不能塞进 h1 里面。塞进去试过，窄屏（390px）实测 h1 高度被撑到 74px：
+   h1 是个行盒，里面的块级子元素（标签 display:block）会参与它的行内布局，
+   标签另起一行后 h1 多出一个行盒，标题本身就被挤到第二行去了。
+   移出来之后，窄屏是「标签一行 + 标题一行」，各占各的高度，互不影响。
+
+   为什么不用「标题下方的副标题」：那会把页头整体推高，
+   把面包屑和 .lede 一起挤下去，而首屏高度在 390px 上本来就紧张。
+
+   Day 14 第 4 板块：等宽 → **衬线体**（--font-en）。
+   理由：这枚标签里装的是英语（"职场英语开口练习"是中文，但 P2 的是
+   "AI 当场追问 · 第 1 步"、P3/P4 也含英文），而全站唯一被允许用衬线体的
+   位置就是「装英文句子的地方」（见 main.css 里 .en 与各台词段的注释）。
+   标签本来就是一句分类语，不是编号——**编号才配等宽**。
+   顺带：等宽在这里还有个实际问题，「职场英语开口练习」10 个汉字用
+   Cascadia Mono 会退到不支持中文的字形，字距忽宽忽窄，很难看。 */
+.brandtag {
+  display: block;
+  width: fit-content;
+  font-family: var(--font-en);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  /* 衬线体不需要额外拉字距（0.06em 是给等宽调的，
+     衬线体本身有衬线做横向分隔，再加会显松散） */
+  letter-spacing: 0.01em;
+  color: var(--accent-deep);        /* A83A23 压奶油底 6.37:1 */
+  background: var(--accent-soft);
+  border: 1px solid rgba(232, 98, 74, 0.28);
+  border-radius: var(--radius-full);
+  /* padding 3px/4px → 2px/3px：实测标签高 47px，比旁边的 14px 小标高一倍多，
+     视觉上像顶了个门帘。衬线体在 pill 里本身留白就多，2/3 够居中了。 */
+  padding: 2px var(--space-3) 3px;
+  /* 桌面：与标题同行，用 margin-bottom 压到标题基线附近；
+     窄屏（≤480px）改为独立成行，见下方媒体查询。 */
+  margin-bottom: var(--space-2);
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  /* 窄屏（390px 实测）：标签 + 标题同排会折成三行、把 navlink 顶到第四行。
+     改为独立成行当「分类标签」用，标题另起一行 —— 两行比三行清楚。
+     这条竖线是分隔不是装饰：独立成行的标签若不给界线，
+     它会和紧随其后的面包屑（「主题列表」）糊成一块，
+     而这两者一个属于标题、一个属于导航，混一起读不出层级。 */
+  .brandtag {
+    margin-bottom: var(--space-3);
+  }
+  .brandtag::after {
+    content: "";
+    display: block;
+    width: 100%;
+    height: 1px;
+    background: var(--border);
+    margin-top: var(--space-3);
+  }
 }
 
 /* 顶栏里的多个链接用竖线隔开 */
@@ -1443,11 +1538,34 @@ body::before {
    加 .en 这个判据，是因为本期 8 个职场主题的追问句还是中文的
    （followUps 本来就是中文描述），中文落进 --font-en 会退到宋体 + 伪斜体，
    很难看。由脚本按「整行是否 ASCII」决定加不加 —— 将来 8 主题补上
-   英文追问句，它会自动套上斜体，这里一个字不用改。 */
+   英文追问句，它会自动套上斜体，这里一个字不用改。
+
+   Day 14 第 4 板块：**开口引号**。加它有两个理由，都不是装饰：
+     ① 口语特色。AI 的台词是「说出来的」，不是「写出来的」——
+        引号是「有人在说话」这个事实的视觉标记，斜体只是「这是外语」。
+        只有斜体时，英文气泡和用户气泡长得太像，都在讲英语，
+        加上引号才能一眼分清「这是对面那个人说的」。
+     ② 台词库里本来就有口语的不完整句（"We're a bit behind."、
+        "I see."），它们脱离对话被单独看时很像写作错误；
+        引号给出「这是在模仿人说话」的框架，读起来就对了。
+   用中文直角引号「」而不是英文 " "：AI 台词一律英语（PRD §6.6），
+   但这个页面是中文界面，引号跟着界面语言走更统一；
+   且直角引号在中文排版里不会被斜体的倾斜带歪。 */
 .tr-text.en {
   font-family: var(--font-en);
   font-style: italic;
 }
+
+.tr-text.en::before,
+.tr-text.en::after {
+  /* 只在英文台词两侧各放一个，不做「连续引号」——
+     引号太多就成了引号墙，反而更吵。 */
+  color: var(--night-accent);
+  opacity: 0.55;
+  font-style: normal;
+}
+.tr-text.en::before { content: "\300C"; margin-right: 1px; }
+.tr-text.en::after  { content: "\300D"; margin-left: 1px; }
 
 /* 本地文案池的说明。**刻意不做成气泡**：它是页面在说实话，
    不是 AI 说的话（语言口径见本节开头）。 */
@@ -1726,21 +1844,54 @@ footer.page-foot {
 .blk-topics   { order: 3; }
 .blk-overview { order: 4; }
 
-/* ---------- 区块小标（等宽字体编号，与卡片上的 TOPIC N 同一套语言） ---------- */
+/* ---------- 区块小标 ----------
+   Day 14 第 3 板块改版：原为「12px 等宽小字 + 珊瑚深档」，在 390px 手机上
+   一行灰字扫过去根本看不见，实测反馈是「点进去不知道该做些什么」。
+   改成**实心徽章**：底色块 + 深档字 + 700 字重。
+   为什么不用「把字号堆大」解决：
+     ① .topbar h1 的注释里已定「上限 38px，再往上就是营销页的喊话体」——
+        同理把小标推到 20px 就成了三块 shouting，谁都不再是重点，等于没重点；
+     ② 真正的信息是「这块是干什么的」，不是「这块编号多大多鲜艳」。
+   形状上选**圆角实心块**而不是下划线/箭头：块有面积，在手机上一眼能扫到；
+   描边式（只有边线）在奶油底上对比不足，正是原来看不清的原因之一。
+   字号 12 → 14px 是配套：块变醒目后，原字号在块里会显得空且局促。
 
+   Day 14 第 4 板块：**字体从等宽改为正文字体**。
+   这是全站最重的一处 AI 味来源——等宽字体（Cascadia Mono）带的是
+   「代码 / 终端 / 开发者工具」语义，而这是个给英语学习者用的对话工具。
+   一屏七处等宽（TOPIC 编号、轮次、计时、小标…）会把整页带成开发者面板。
+   改法不是「删掉等宽」：下面 .topic .no（TOPIC 1）、.rec-timer（计时）、
+   .tr-count（第 N 轮）仍保留等宽——**数字要对齐，那里等宽是对的**。
+   只把「给人读的短句」换回正文字体，靠字重与底色区分层级。 */
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.1em;      /* 0.08 → 0.1：等宽小字拉开字距更像「编号」而非正文 */
-  /* 原用 --accent（奶油底 3.23，12px 不达标）→ 换深档 6.16 */
-  color: var(--accent-deep);
-  margin-bottom: var(--space-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  /* 字距 0.1em → 0.04em：字号变大后 0.1em 会拉得太散，
+     「03」和「选一个主题」之间出现明显断裂，读起来不像一个整体 */
+  letter-spacing: 0.04em;
+  /* 鲜色只做装饰，小字一律用 -deep 档（项目硬规矩）：
+     --primary-deep 9A4708 压 --primary-soft 底 = 6.40:1，远超 4.5 */
+  color: var(--primary-deep);
+  /* 徽章底色用浅一档的蜜橘族，和卡片白底拉出层次但不抢戏 */
+  background: var(--primary-soft);
+  /* width: fit-content 是必须的：01 那块是通栏卡片，.eyebrow 是它的直接子元素，
+     不加这一条 inline-block 会被父级的块级布局拉满整行宽，
+     徽章就变成一条横幅 —— 与 02/03 的小块形态不一致，看着像另一类东西。 */
+  width: fit-content;
+  display: block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  /* 徽章比原来高 9px，间距相应收 4px，净增 5px，不至于把下面的内容推远 */
+  margin-bottom: var(--space-2);
+  border-left: 3px solid var(--primary);
 }
 
+/* 区块 4 走深青：与它的三条统计同一色相，区块内不超过两种颜色 */
 .blk-overview .eyebrow {
-  /* 区块 4 走深青：与它的三条统计同一色相，区块内不超过两种颜色 */
   color: var(--teal);
+  background: var(--teal-soft);
+  border-left-color: var(--teal);
 }
 
 /* ---------- 区块 01｜称呼区：收起说明行（Day 14，与自由对话那一节对调主次） ----------
@@ -1819,6 +1970,20 @@ footer.page-foot {
    实测结果见交付说明；这不是「看着差不多」，是两处高度都量过。
    ============================================================ */
 
+/* Day 14 第 5 板块：横条由**暗底改浅底**（用户要求「从深色改浅一些，可以突出，
+   但不要过于突出，不然用户注意不到其他板块」）。
+
+   为什么原来那么深不叫「突出」而叫「抢戏」：#241A13 的明度只有 8%，
+   而整页底色 #FDFBF6 是 99% —— 两者对比如同一张纸上贴了块黑胶布。
+   视线会被它先吸走，再也回不到「选一个主题」那8 张卡上。
+   统计口径上，这页三个区块的「注意力预算」应该按内容重要性分，
+   而 8 个主题才是产品主体，自由对话是**出口**，不该占最重的视觉块。
+
+   改成浅底后怎么还能「突出」——靠三处，不是靠色深：
+     ① 一道 4px 的蜜橘左边框：颜色最饱和处只有这一条线，视线扫过去会被它引一下；
+     ② 底色用 --primary-soft（比白卡片深一档），它仍是全页唯一「有色」的整块；
+     ③ 光球那颗深色底座：整条横条里唯一的深色，焦点被收窄到球上（见 .free-orb）。
+   三处叠加的注意力总量 ≈ 原来一块黑胶布的 1/3，但「看得出这里是个入口」保住了。 */
 .free-link {
   position: relative;
   display: flex;
@@ -1827,17 +1992,23 @@ footer.page-foot {
   /* 上下 28px（原 20px）：这一节现在是页面上的区块 02，要与称呼区对调主次，
      光靠一个小标补不上 14px 的差额，所以这里放开一点。算式写在上面那段说明里。 */
   padding: 28px var(--space-6);
-  border: 1px solid var(--night-edge);
+  border: 1px solid var(--border);
+  /* 左边框 4px：与 .eyebrow 同一根蜜橘色，是全站唯一「饱和色只出现在细线上」的地方。
+     之所以不用珊瑚：珊瑚是警示色专管（偏题、卡点、失败），这里不是警示。 */
+  border-left: 4px solid var(--primary);
   border-radius: var(--radius-xl);
-  background: var(--night);
-  color: var(--night-text);
+  /* 浅底：比 .card 的纯白深一档，于是它仍是这一页唯一「有色」的整块，
+     但色相与 8 张主题卡的白底同属暖奶油族，不会在页面上割出一块异色。 */
+  background: var(--primary-soft);
+  color: var(--text);
   text-decoration: none;
   overflow: hidden;
   isolation: isolate;
-  /* 阴影用舞台自己的深色（同 .stage），看起来才是「凹进去的一块」 */
+  /* 阴影从「0 20px 38px -24px rgba(36,26,19,.62)」大幅调浅：
+     原来的浓阴影是暗底带来的「悬浮」错觉，底色变浅后还留着重影会显得脏。 */
   box-shadow:
-    0 20px 38px -24px rgba(36, 26, 19, 0.62),
-    0 2px 6px -2px rgba(36, 26, 19, 0.16);
+    0 10px 20px -14px rgba(107, 84, 56, 0.34),
+    0 2px 5px -2px rgba(107, 84, 56, 0.1);
   transition:
     transform var(--normal) var(--ease-soft),
     box-shadow var(--normal) var(--ease-out);
@@ -1848,8 +2019,10 @@ footer.page-foot {
   animation-delay: calc(1 * var(--stagger));
 }
 
-/* 光球那一侧铺一层暖光：与 .stage::before 同一手法，
-   让这条横条看起来「有光源」，而不是一块深色贴纸。 */
+/* 光球那一侧铺一层暖光（浅底之后强度要一起降）：
+   原来是 rgba(242,160,60,.22) 打在一块近黑上，才显得有光源。
+   底色变浅后同样的强度会变成「一块发黄的白斑」，反而脏。
+   降到 .10 并把扩散收窄，只留下极淡的一层暖意。 */
 .free-link::before {
   content: "";
   position: absolute;
@@ -1857,9 +2030,9 @@ footer.page-foot {
   z-index: 0;
   pointer-events: none;
   background: radial-gradient(
-    42% 130% at 6% 50%,
-    rgba(242, 160, 60, 0.22) 0%,
-    rgba(242, 160, 60, 0) 70%
+    38% 120% at 5% 50%,
+    rgba(242, 160, 60, 0.1) 0%,
+    rgba(242, 160, 60, 0) 68%
   );
 }
 
@@ -1870,12 +2043,15 @@ footer.page-foot {
 }
 
 /* 悬停沿用主题卡那套「被点亮」而不是「被抬起来」：
-   一小段上浮 + 外圈一圈极淡的暖色描边。 */
+   一小段上浮 + 外圈一圈极淡的暖色描边。
+   Day 14 第 5 板块：阴影 rgba(36,26,19,.7) 与外圈 rgba(255,196,107,.16)
+   都是按暗底调的 —— 底色变浅后，浓黑阴影会在横条下方拖一块脏影，
+   亮米色描边则等于没有描边。改成与 .card:hover 同族的蜜橘描边。 */
 .free-link:hover {
   transform: translateY(-3px);
   box-shadow:
-    0 26px 46px -24px rgba(36, 26, 19, 0.7),
-    0 0 0 1px rgba(255, 196, 107, 0.16);
+    0 14px 26px -14px rgba(107, 84, 56, 0.4),
+    0 0 0 1px rgba(217, 119, 6, 0.24);
 }
 
 .free-link:active {
@@ -1885,7 +2061,10 @@ footer.page-foot {
 /* ---------- 缩小版光球 ----------
    与对话页那颗是同一个组件、同样四层，只改尺寸。
    core 的 box-shadow 是绝对 px，不按比例收小就会糊成一团光晕，
-   所以这里把三层发光与两条 inset 一并收窄。 */
+   所以这里把三层发光与两条 inset 一并收窄。
+
+   尺寸：60px 写在 .orb.free-orb 那一层（不是 .free-orb），
+   保持「缩放版」的身份；下面 .free-orb 只负责底座与居中。 */
 .orb.free-orb {
   width: 60px;
 }
@@ -1902,8 +2081,59 @@ footer.page-foot {
     inset 2px 3px 7px rgba(255, 232, 190, 0.42);
 }
 
-/* ---------- 文字（全部走暗场令牌，取值见 :root 那一段的实测表） ---------- */
+/* Day 14 第 5 板块：横条由暗底改浅底后，**光球必须有自己的一块深色底座**。
+   球体的光（--orb-hi / --orb-core / --orb-glow）是为暗处设计的，
+   直接放到奶油底上会淡成一小团黄，看不出是颗球 —— 而这颗球是
+   「自由对话」整块的形象落点（它与对话页中央那颗是同一个组件，
+   用户靠它认出「这是同一套东西」）。
+   所以不是「把球调亮」，而是给它一个深色圆底：
+   深底 + 亮球 = 球还是球，且那块深色比整条暗底小得多，
+   重量落在「一个焦点」上而不是「一整块黑」。
 
+   ⚠️ 这里**不能写height**（第一版踩了，写了 height:60px）：
+   基础 .orb 靠 `aspect-ratio: 1/1` 决定高度（main.css .orb 段），
+   一旦给它写死height，宽高比就脱离 1:1；
+   再叠加 flex 压缩后实测成49×62 的**扁椭圆**（球看着歪了）。
+   正确做法：只给背景与阴影，尺寸继续由 .orb 的 aspect-ratio 管，
+   窄屏由下面媒体查询里的 48px 统一收小。 */
+.free-orb {
+  position: relative;
+  flex: none;
+  /* 底座比球芯大一圈：球芯是 .orb-core 的 72%，剩下 28% 是留给光晕的边。
+     第一版底座与球芯同宽（100% vs 72%），光晕溢出时会被底座边缘切断，
+     球看着像「顶到井壁」；加宽到 116% 后四周留出一圈余量，
+     光晕能散开，圆和底座的关系变成「球放在碟子里」而不是「球卡在洞里」。 */
+  width: 116%;
+  border-radius: var(--radius-full);
+  background: radial-gradient(
+    circle at 50% 42%,
+    #4A3524 0%,      /* 比 --night 亮一档，是「有球的洞」而不是「一个洞」 */
+    #2C1F16 58%,
+    #241A13 100%
+  );
+  box-shadow:
+    0 0 0 1px rgba(62, 45, 32, 0.9),
+    0 3px 10px -3px rgba(36, 26, 19, 0.5);
+  /* 球芯在底座里居中：球芯是绝对定位的 72%，不给绝对定位基准会贴左上角 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 四层球体要压在底座之上且居中：
+   它们是 position:absolute 的兄弟节点，不给z-index 会被后绘制的底座盖住。 */
+.free-orb .orb-core,
+.free-orb .orb-halo,
+.free-orb .orb-ripple,
+.free-orb .orb-orbit {
+  z-index: 1;
+}
+
+/* ---------- 文字 ----------
+   Day 14 第 5 板块：横条改浅底后，卡内文字**全部从暗场令牌换回亮场令牌**。
+   这是这次改动里最不能漏的一步 —— 若只改背景不改字色，
+   --night-text（#F5EDE2 浅米色）压在 --primary-soft（#FDF0DC 浅蜜橘）上，
+   对比度约 1.1:1，整条横条会变成「白底白字」，比原来更糟。
+   取值与深档都写在括号里，按WCAG 4.5（小字）/ 3.0（大字）核过。 */
 .free-body {
   /* flex-basis 用 0 而不是 auto：auto 会拿「整句话不折行」的宽度去要空间，
      窄屏上光球就被挤到单独一行，横条凭空高出一大截（390px 实测 275px → 修后约 200px）。
@@ -1919,7 +2149,7 @@ footer.page-foot {
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.1em;
-  color: var(--night-accent);   /* 7.94 */
+  color: var(--primary-deep);   /* 5.70 压 primary-soft（原 --night-accent 只在暗底达标） */
   margin-bottom: var(--space-2);
 }
 
@@ -1928,7 +2158,7 @@ footer.page-foot {
   font-size: var(--text-xl);
   font-weight: 700;
   line-height: 1.3;
-  color: var(--night-text);     /* 14.68 */
+  color: var(--text);            /* 14.4:1，最深的一档，标题必须最重 */
   margin-bottom: var(--space-2);
 }
 
@@ -1936,7 +2166,7 @@ footer.page-foot {
   display: block;
   font-size: var(--text-sm);
   line-height: 1.7;
-  color: var(--night-2nd);      /* 9.13 */
+  color: var(--text-secondary);   /* 5.35 压 primary-soft，14px 达标 */
   /* 不设 max-width：这句只有 33 个字，被限宽（试过 44ch）会折成
      「…AI 会接着 / 聊，不打断、不评判。」—— 第二行只剩孤零零一截。
      整句落在一行时横条更矮，也就不那么抢主题卡的眼。
@@ -1956,14 +2186,16 @@ footer.page-foot {
 
 .free-dur {
   font-size: var(--text-xs);
-  color: var(--night-muted);    /* 6.19，12px 也达标 */
+  color: var(--text-secondary);    /* 5.35 压 primary-soft，12px 也达标 */
 }
 
 .free-go {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--night-text);
-  border: 1px solid rgba(255, 196, 107, 0.36);
+  color: var(--primary-deep);      /* 5.70 压 primary-soft */
+  /* 描边由「亮米色半透明」改为「蜜橘实色」：浅底上 rgba(255,196,107,.36)
+     几乎看不见（亮色描边压浅底 = 没有描边），按钮会像个没边界的字串。 */
+  border: 1px solid rgba(154, 71, 8, 0.42);
   border-radius: var(--radius-full);
   padding: 8px 18px;
   white-space: nowrap;
@@ -1972,11 +2204,11 @@ footer.page-foot {
     border-color var(--fast) var(--ease-out);
 }
 
-/* 悬停时整条横条亮起来的同时，把「开始聊」也点亮一档 —— 
+/* 悬停时整条横条亮起来的同时，把「开始聊」也点亮一档 ——
    它是这条横条唯一可点的动作，值得跟着一起响应。 */
 .free-link:hover .free-go {
-  background: rgba(242, 160, 60, 0.16);
-  border-color: rgba(255, 196, 107, 0.62);
+  background: rgba(217, 119, 6, 0.14);
+  border-color: var(--primary);
 }
 
 /* ============================================================
@@ -2632,8 +2864,15 @@ footer.page-foot {
     padding: var(--space-6) var(--space-4) var(--space-10);
   }
 
+  /* Day 14 第 3 板块：原为 var(--text-2xl)（24px 定值）。
+     它会把 .topbar h1 里的 clamp 覆盖掉 —— 媒体查询在文件更靠后、
+     同特异度下后写的赢，所以 390px 上标题一直被钉死在 24px，
+     上面那句「clamp 上限敢加到 44」的注释在窄屏上根本没兑现过。
+     窄屏给 26px：比 24px 明显压得住场，又留得住中文标题在 390px 内的
+     单行可能（26px × 7 字 ≈ 182px，加标签 136px 仍需换行，故标签在窄屏另起一行）。 */
   .topbar h1 {
-    font-size: var(--text-2xl);
+    font-size: 1.625rem;
+    line-height: 1.3;
   }
 
   /* 光球舞台：小屏上左右内边距收窄（.orb 本身靠 clamp 已缩到下限 104px），

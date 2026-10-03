@@ -50,7 +50,16 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 # 服务根目录 = 本文件所在目录（即 frontend/），与 README 里的启动方式一致
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
-BIND = '127.0.0.1'
+# 【Day 14 改动】默认仍只绑 127.0.0.1（只有本机能访问）。
+# 真人测试需要让对方用自己的设备打开页面，所以加了命令行开关：
+#
+#   python serve.py            → 127.0.0.1:8010（日常开发，本机访问）
+#   python serve.py 8010 --lan → 0.0.0.0:8010（同一 WiFi 下同事可访问）
+#
+# 为什么要做成开关而不是直接改死 0.0.0.0：0.0.0.0 意味着**同一网段任何设备**
+# 都能读这台电脑 frontend/ 目录下的全部文件。日常开发没必要长期开这个口，
+# 开成「不写 --lan 就是本机」比每次靠记性安全。
+BIND = '0.0.0.0' if '--lan' in sys.argv[1:] else '127.0.0.1'
 DEFAULT_PORT = 8010
 
 
@@ -64,11 +73,15 @@ def port_in_use(port):
 
     所以改成「先连一下」：连得上就说明有人在那儿。300ms 超时，
     对已占用的端口只是一次立刻关闭的连接，不会打扰对方。
+
+    【Day 14】探测**永远连 127.0.0.1**，不跟着 BIND 走：--lan 模式下 BIND 是
+    0.0.0.0，而 Windows 上 `connect(0.0.0.0)` 会被解释成「连本机」，
+    探到的东西含义不清。要问的问题始终是「本机这个端口有没有人占」。
     """
     s = socket.socket()
     s.settimeout(0.3)
     try:
-        return s.connect_ex((BIND, port)) == 0
+        return s.connect_ex(('127.0.0.1', port)) == 0
     finally:
         s.close()
 
@@ -79,6 +92,20 @@ def first_free_port(start, tries=20):
     while port < start + tries and port_in_use(port):
         port += 1
     return port
+
+
+def lan_ip():
+    """问系统要本机的局域网 IPv4。拿不到就返回 None（只影响 --lan 的提示文案）。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # 用 UDP 连一个不存在的地址：不会真发包，只是让系统选出「默认出口网卡」的 IP
+        s.connect(('10.255.255.255', 1))
+        ip = s.getsockname()[0]
+        return None if ip.startswith('127.') else ip
+    except OSError:
+        return None
+    finally:
+        s.close()
 
 
 class NoStoreHandler(SimpleHTTPRequestHandler):
@@ -119,10 +146,16 @@ class Server(ThreadingHTTPServer):
 
 
 def main():
+    # 【Day 14】--lan 是开关不是端口号，所以先把位置参数里的非数字部分摘掉，
+    # 剩下的第一个才当端口。原先直接读 sys.argv[1]，
+    # 写成 `python serve.py --lan` 会去 int('--lan') 然后报错退出。
+    args = [a for a in sys.argv[1:] if not a.startswith('-')]
+    lan = '--lan' in sys.argv[1:]
+
     port = DEFAULT_PORT
-    if len(sys.argv) > 1:
+    if args:
         try:
-            port = int(sys.argv[1])
+            port = int(args[0])
         except ValueError:
             print('端口要给数字，例如：  python serve.py 8032')
             return 1
@@ -147,7 +180,18 @@ def main():
         return 1
 
     print('服务目录：%s' % ROOT)
-    print('入口地址：http://localhost:%d/pages/topics.html' % port)
+    if lan:
+        ip = lan_ip()
+        print('模式：--lan（同一 WiFi 下别人也能访问）')
+        if ip:
+            print('给对方的地址：http://%s:%d/pages/topics.html' % (ip, port))
+        else:
+            print('没能自动拿到本机局域网 IP，手动查：  ipconfig')
+        print('本机自己打开：http://localhost:%d/pages/topics.html' % port)
+        print('测完记得 Ctrl+C 关掉 ——开着期间同网段设备都能读这个目录。')
+    else:
+        print('入口地址：http://localhost:%d/pages/topics.html' % port)
+        print('要让别人用自己的设备打开，加 --lan：  python serve.py %d --lan' % port)
     print('缓存头已设为 no-store —— 改完文件直接刷新即可，不用强刷。')
     print('按 Ctrl+C 停止。')
 

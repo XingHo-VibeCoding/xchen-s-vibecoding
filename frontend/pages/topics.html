@@ -11,6 +11,7 @@
 
     <!-- 页头（全宽）：项目名 + 去错误记录入口（PRD.md §7.3 P1 必现信息） -->
     <div class="topbar">
+      <span class="brandtag">职场英语开口练习</span>
       <h1>口语对话实战器</h1>
       <a class="navlink" href="records.html">查看错误记录 →</a>
     </div>
@@ -26,8 +27,8 @@
     </nav>
 
     <p class="lede">
-      选一个主题开始练习。AI 会扮演你的同事或上司，当场问你，不迁就你——
-      说含糊了它追问，说到一半停住它不替你补完。
+      挑一个场景就开始。它扮你的同事或上司，<strong>不给你台阶</strong>——
+      你含糊，它追着问；你说不下去，它就停在那儿等你。
     </p>
 
     <!-- 主视图：单列堆叠，视觉顺序由 CSS 的 order 决定，始终与编号小标 01 → 04 一致 -->
@@ -42,7 +43,7 @@
         <!-- ============ 区块 1｜开始之前：怎么称呼你 ============ -->
         <!-- 出处：PRD.md §7.3 P1「昵称输入（首次进入时）」、§8.1 字段① -->
         <section class="card blk-identity">
-          <p class="eyebrow">01 · 开始之前</p>
+          <p class="eyebrow">01 · 先告诉我怎么称呼你</p>
           <h2>怎么称呼你</h2>
           <p class="hint">填了之后，练习记录里就用这个名字称呼你。不填也能用，页面会用「你」称呼。</p>
           <div class="field">
@@ -58,7 +59,7 @@
         <!-- ============ 区块 4｜你的卡点概览 ============ -->
         <!-- 出处：PRD.md §4.1 H3「它在盯着我的弱点」、§8.3 错误次数口径、§7.3 P1 记录页入口 -->
         <section class="card blk-overview">
-          <p class="eyebrow">04 · 你的卡点</p>
+          <p class="eyebrow">04 · 你被卡住的地方</p>
           <h2>你被卡住的地方</h2>
           <div class="blk-body" id="overview-body" aria-live="polite"></div>
         </section>
@@ -74,6 +75,11 @@
            （topics.json 里 group="自由" 的那一条）。读不到数据 / 数据里没有这一条时，
            整节连同小标一起不出现，不留一个底下没内容的空编号。 -->
       <section class="blk-free" id="block-free" hidden>
+        <!-- Day 14 第 3 板块曾把这条改成中文「不挑题目随便聊」，随后按用户要求
+改回英文 'Free talk'。保留中文注释的理由：它同时记着"这里为什么曾是中文"，
+免得下一次又有人以"用户看不懂英文"为由把它改回去。
+注意区分两件事：这条**小标**用英文（是产品的调性标识），
+而下方卡片里的说明文字仍是中文（那是给人读的指引）。两者并存不矛盾。 -->
         <p class="eyebrow">02 · Free talk</p>
         <!-- 自由对话入口由 topics.js 渲染在这里（它不再是主题列表里的一项） -->
         <div id="free-slot" aria-live="polite"></div>
