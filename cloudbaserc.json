@@ -1,0 +1,36 @@
+{
+  "envId": "cxj1528-d4g55ng0o54cbe296",
+  "version": "2.1",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "health",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/health",
+      "runtime": "Nodejs20.19",
+      "timeout": 10,
+      "memorySize": 256,
+      "installDependency": true
+    }
+  ],
+  "hosting": [
+    {
+      "name": "web",
+      "root": "./.deploy/hosting",
+      "framework": "static",
+      "deployPath": "/"
+    }
+  ],
+  "gateway": {
+    "routes": [
+      {
+        "path": "/api",
+        "target": "function:health"
+      },
+      {
+        "path": "/",
+        "target": "hosting:web"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "health",
+  "version": "1.0.0",
+  "description": "GET /api/health —— 第一个云函数，只验链路通不通，不连数据库、不调大模型（Day 15）",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

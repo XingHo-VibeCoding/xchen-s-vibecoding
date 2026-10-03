@@ -1681,7 +1681,12 @@ button:disabled {
    加宽内边距是为了拉开主次 —— 一个页面只该有一个主按钮，
    那就必须让人一眼看出哪个是主。 */
 button.primary {
-  background: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
+  /* 同样是「兜底底色 + 渐变」两条写。原因见 .ic-btn.is-fav 的注释：
+     微信内置浏览器不渲染「渐变 + var()」的 background 简写时，
+     整条 background 作废会回退到白底，而白字仍生效 → 文字消失。
+     主按钮是全站都在用的，漏了它比收藏按钮更严重。 */
+  background-color: var(--grad-from);
+  background-image: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
   border-color: transparent;
   color: #FFFFFF;
   font-weight: 600;
@@ -1692,7 +1697,8 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--grad-from-hover) 0%, var(--grad-to-hover) 100%);
+  background-color: var(--grad-from-hover);
+  background-image: linear-gradient(135deg, var(--grad-from-hover) 0%, var(--grad-to-hover) 100%);
   box-shadow:
     0 12px 26px -9px rgba(168, 58, 35, 0.8),
     var(--shadow-md);
@@ -2536,8 +2542,16 @@ footer.page-foot {
 /* ---------- 已收藏 / 已星标（持久状态，最强的一环） ---------- */
 
 .ic-btn.is-fav {
-  /* 与主按钮同一套渐变端点，白字对比度 5.02 / 4.87（原端点只有 3.19~3.35） */
-  background: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
+  /* 兜底底色：**必须写background-color，而不是只靠上面的渐变**。
+     Day 15 实测：微信内置浏览器（X5 内核）不渲染
+     `linear-gradient(135deg, var(--x) 0%, var(--y) 100%)` 这条background 简写，
+     于是 `background` 整条作废 → 回退到 .ic-btn 基础的 `background: var(--surface)`（白底），
+     而 `color: #FFFFFF` 仍然生效 → **白字压白底，「★ 已收藏」四个字直接消失**
+     （实测对比度 1.12:1，等于看不见）。
+     写成两条之后：支持渐变的浏览器照旧拿渐变，不支持的也有深色底兜着，
+     **白字在任何情况下都读得出来**（兜底值白字对比度 5.02:1）。 */
+  background-color: var(--grad-from);
+  background-image: linear-gradient(135deg, var(--grad-from) 0%, var(--grad-to) 100%);
   border-color: transparent;
   color: #FFFFFF;
   box-shadow: var(--shadow-sm);
