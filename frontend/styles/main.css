@@ -361,6 +361,83 @@ body::before {
   transform: translateY(0) scale(0.98);
 }
 
+/* ---------- 面包屑（Day 13 新增） ----------
+   位置：紧贴 .topbar 之下、.lede 之上。四页都有（话题链一致，见下）。
+
+   为什么单独一套样式、不复用 .navlink：
+     .navlink 是**药丸按钮**（10px 内边距、圆角胶囊、46px 高），
+     那是「可点击的主要去处」的样子。面包屑是**位置指示**——
+     它回答「我在哪」，不回答「点我去哪」。两者角色不同，
+     套用同一套视觉会让页头多出三个抢戏的胶囊，把 h1 压下去。
+
+   为什么是深青而不是蜜橘（视觉规范：三色分工）：
+     蜜橘族是 A 组（会议上）、深青族是 B 组（同事间）。
+     面包屑是**全站通用构件**，不属于任何一个组，
+     所以走中性文字档（--text-muted / --primary-deep），
+     不占用 A / B 任一组的身份色 —— 一旦占了，读者会误以为
+     「我现在在 A 组那一侧」。 */
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.breadcrumb a {
+  color: var(--primary-deep);          /* 白底 6.40，14px 小字达标 */
+  text-decoration: none;
+  /* 触控目标：min-height 44px 是硬要求（regress.js 逐页逐断点量）。
+     为什么不靠 padding 撑到 44：10px padding + 22.4px 行高 = 42.4px，
+     实测 42px，**差这2px** —— 而 padding 从 10 调到 11 会脱离4px 网格。
+     所以 padding 保持 10px（仍在网格上），另用 min-height 兜到 44px。
+     负 margin 把padding 撑出来的高度收回，面包屑不会在页头下多占一行。 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px var(--space-2);
+  margin: -10px calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
+  transition: color var(--fast) var(--ease-out),
+              background var(--fast) var(--ease-out);
+}
+
+.breadcrumb a:hover {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+
+.breadcrumb a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 分隔符「›」：aria-hidden —— 读屏用户听到的是"主题列表 错误记录"，
+   中间这个符号没有语义，读出来只会变成"尖括号"。*/
+.breadcrumb .sep {
+  color: var(--text-muted);
+  /* 「›」在中文里的视觉重心偏上，基线对齐会显得浮 */
+  transform: translateY(-1px);
+}
+
+/* 当前页：不是链接，是文字。
+   为什么不给它加背景色块：加了色块，它看起来就"可点"，
+   而它是这一层里唯一不能点的一页（点自己没意义）。 */
+.breadcrumb [aria-current="page"] {
+  color: var(--text-secondary);
+  font-weight: 500;
+  cursor: default;
+}
+
+/* 窄屏：面包屑允许折行，但不让它挤到 h1 下面显得像正文。
+   flex-wrap 已在 .breadcrumb 上，这里只保证折行后行距不塌。 */
+.breadcrumb {
+  row-gap: var(--space-1);
+}
+
 /* 页头与主内容之间的一条发丝线（Day 12 新增）。
    为什么：原来标题区与三张卡之间只靠 margin 分隔，视觉上是一个连续的大块；
    加一条线之后页头自成一个「带」，下面的内容从线上「开始」。

@@ -14,6 +14,17 @@
       <a class="navlink" href="topics.html">← 回到主题列表</a>
     </div>
 
+    <!-- 面包屑（Day 13）· 层级约定见 TECH_DESIGN.md §4.3
+         话题链：主题列表 › 对话。
+         顶部的「← 回到主题列表」**保留不删** —— 两者分工不同：
+         药丸按钮是「一个明显的去处」，面包屑是「我在哪」。
+         删了按钮就等于拿面包屑顶替按钮，那是降级不是优化。 -->
+    <nav class="breadcrumb" aria-label="面包屑导航">
+      <a href="topics.html">主题列表</a>
+      <span class="sep" aria-hidden="true">›</span>
+      <span aria-current="page">对话</span>
+    </nav>
+
     <!-- 顶部常驻信息：主题名 / 轮次 / 对话时长（PRD.md §7.3 P2 要求）
          轮次不是固定数字：未开始时显示「准备开始」（#turn-state），
          开始后切换成「第 N 轮」（#turn-count）。两者只有一个是可见的。 -->

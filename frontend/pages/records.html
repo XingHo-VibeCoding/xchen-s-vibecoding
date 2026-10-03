@@ -13,6 +13,18 @@
       <h1>错误记录</h1>
       <a class="navlink" href="topics.html">← 回到主题列表</a>
     </div>
+
+    <!-- 面包屑（Day 13）· 层级约定见 TECH_DESIGN.md §4.3
+         话题链：主题列表 › 错误记录。
+         本页与 P2/P3 不同：记录是**跨会话**的（P4 把历次条目混排），
+         不属于任何一场对话，所以话题链到二级就断 ——
+         硬写成「主题列表 › 对话 › 错误记录」会是**假动线**，
+         因为错误记录并不挂在某一场对话下面。 -->
+    <nav class="breadcrumb" aria-label="面包屑导航">
+      <a href="topics.html">主题列表</a>
+      <span class="sep" aria-hidden="true">›</span>
+      <span aria-current="page">错误记录</span>
+    </nav>
     <p class="lede">这里汇总你历次练习里的问题条目，按时间倒序排列。</p>
 
     <!-- 筛选条（Day 12）· 口径见 PRD.md §7.4
@@ -43,19 +55,11 @@
 
     <!-- 收藏区 -->
     <h2 class="section-title group-a">收藏区</h2>
-    <div class="item-list" id="fav-list" aria-live="polite">
-      <div class="empty">
-        <div class="big">正在读取收藏…</div>
-      </div>
-    </div>
+    <div class="item-list" id="fav-list" aria-live="polite"></div>
 
     <!-- 全部条目 -->
     <h2 class="section-title group-b">全部条目</h2>
-    <div class="item-list" id="all-list" aria-live="polite">
-      <div class="empty">
-        <div class="big">正在读取记录…</div>
-      </div>
-    </div>
+    <div class="item-list" id="all-list" aria-live="polite"></div>
 
     <div class="mock-bar" id="rec-mock"></div>
 
@@ -89,6 +93,8 @@
     //   ② 收藏区：只列已收藏的条目，**按收藏时间倒序**（PRD.md §6.4 第 468 行）
     //   ③ 两处都能收藏 / 取消收藏，并且**改一处两处同时更新**
     //   ④ 筛选条（Day 12）：一个输入框同时筛两块，口径见 PRD.md §7.4
+    //   ⑤ 四态开关（Day 13）：?state=loading / empty / error 三态可单独看，
+    //     写法与 P1 的 topics.js:31 完全一致 —— 见下方「Day 13」注释
     //
     // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
     //   收藏状态只有一份，存在 localStorage（Storage 的 favoriteItems 键）。
@@ -102,6 +108,54 @@
 
     (function () {
       var FAV_DELAY_MS = 320;
+
+      /* ---------- Day 13：四种状态的开关 ----------
+         与 P1（js/pages/topics.js:31）**同一套写法**，不另发明：
+           pages/records.html                  成功（有数据）
+           pages/records.html?state=loading    加载中
+           pages/records.html?state=empty      空（跑完了，确实没有）
+           pages/records.html?state=error      错误
+
+         为什么用地址栏参数而不是页面里放个调试下拉框：
+           ① 能截图（打卡要求图里必须有地址栏）；
+           ② 能复现 —— 别人照着同样的地址打开，看到的是同一屏；
+           ③ 不用在正式界面上挂一个只给开发看的控件。
+
+         为什么本页的「加载中」原来做不到：Day 11 时两个列表的加载文案是
+         **写死在 HTML 里**的（<div class="empty">正在读取记录…</div>），
+         那是「还没拿到数据时的默认内容」，不是一种能被单独检视的状态。
+         现在改成由 renderLoading() 渲染 —— 拿到数据的路径统一走 paint()，
+         两处不再各写一份。 */
+      var FORCED = new URLSearchParams(location.search).get('state') || 'success';
+
+      var favList = document.getElementById('fav-list');
+      var allList = document.getElementById('all-list');
+      var countEl = document.getElementById('flt-count');
+      var mockBar = document.getElementById('rec-mock');
+
+      /* ---------- 加载中（Day 13新增） ----------
+         用 P1 同款的骨架卡：.skeleton-grid / .skeleton-card / .bar.w40|w70|w100
+         样式全部已在 main.css 里（P1 在用），**本页不新增任何 CSS**。
+         为什么骨架卡比「正在读取…」一句话好：列表有多长事先不知道，
+         骨架按真实条数占位，页面不会在数据到达时突然往下跳一屏。 */
+      function renderLoading() {
+        [favList, allList].forEach(function (host) {
+          var grid = document.createElement('div');
+          grid.className = 'skeleton-grid';
+          for (var i = 0; i < 3; i++) {
+            var card = document.createElement('div');
+            card.className = 'skeleton-card';
+            ['w40', 'w70', 'w100', 'w100'].forEach(function (w) {
+              var bar = document.createElement('div');
+              bar.className = 'bar ' + w;
+              card.appendChild(bar);
+            });
+            grid.appendChild(card);
+          }
+          host.replaceChildren(grid);
+        });
+        countEl.textContent = '正在读取…';
+      }
 
       /* ---------- 筛选相关（Day 12） ----------
          为什么要缓存 + 分「重取」与「重画」两层：
@@ -132,9 +186,6 @@
       }
 
       function paint(rows) {
-        var favList = document.getElementById('fav-list');
-        var allList = document.getElementById('all-list');
-        var countEl = document.getElementById('flt-count');
         var hitAll = rows.filter(function (r) { return match(r, KEY); });
 
         // ---------- 全部条目（时间倒序 + 筛选） ----------
@@ -296,28 +347,86 @@
       }
 
       /* render 只做两件事：取一次数据、缓存起来、交给 paint。
-         筛选词变化时不走这里（见paint 上方注释）。 */
+         筛选词变化时不走这里（见paint 上方注释）。
+         Day 13：开头按 ?state= 分发四态，末尾的错误分支改走 renderError()。*/
       function render() {
+        // 先摆出加载态：真实取数期间用户看到的是骨架屏，不是一片空白
+        renderLoading();
+
+        // 要看「加载中」这一态就停在这里，不再往下走
+        if (FORCED === 'loading') return;
+
         fetch('../../data/mock-items.json', { cache: 'no-store' })
           .then(function (res) {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.json();
           })
           .then(function (data) {
-            CACHE.rows = flatten(data);
-            paint(CACHE.rows);
-            document.getElementById('rec-mock').textContent =
-              '以上 ' + CACHE.rows.length + ' 条是本地假条目（data/mock-items.json），' +
+            var rows = flatten(data);
+
+            /* Day 13 补：强制空态。
+               与成功态的区别是**数据先真的取到了**再决定显示空 ——
+               所以 ?state=empty 与「筛选没命中」是两回事：
+                 · ?state=empty    请求成功，但一条记录也没有（数据层为空）
+                 · notFoundBox()   请求成功、有数据，只是筛选词没命中
+               两者都确定「结果为空」，但原因不同，文案也不同。*/
+            if (FORCED === 'error') throw new Error('演示用：强制错误状态');
+            if (rows.length === 0 || FORCED === 'empty') {
+              CACHE.rows = rows;
+              renderEmpty();
+              return;
+            }
+
+            CACHE.rows = rows;
+            paint(rows);
+            mockBar.textContent =
+              '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json），' +
               '不是你真练出来的。收藏状态存在本机浏览器里，刷新后仍在。';
           })
           .catch(function (err) {
-            var box = document.getElementById('all-list');
-            var e = emptyBox('记录没能加载',
-              '（' + (err && err.message ? err.message : '') + '）' +
-              '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。');
-            e.className = 'empty state-error';
-            box.replaceChildren(e);
+            renderError(err && err.message ? err.message : '');
           });
+      }
+
+      /* ---------- 空态（Day 13 补：可单独看） ----------
+         两块分别给文案，因为它们的空**含义不同**：
+           收藏区空 = 还没收藏过任何条目（这是 F4 的正常起点，不是缺数据）
+           全部条目空 = 一次练习都还没做（这时该去 P1 挑个主题）
+         原来这两种空只有真实发生时才看得到，现在能单独检视。 */
+      function renderEmpty() {
+        favList.replaceChildren(emptyBox(
+          '还没有收藏任何条目', '在会话结果页对某一条点「收藏」，它就会出现在这里。'));
+        allList.replaceChildren(emptyBox(
+          '还没有任何记录', '完成一次练习之后，这里会按时间倒序列出你的问题条目。'));
+        countEl.textContent = '共 0 条（收藏区 0 条）';
+        mockBar.textContent = '空态：本页已经取到数据，只是数据里一条记录也没有。';
+      }
+
+      /* ---------- 错误态（Day 13：从 render 的 catch 里抽出来） ----------
+         文案与原 catch 分支**逐字相同**，只是把「渲染进all-list」升级成
+         「两块都渲染」—— 原写法只填 all-list，收藏区会留着加载态的骨架卡，
+         那不是「出错后这一屏该有的样子」。 */
+      function renderError(detail) {
+        var msg = emptyBox('记录没能加载',
+          '页面本身没问题，是数据没读上来。' +
+          (detail ? '（' + detail + '）' : '') +
+          '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。');
+        msg.className = 'empty state-error';
+
+        var btn = document.createElement('button');
+        btn.className = 'primary';
+        btn.textContent = '重新加载';
+        btn.style.marginTop = '16px';
+        // 去掉地址栏上的 ?state= 再重来，避免又落回被强制出来的错误态
+        btn.addEventListener('click', function () {
+          location.href = location.pathname;
+        });
+        msg.appendChild(btn);
+
+        favList.replaceChildren(emptyBox('收藏没能读上来', '先把记录加载出来，再看收藏。'));
+        allList.replaceChildren(msg);
+        countEl.textContent = '没能读到记录';
+        mockBar.textContent = '错误态：数据没读上来，页面本身没问题。';
       }
 
       // 筛选输入：改 KEY → 只重画，不重取。

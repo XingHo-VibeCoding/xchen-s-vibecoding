@@ -17,6 +17,19 @@
         <a class="navlink" href="records.html">查看错误记录 →</a>
       </div>
     </div>
+
+    <!-- 面包屑（Day 13）· 层级约定见 TECH_DESIGN.md §4.3
+         话题链：主题列表 › 对话 › 会话结果（三级）。
+         为什么结果页是三级而不是一级：P2 → P3 是**顺着流程往下走**
+         （对话结束才出结果），不是平级换页。面包屑照出实际的动线，
+         用户看到三级就知道「我在对话的末尾」，而不是以为跳到了别处。 -->
+    <nav class="breadcrumb" aria-label="面包屑导航">
+      <a href="topics.html">主题列表</a>
+      <span class="sep" aria-hidden="true">›</span>
+      <a href="dialogue.html">对话</a>
+      <span class="sep" aria-hidden="true">›</span>
+      <span aria-current="page">会话结果</span>
+    </nav>
     <p class="lede" id="topic-line">本次练习主题：（未选择主题）</p>
 
     <!-- 四个字段：昵称 / 对话时长 / 错误次数 / 精彩句子呈现次数（PRD.md §7.3 P3 要求）
