@@ -6,6 +6,10 @@
 > `DAY15` 只上线了 `GET /api/health` 一个接口（见 [§2](#s2)），其余全部是**占位**。
 > Day 16–20 写代码时回来对照本文件，**不要即兴发明字段**。
 >
+> **Day 16 更新**：建表与种子脚本已写好（**PostgreSQL 方言**，尚未在真实库里执行），表结构登记在 [§9](#s9)（三张表：
+> `sessions` / `turns` / `items`）。§6.2 与 §8 里「不建表」的说法已按实际修订。
+> 接口仍然一个都没写。
+>
 > **写代码时本文档若与`TECH_DESIGN.md` 冲突，以 `TECH_DESIGN.md` 为准**，
 > 并回头改本文档——契约是从文档派生出来的，不是反过来。
 
@@ -17,8 +21,8 @@
 | 建立 | Day 15（第 3 周，板块 ④） |
 | 上游依据 | `TECH_DESIGN.md` §5（数据对象）/ §6（API 列表）/ §8（错误处理） |
 | 公网基址 | `https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com` |
-| 状态 | 🔴 1 个已实现（health）· 🟡 3 个占位待实现（chat / analyze / speech-to-text）· ⚪ 4 个预留（不启用） |
-| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳） |
+| 状态 | 🔴 1 个已实现（health）· 🟡 3 个占位待实现（chat / analyze / speech-to-text）· ⚪ 4 个预留（不启用）· 🟡 **数据表脚本已写、未执行（Day 16，见 §9）** |
+| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」） |
 
 ---
 
@@ -378,23 +382,39 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 }
 ```
 
+> **⚠️ 时间字段的时区口径（Day 17 写接口时必读）**
+>
+> 库里的 `started_at` / `ended_at` / `favorited_at` / `created_at` 都是
+> **`TIMESTAMP`（不带时区）**，按 **UTC+8** 存，本项目单时区不做换算。
+> 而接口层按 ISO 8601 带偏移输出（`+08:00`），见上面的示例。
+>
+> **偏移量是写死在代码里的常量，不是算出来的** —— 不要引入 `now()` 或时区库，
+> 一换环境（本机时区不是 UTC+8 的笔记本、或将来部署到别处）就会算错。
+>
+> 转换只发生在云函数出口那一处：读库拿到 `TIMESTAMP` → 直接拼上 `+08:00`。
+
 | 错误码 | HTTP | 场景 |
 |---|---|---|
 | `INVALID_PARAMS` | 400 | `limit` 不是数字等 |
 | `NOT_FOUND` | 404 | 指定的 `sessionId` 不存在 |
 | `RATE_LIMITED` | 429 | 超频 |
 
-### 6.2 为什么先不启用（重要）
+### 6.2 为什么这些接口先不实现（重要）
 
-| 理由 | 依据 |
-|---|---|
-| **与已锁定决策冲突** | `§3.3` 选路线乙、PRD D5 砍掉账号系统、`§10.1` 写明「数据不部署，在用户自己浏览器里」。做这些接口等于默认上云数据库 = **回头改PRD** |
-| **今天不建表** | 清单「今日不做」明确写了：真实业务接口、**数据库建表**、跨域配置都留Day 16–20 |
-| **无跨域 = 前端连不上** | 静态托管与接口虽同域名，但跨域白名单今天不配（也在「今日不做」里） |
-| **`storage.js` 结构已预留** | `§4.2` 规矩 2：将来只需改那一个文件，4 个页面不用动。**这是当初就设计好的降本路径** |
+> **Day 16 修订**：本节原标题为「为什么先不启用」，其中「今天不建表」一条已过期——
+> 表的**脚本**已于 Day 16 写好，见 [§9](#s9)。**接口本身仍然不实现**（Day 17 起），
+> 下面四条理由里只有第2 条过期了，其余三条依然成立。
+
+| 理由 | 依据 | Day 16 后是否仍成立 |
+|---|---|---|
+| **与已锁定决策冲突** | `§3.3` 选路线乙、PRD D5 砍掉账号系统、`§10.1` 写明「数据不部署，在用户自己浏览器里」。做这些接口等于默认上云数据库 = **回头改PRD** | ⚠️ 部分变化——见 §9.1 边界声明 |
+| ~~**今天不建表**~~ | ~~清单「今日不做」明确写了：数据库建表留 Day 16–20~~ | ❌ **已过期**：Day 16 已写出建表脚本 |
+| **无跨域 = 前端连不上** | 静态托管与接口虽同域名，但跨域白名单今天不配（也在「今日不做」里） | ✅ 仍成立 |
+| **`storage.js` 结构已预留** | `§4.2` 规矩 2：将来只需改那一个文件，4 个页面不用动。**这是当初就设计好的降本路径** | ✅ 仍成立 |
 
 **结论**：这一节是**登记占位**，写清楚"将来要上云时会需要哪几个、参数长什么样"，
-好让 Day 16–20 建表时不必重新推导。**今天不实现、不建表、不配跨域。**
+好让 Day 17 起写接口时不必重新推导。**接口仍不实现**——
+但表已经建好（§9），读接口可以直接查库，不必再回头推导字段。
 
 ---
 
@@ -449,12 +469,185 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 
 | 不写 | 为什么 |
 |---|---|
-| 具体表结构 / 建表 SQL | 属`TECH_DESIGN §5` 的范围，且**今天不建表** |
+| ~~具体表结构 / 建表 SQL~~ | ~~属`TECH_DESIGN §5` 的范围，且今天不建表~~ → **Day 16 已写**：表结构在 [§9](#s9)，SQL 在 `db/schema.sql` 与 `db/seed.sql`（PostgreSQL 方言），字段口径仍以 `TECH_DESIGN §5` 为准 |
 | 跨域（CORS）配置 | 清单「今日不做」，Day 16 起处理 |
 | 鉴权 / 账号 | PRD D5 已砍账号系统（`§3.3` 第 3 条理由） |
 | 限频数值 | 「不替用户选方案」；E4 只定了「只重试 1 次」 |
-| 部署平台细节 | 已定稿 CloudBase，写在 `TECH_DESIGN §10.1`（待补） |
+| 部署平台细节 | 已定稿 CloudBase，写在 `TECH_DESIGN §10.1` |
 
 ---
 
-**建表与写接口时回来对照本文件；有拿不准的先问，不要即兴发明字段。**
+<a id="s9"></a>
+
+## 九、数据模型（Day 16 已建表）🟢
+
+**这一节是 §3–§6 的落地依据**：接口的字段名从这里来，接口的形状也照着这些索引设计。
+建表脚本 `db/schema.sql`，种子数据 `db/seed.sql`，两者都可重复执行。
+
+### 9.1 三张表与边界声明
+
+```
+sessions（一场练习 = 一行）
+  │
+  ├── 1 : N ──> turns（该场每一轮）
+  │
+  └── 1 : N ──> items（偏题 / 逻辑错误 / 精彩句子）
+```
+
+**关联字段：`turns.session_id` 与 `items.session_id` 都外键指向 `sessions.session_id`**（库里的名字snake_case，接口层对应 `sessionId`），
+`ON DELETE CASCADE`（删一场会话，连带删它的轮次与条目）。
+
+| 表 | 存什么 | 依据 |
+|---|---|---|
+| `sessions` | 一场练习的**汇总**：主题、起止时间、时长、三个计数 | `TECH_DESIGN §5.3` |
+| `turns` | 该场的**每一轮**：用户说了什么、AI 回了什么 | `TECH_DESIGN §5.4` |
+| `items` | 该场的**条目**：偏题 / 逻辑错误 / 精彩句子 | `TECH_DESIGN §5.5` + §5.6 |
+
+> **⚠️ 边界声明（这条不要跳过）**
+>
+> Day 16 **只建表**，其余什么都没动：
+>
+> | 项| 状态 |
+> |---|---|
+> | 表结构 | 🟡 **脚本写好了（`db/schema.sql`），尚未在真实数据库里执行** |
+> | 种子数据 | 🟡 **脚本写好了（`db/seed.sql`，5 场 / 17 轮 / 7 条），同样未执行** |
+> | 任何接口 | ❌ **仍然一个都没写** |
+> | 前端 `api.js` | ❌ **未创建**，前端仍读写 localStorage |
+> | `storage.js` | ❌ **一行未改**，四个页面行为完全不变 |
+> | 跨域白名单 | ❌ 未配 |
+>
+> **所以 `TECH_DESIGN §3.3` 的路线乙（不引入数据库）没有被推翻，用户数据仍然只在本机。**
+> 建表是为了让 Day 17 的读接口有库可查，**不是为了把用户数据搬上云**——
+> 上云是另一件事，要改 PRD D5 与 R5「主动告知用户数据只存在本机」的口径，
+> 那是路线丙的决策，不在 Day 16。
+>
+> **⚠️ 数据库是 PostgreSQL，不是 MySQL**（Day 16 上午发现的）
+>
+> 本项目环境（`cxj1528-d4g55ng0o54cbe296`）的「SQL 数据库」入口进去是
+> **PostgreSQL 管理**，控制台没有独立的 MySQL 入口 —— PG 是 CloudBase 的
+> 独立环境类型（2026 年 8 月起正式支持）。
+>
+> 上午先按 MySQL 写了一版脚本，跑不进这个引擎，**已整体翻译成 PG 方言**，
+> 改了 11 类语法（`INT UNSIGNED`、`TINYINT(1)`、`DATETIME`、行内 `COMMENT`、
+> 内联 `KEY`、`SET FOREIGN_KEY_CHECKS` 等），翻译对照表写在 `db/schema.sql` 文末附录。
+> §9.3–9.5 三张字段表里写的都是 **PG 类型**。
+>
+> 执行入口不是 DMC，是控制台的 **SQL 编辑器**（`#/db/postgres/data-editor`）。
+> 11 个分批文件与操作步骤见 `README.md`「数据库怎么建起来的」一节。
+>
+> **为什么值得先把表建出来**：字段一旦被接口引用，改名成本就涨了。
+> 现在改是零成本（Day 15 拍板 `originalText` / `correction` 就是这个道理）。
+
+### 9.2 两条与既有文档不同的决定（Day 16 用户拍板）
+
+| # | 决定 | 覆盖了什么 | 为什么 |
+|---|---|---|---|
+| 1 | **`turns` 独立成表** | `TECH_DESIGN §5.4` 原写「v1 把轮次作为 `sessions.transcript` 数组内嵌，不单独立表」；同时 `§5.3` 的 `transcript` 字段**已删除** | 轮次要能被单独查、单独排。拆出来后`turns` 的主键用复合键 `(sessionId, turn)`，顺带把「同一场里不能有两个第 3 轮」钉在数据库里——内嵌数组做不到这件事 |
+| 2 | **库里的列名用 snake_case，接口层仍是 camelCase** | 上午写过一版「库与接口同用 `originalText` / `correction`」的MySQL 脚本 | 环境是 PostgreSQL，**PG 会把不带双引号的标识符全部转小写** —— `sessionId` 会被存成 `sessionid`，库里的名字和代码里写的对不上，排查极费劲。所以库里一律 `session_id` / `original_text`，映射在 Day 17 的云函数里用 `AS "sessionId"` 做一次，不散落在各处。**唯一例外是 `correction` 这个词本身**（不改成 `fix`）：它绑着 B7 硬约束，叫 `fix` 会让人以为可以随便改 |
+
+> **两个「不建表」的对象**（都不是遗漏，是已定决策）：
+> - **`topics` 不入库** —— `TECH_DESIGN §5.2` 已定「来自 `topics.json`，**不是用户数据**，只在代码里维护」。主题是内容，内容归 `topics.json`（`§10.3` 同一条：调整主题只改 JSON 不动代码）。
+> - **`issues` 与 `goodSentences` 不分表** —— `§5.5` 已记录「实现侧就是一个 `items` 数组，靠 `type: "good"` 区分」，契约 §6.1 的接口也叫 `/api/items`。所以 `type` 有三个值不是设计失误。
+
+### 9.3 `sessions` 字段
+
+| 库里的列 | PG 类型 | 接口层的名字 | 空 | 说明 |
+|---|---|---|---|---|
+| `session_id` | VARCHAR(32) PK | `sessionId` | 否 | 后端生成，**不用自增**（§1.6） |
+| `topic_id` | VARCHAR(16) | `topicId` | 否 | `T1`–`T8` / `FREE` |
+| `nickname` | VARCHAR(64) | `nickname` | 否（默认 `''`） | 未填写为空串，界面用「你」 |
+| `started_at` | TIMESTAMP | `startedAt` | 否 | 统一按 UTC+8 存，**单时区不做换算**（用不带时区的 `TIMESTAMP`，不是 `TIMESTAMPTZ`） |
+| `ended_at` | TIMESTAMP | `endedAt` | **是** | **为空 = 中途退出**（B6） |
+| `duration_seconds` | INTEGER | `durationSeconds` | 否 | 墙钟时间，含停顿与 AI 说话（PRD §8.2）。**PG 没有 `UNSIGNED`，负数由 `ck_sessions_counts` 挡** |
+| `error_count` | INTEGER | `errorCount` | 否 | 偏题 + 逻辑错误（PRD §8.3） |
+| `good_sentence_count` | INTEGER | `goodSentenceCount` | 否 | **不计入** `error_count` |
+| `turn_count` | INTEGER | `turnCount` | 否 | 场内轮数；**≠ `practiceCount`**（跨场次累计） |
+| `is_complete` | BOOLEAN | `isComplete` | 否 | **`false` = 中途退出，数据仍留**（B6）。PG 没有 `TINYINT(1)` |
+
+### 9.4 `turns` 字段
+
+| 库里的列 | PG 类型 | 接口层的名字 | 空 | 说明 |
+|---|---|---|---|---|
+| `session_id` | VARCHAR(32) | `sessionId` | 否 | 复合主键第 1 段 + 外键 |
+| `turn` | INTEGER | `turn` | 否 | 复合主键第 2 段，**从 1 开始** |
+| `user_text` | TEXT | `userText` | 否 | 用户原句，一字不改。**B8 的唯一可信来源** |
+| `ai_text` | TEXT | `aiText` | 否 | AI 回应；前端再用 `SpeechSynthesis` 读（B2） |
+| `timestamp` | INTEGER | `timestamp` | 否 | **相对**会话开始的毫秒，用于回放与排序 |
+| `asked_follow_up` | BOOLEAN | `askedFollowUp` | 否 | 本轮 AI 是否追问 |
+
+> `turn` 与 `timestamp` 在 PG 里都是**非保留关键字**，可以直接当列名，不必加双引号。
+
+### 9.5 `items` 字段
+
+| 库里的列 | PG 类型 | 接口层的名字 | 空 | 说明 |
+|---|---|---|---|---|
+| `item_id` | VARCHAR(40) PK | `itemId` | 否 | 后端生成 |
+| `session_id` | VARCHAR(32) | `sessionId` | 否 | 外键 → `sessions.session_id` |
+| `topic_id` | VARCHAR(16) | `topicId` | 否 | **刻意冗余**：记录页要「按主题 + 时间倒序」，有它走索引一次命中，不必 join |
+| `type` | VARCHAR(8) | `type` | 否 | 只允许 `offtopic` / `logic` / `good`（PG 里`type` 是非保留关键字，可直接用） |
+| `turn` | INTEGER | `turn` | 否 | 对应 `turns.turn` |
+| `original_text` | TEXT | `originalText` | 否 | 从 `turns.user_text` 原样取出，**禁止 AI 重新生成**（B8） |
+| `reminder` | VARCHAR(500) | `reminder` | 否（默认 `''`） | 偏题说明偏离哪一点／逻辑错误说明哪里不成立／精彩句子说明好在哪 |
+| `correction` | TEXT | `correction` | **是** | **偏题与精彩句子必须 `NULL`，逻辑错误必须有值**（B7）。**这一列没改成 snake_case**，见 §9.2 第 2 条 |
+| `is_favorited` | BOOLEAN | `isFavorited` | 否 | F4 |
+| `note` | VARCHAR(120) | `note` | 否（默认 `''`） | 建议 ≤30 字 |
+| `favorited_at` | TIMESTAMP | `favoritedAt` | **是** | 收藏区倒序用 |
+| `created_at` | TIMESTAMP | `createdAt` | 否 | 记录页时间倒序（B19） |
+
+> **`items.topic_id` 冗余的代价**：理论上可能与 `sessions.topic_id` 写歪。
+> 约定：**由后端从 session 带出，不单独由前端传**。
+>
+> **入库时的一处翻译**：`mock-items.json` 里偏题写的是 `fix: ""`（空串），
+> 入库必须变成**真正的 `NULL`** —— 库里分得清空串与 `NULL`，而前端JS 用 falsy 判断，
+> 两者对它是「都没有」。空串会被 `ck_items_correction` 直接拒绝。
+
+### 9.6 五条 CHECK 约束（PRD 口径钉在库里）
+
+**这一节是今天最该记住的部分**：口径不只写在文档里，还写进了数据库。
+就算代码写错、模型不听话，**插不进一条违反 PRD 的脏数据**。
+
+| 约束 | 管什么 | 挡住什么 |
+|---|---|---|
+| `ck_items_type` | `type` 只允许三个字面量 | 类型拼错（Day 14 踩过 `offtopic` 被写成 `off_topic`） |
+| `ck_items_correction` | `logic` 必有改法；`offtopic` / `good` 必无 | **B7** 被绕过 —— §4 特意强调这条要后端强制，现在库也强制了 |
+| `ck_sessions_endtime` | `is_complete` 为真必有 `ended_at`；为假必无 | **B6** —— 标了正常结束却没时间戳 |
+| `ck_items_favtime` | 收藏状态与收藏时间必须一致 | 收藏区倒序排不出来／数据自相矛盾 |
+| `ck_turns_turn` / `ck_items_turn` |轮次从 1 起 | 传 0 或负数 |
+
+### 9.7 索引与它们服务的查询
+
+| 索引 | 服务谁 | 为什么要它 |
+|---|---|---|
+| `idx_sessions_topic_time (topic_id, started_at)` | §6.1 **R1** 列表读取 | 按主题取场次，按时间倒序 |
+| `idx_items_session (session_id)` | P3 结果页看「本次」 | 按会话取全部条目 |
+| `idx_items_topic_time (topic_id, created_at)` + `idx_items_time (createdAt)` | §6.1 **R4** 记录页 | 按主题筛选 + 时间倒序；不传主题时走后一段 |
+| `idx_items_fav (is_favorited, favorited_at)` | P4 收藏区（F4） | 只取已收藏，按收藏时间倒序 |
+
+> **游标翻页，不是 offset**：§6.1 R4 已定用 `cursor`。
+> 上表每个索引的第二列都是时间，因为**游标就用时间**——
+> 记录是持续追加的，offset 会漏读或重读。
+
+### 9.8 Day 17 写接口时必须遵守的五件事
+
+1. **`/api/chat` 与 `/api/analyze` 都不查库**（它们只调大模型）。
+   库是给**读接口**（§6.1 的 R1–R6）用的—— `R3 POST /api/sessions` 才是写库的那个。
+2. **写库时 `items.original_text` 必须从 `turns.user_text` 取**，不许 AI 重新生成（B8）。
+   `ck_items_correction` 只能挡住 `correction` 那一列，**挡不住原句被编造**——
+   B8 的保障在这一层，不在数据库。
+3. **`FREE` 时后端强制丢弃所有 `type='offtopic'` 的条目**，且 `error_count`
+   只由逻辑错误算（PRD §8.3）。§4 硬约束第 3 条，库里的证据见 `seed.sql` 的验证 4.5。
+4. **★ 查询写snake_case，输出用 `AS "camelCase"` 映射回接口层**（PG 特有）。
+   库里的列是 `session_id` / `is_complete` / `original_text`…，
+   接口要吐 `sessionId` / `isComplete` / `originalText`…（§6.1 的形状）。
+   **映射只写在云函数出口这一处**，不要散落到各个查询里。
+   布尔列直接返回 `is_complete` 即可 —— PG 的 `BOOLEAN` 出参就是 `true` / `false`，
+   与 §6.1 示例里的 `"isFavorited": true` 天然一致，**不需要转换**。
+5. **★ 时间戳出口要拼 `+08:00`**（PG 特有）。库里 `TIMESTAMP` 不带时区，
+   接口按 ISO 8601 带偏移输出，详见 §6.1 示例下方那段「时间字段的时区口径」。
+
+---
+
+**写接口时回来对照本文件；有拿不准的先问，不要即兴发明字段。**
+**字段长什么样看 [§9](#s9)（库结构，PG 类型）；接口长什么样看 §3–§6（camelCase）。**
+**两者不一致时先查 §9.2 的两条决定** —— 库与接口的名字不一致是有意为之（PG 会转小写），
+不是笔误。产品口径仍以 `TECH_DESIGN §5` 为准，并回头改这里。**

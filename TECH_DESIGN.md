@@ -334,7 +334,7 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 
 ### 5.1 数据模型总览
 
-四张"表"（localStorage 里就是四个键）：
+**四张"表"**（localStorage 里就是四个键）：
 
 ```
 topics（主题配置·只读，来自 topics.json）
@@ -347,6 +347,18 @@ sessions（会话）
    │
    └── 1 : N ──> issues（问题条目）── 收藏与备注挂在这里
 ```
+
+> **Day 16 修订 · 云端建表时 `turns` 独立成表**：
+> 上面这张图是**localStorage 视角**（v1 的实际形态，`sessions.transcript` 内嵌轮次）。
+> Day 16 在 CloudBase 建表时，用户拍板把 `turns` **拆成独立的表**，
+> 不再内嵌 —— 见 `docs/api-contract.md §9.2`。
+>
+> **两者不冲突**：localStorage 里存内嵌数组（省一次读写、省一层结构），
+> 云库里存独立表（能按轮次查、能用复合主键防重复轮次）。
+> **字段口径两处必须一致**，改一处要回头改另一处。
+>
+> 另外两个「不建表」的对象（已定决策，不是遗漏）：
+> `topics` 只在代码里维护不入库（§5.2）；`issues` 与 `goodSentences` 不分表（§5.5）。
 
 ### 5.2 表一：`topics`　主题配置（只读）
 
@@ -432,8 +444,15 @@ PRD §6.6 定义了 F6。它的配置**也放在 `topics.json` 里，作为一�
 | `errorCount` | number | **错误次数** = 偏题条数 + 逻辑错误条数 | 字段③　PRD §8.3 |
 | `goodSentenceCount` | number | **精彩句子呈现次数** = 精彩句子区的条数 | 字段④　PRD §8.2 |
 | `turnCount` | number | 总轮数（一轮 = 用户一次发言 + AI 一次回应） | §8.4 轮次 |
-| `transcript` | object[] | 转写全文（见下） | §8.4 转写全文 |
+| `transcript` | object[] | 转写全文（见下）。**Day 16 起仅用于 localStorage 与接口收发，云库里已拆为独立的 `turns` 表** | §8.4 转写全文 |
 | `isComplete` | boolean | 是否正常结束（中途退出也存，见 B6） | B6 |
+
+> **Day 16 修订 · 云端建表时 `transcript` 不落库**：v1 在 localStorage 里
+> 轮次仍是内嵌在 `sessions.transcript` 数组（下面的结构不变）；
+> 但 Day 16 在 CloudBase 建表时，用户拍板把轮次**拆成独立的 `turns` 表**，
+> 该字段因此在**云库里不存在** —— 见 `docs/api-contract.md §9.2` 与 §9.4。
+> 写读接口时 `transcript` 仍作为**接口的请求/响应形状**使用（§6.2 / §6.3），
+> 那与存不存库是两件事，别混。
 
 **`transcript` 里每一项的结构**（数组，按轮次顺序）：
 
@@ -446,7 +465,19 @@ PRD §6.6 定义了 F6。它的配置**也放在 `topics.json` 里，作为一�
 
 ### 5.4 表三：`turns`　轮次
 
-> **实现说明**：为减少读写次数、避免数据不一致，v1 **把轮次作为 `sessions.transcript` 数组内嵌**，不单独立表。下表是它的字段定义（逻辑上仍是独立实体）。
+> **实现说明（Day 16 已修订）**：本节原写「v1 把轮次作为 `sessions.transcript` 数组内嵌，
+> **不单独立表**」——**localStorage 侧仍然如此**（省一次读写、省一层结构）。
+> 但 **Day 16 在 CloudBase 建表时，用户拍板拆成独立的 `turns` 表**，
+> 原句中的「不单独立表」对云库已作废。
+>
+> **拆出来的三个收益**（不是为了拆而拆）：
+> 1. 轮次能被单独查、单独排序，不必把整个数组取出来在应用层过滤
+> 2. 主键用复合键 `(sessionId, turn)`，顺带把「同一场里不能有两个第 3 轮」
+>    钉进数据库 —— 内嵌数组做不到这件事
+> 3. `turns.userText` 成为**唯一可信的原句来源**，`items.originalText`
+>    只能从它取（B8 的技术保障落到了表结构上）
+>
+> 字段定义见 `docs/api-contract.md §9.4`，建表语句见 `db/schema.sql`。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|

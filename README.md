@@ -9,9 +9,9 @@
 
 ---
 
-## 当前状态（Day 14 / 第 2 周）
+## 当前状态（Day 16 / 第 3 周）
 
-**已完成：4 个页面的骨架、全站视觉，以及「星标 / 收藏 / 自由对话」三条能在本地跑通的功能线。**
+**已完成：4 个页面的骨架、全站视觉、「星标 / 收藏 / 自由对话」三条能在本地跑通的功能线，已上线到 CloudBase 云函数，以及三张表的建表与种子脚本（PostgreSQL 方言）。**
 
 | 页面 | 文件 | 现在能做什么 | 还不能做什么 |
 |---|---|---|---|
@@ -20,11 +20,26 @@
 | P3 会话结果页 | `frontend/pages/result.html` | 四个字段都有值（时长来自对话页，错误次数与精彩句子按本次条目真实计数）；问题清单（偏题只提醒 / 逻辑错误给纠正）+「这次说得好的」，每条可收藏；`?topic=FREE` 时不出现偏题只显示逻辑错误 | 条目来自 `data/mock-items.json` 的本地假数据，判断功能未接入 |
 | P4 错误记录页 | `frontend/pages/records.html` | 收藏区（按收藏时间倒序）+ 全部条目列表，条目同样可收藏 | 条目仍是本地假数据，不是真实会话记录 |
 
+### 后端与数据（第 3 周）
+
+| 项 | 状态 |
+|---|---|
+| 静态托管（4 个页面） | ✅ 已上线，`https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/` |
+| `GET /api/health` | ✅ 已上线，公网返回 `{"ok":true,"service":"TalkTrainer"}` |
+| 数据表三张（`sessions` / `turns` / `items`） | 🟡 **脚本已写好，尚未在库里执行**，见下方「数据库怎么建起来的」 |
+| `POST /api/chat`、`POST /api/analyze` | ❌ 尚未实现（Day 17 起） |
+| 前端 `api.js` | ❌ 尚未创建 |
+
+> **建表 ≠ 用户数据上云**：Day 16 只写出了表结构与种子脚本，**还没在数据库里执行**；
+> 而且**接口一个都没写，前端仍读写 localStorage**。
+> 用户数据仍然只在本机浏览器里，`TECH_DESIGN §3.3` 的路线乙没有被推翻。
+> 边界声明见 `docs/api-contract.md` §9.1。
+
 **下一步要做的事**（按顺序）：
-1. 接入真实录音与转写 → 对话页能说一句、屏幕上出文字（新建 `frontend/js/speech.js`）
-2. 接入后端与大模型 → 能真的来回对话（8 个主题的英语追问句已备好）
-3. 接入真实会话存储 → 昵称、会话记录、问题条目能留下来（目前只有练习次数 / 星标 / 收藏三类落盘）
-4. 接入 AI 判断 → 结束对话后真的给出偏题提醒与逻辑纠正
+1. 写读接口`GET /api/sessions` / `GET /api/items` —— 现在有库可查了（Day 17）
+2. 接入真实录音与转写 → 对话页能说一句、屏幕上出文字（新建 `frontend/js/speech.js`）
+3. 接入大模型 → 能真的来回对话（8 个主题的英语追问句已备好）
+4. 写 `POST /api/chat` 与 `POST /api/analyze`，把 AI 判断接上
 
 ---
 
@@ -119,6 +134,130 @@ python serve.py 8010 --lan
 
 ---
 
+## 数据库怎么建起来的（Day 16）
+
+三张表建在 **CloudBase 的 PostgreSQL 数据库**里，建表脚本与种子数据都在 `db/` 目录：
+
+| 文件 | 作用 | 可重复执行 |
+|---|---|---|
+| `db/schema.sql` | 建表（`sessions` / `turns` / `items`）+ 外键 + 5 条 CHECK 约束 + 31 条字段注释 | ✅ 开头 `DROP TABLE IF EXISTS` |
+| `db/seed.sql` | 灌 5 场会话 / 17 轮 / 7 条条目 + 7 条验证 SELECT | ✅ 用 `TRUNCATE` 而非 `ON CONFLICT` |
+| `db/steps/` | 上面两个文件**按语句边界切开的分批版**，共 11 个文件 | ✅ 内容与原文件逐条一致 |
+
+表结构与字段口径见 `docs/api-contract.md` §9。
+
+> ### ⚠️ 本项目的环境是 PostgreSQL，不是 MySQL
+>
+> CloudBase 从 2026 年 8 月起正式支持 PostgreSQL，它是**独立的环境类型**——
+> 本项目环境（`cxj1528-d4g55ng0o54cbe296`）的「SQL 数据库」入口进去就是
+> **PostgreSQL 管理**，控制台里没有独立的 MySQL 入口。
+>
+> Day 16 上午先按 MySQL 写了一版脚本，跑不进这个引擎，已整体翻译成 PG 方言。
+> 翻译对照表写在 `db/schema.sql` 文末附录，一共改了 11 类语法。
+> **如果以后看到 `db/` 里的脚本，别拿 MySQL 的经验去判断对错。**
+
+### 第一步：进SQL 编辑器
+
+数据库已经开通好了（Day 16 之前就已存在），直接进：
+
+```
+https://tcb.cloud.tencent.com/dev?envId=cxj1528-d4g55ng0o54cbe296#/db/postgres/data-editor
+```
+
+或者从控制台左侧点「**SQL 数据库**」进去 —— 进去后确认页面上写的是
+「**PostgreSQL** 管理」、左上角schema 选的是 `public`，这两个都对再往下走。
+
+### 第二步：执行建表脚本（6 批，按顺序）
+
+`db/steps/` 下这 6 个文件，**按 1→6 顺序**逐个打开、全选（Ctrl+A）、复制、粘进 SQL 编辑器、执行：
+
+| 顺序 | 文件 | 做什么 | 执行完应该看到 |
+|---|---|---|---|
+| 1 | `schema-1-清理旧表.sql` | 删掉旧的三张表 | 不报错即可 |
+| 2 | `schema-2-建sessions.sql` | 建 `sessions` + 它的索引 | Query OK |
+| 3 | `schema-3-建turns.sql` | 建 `turns`（外键 → `sessions`） | Query OK |
+| 4 | `schema-4-建items.sql` | 建 `items`（外键 + 4 条 CHECK）+ 4 个索引 | Query OK |
+| 5 | `schema-5-字段注释.sql` | 31 条 `COMMENT ON`（3 张表 + 28 列） | Query OK |
+| 6 | `schema-6-建表自检.sql` | 两条查询：查表清单、查外键 | **3 行** / **2 行** |
+
+第 6 批的期望值：
+
+| 查询 | 期望 | 应看到的内容 |
+|---|---|---|
+| 查表清单 | **3 行** | `items` / `sessions` / `turns` |
+| 查外键 | **2 行** | `fk_items_session` / `fk_turns_session` |
+
+> **第 5 批失败不阻断**：字段注释只是给人看的说明文字，插不进去也不影响表能不能用。
+> 真报错了可以跳过这批，继续跑第 6 批验证表结构。
+>
+> **如果报语法错**，99% 是复制时漏了东西——中文注释较多，整块复制比手动敲稳得多。
+> 若报「表已存在」，说明第 1 批没执行成功，回到第 1 批重跑。
+
+### 第三步：执行种子脚本（5 批，按顺序）
+
+同样打开 `db/steps/` 下这 5 个文件，按 1→5 顺序执行：
+
+| 顺序 | 文件 | 做什么 | 执行完应该看到 |
+|---|---|---|---|
+| 1 | `seed-1-清空旧数据.sql` | `TRUNCATE sessions CASCADE`（连带清空子表） | 不报错即可 |
+| 2 | `seed-2-灌sessions.sql` | 插入 5 场会话 | Query OK |
+| 3 | `seed-3-灌turns.sql` | 插入 17 轮对话 | Query OK |
+| 4 | `seed-4-灌items.sql` | 插入 7 条条目，**末尾带 4.1 行数核对** | Query OK + 行数 **5 / 17 / 7** |
+| 5 | `seed-5-验证.sql` | 6 条验证 SELECT（4.2 – 4.7） | 见下表 |
+
+> **4.1 为什么不在第 5 批**：切分是按语句边界切的，`4.1` 紧跟在 `INSERT items` 后面，
+> 所以被分到了第 4 批。**灌完条目当场就能看行数**，这反而更顺手。
+
+第 5 批的验证 SELECT，逐条对照：
+
+| 验证 | 期望 | 验的是哪条 PRD 口径 |
+|---|---|---|
+| 4.2 关联 | 5 行，每行的轮数/条目数对得上 | 两张表靠 `session_id` 关联 |
+| 4.3 B22 | 每行都 `OK` | 错误次数 = 偏题 + 逻辑错误 |
+| 4.4 B7 | 每条都 `OK` | 偏题无改法、逻辑错误有改法 |
+| 4.5 F6 | **0 行** ← 空结果是对的 | 自由对话不判偏题 |
+| 4.6 B6 | **1 行**，`ended_at` 为空 | 中途退出也存数据 |
+| 4.7 收藏 | **3 行** | 收藏区排序 |
+
+**验证 4.5 返回 0 行是对的**（不是漏了数据）。想看 FREE 那场的条目，单独查：
+
+```sql
+SELECT item_id, type, turn, original_text FROM items WHERE topic_id = 'FREE';
+```
+
+### 第三步之二：确认脚本真的可重复执行
+
+**把 `seed-1` → `seed-4` 再执行一遍**（第 5 批验证不用重跑），应该不报错、行数还是 5 / 17 / 7。
+
+这一条是清单的完成标准，值得当场验。如果第二遍报 `Duplicate entry`，说明 TRUNCATE 没生效——检查是不是只复制了 INSERT 段、没复制第 1 批的 TRUNCATE。
+
+### 第四步：截图
+
+清单要交的是**数据库表数据页**，图里要有表名、每张核心表至少 5 行数据。
+
+进「SQL 数据库」→左侧「表」→ 点 `sessions` → 数据页，把表名和行数截进图里。
+
+> **截图是手动做的**：无头浏览器截不到控制台内部页面（DMC 是带侧栏的应用界面），
+> 这几张图必须你自己截。我这边给不了。
+
+### 数据库的几个已知特点
+
+| 特点 | 影响 |
+|---|---|
+| **PostgreSQL，不是 MySQL** | 语法完全不同；本节所有脚本都是 PG 方言 |
+| **列名一律snake_case** | PG 会把不带引号的标识符转小写，`sessionId` 会被存成 `sessionid`。所以库里用 `session_id`，接口层仍用 `sessionId`，Day 17 在云函数里用 `AS` 映射 |
+| **`INT UNSIGNED` 不存在** | 改用 `INTEGER` + `CHECK >= 0`，负数防护由约束接手 |
+| **`TINYINT(1)` 不存在** | 三个布尔字段（`is_complete` / `asked_follow_up` / `is_favorited`）用 `BOOLEAN`，值是 `TRUE` / `FALSE` |
+| **`DATETIME` 不存在** | 用 `TIMESTAMP`（不带时区），因为本项目单时区、`started_at` 一律按 UTC+8 存 |
+| **列内不能写 `COMMENT`** | 31 条字段注释用 `COMMENT ON COLUMN` 单独补，写在 `schema.sql` 末尾 |
+| **索引不能内联** | MySQL 的 `KEY idx (…)` 要拆成独立的 `CREATE INDEX` |
+| **没有 `FOREIGN_KEY_CHECKS` 变量** | 清表用 `TRUNCATE … CASCADE` 连带清掉子表，不用手动开关 |
+| **按需启停，空闲会挂起** | 第一次访问会有冷启动延迟；将来 Day 17 的读接口第一次响应会慢一点 |
+| **默认时区不是 UTC+8** | `sessions.started_at` 一律按 UTC+8 存，**本项目单时区不做换算** |
+
+---
+
+
 ## 目录结构
 
 ```
@@ -128,6 +267,29 @@ VibeCoding/
 ├── TECH_DESIGN.md
 ├── AGENTS.md
 ├── README.md                       ← 本文件
+│
+├── db/                            ← Day 16 新建：数据库脚本（PostgreSQL 方言）
+│   ├── schema.sql                 ← 建表（3 张表 + 外键 + 5 条 CHECK + 31 条字段注释）
+│   ├── seed.sql                   ← 种子数据（5/17/7）+ 7 条验证 SELECT
+│   └── steps/                     ← 按语句边界切的 11 个分批版（编辑器单次限 10000 字符）
+│       ├── schema-1-清理旧表.sql   ┐
+│       ├── schema-2-建sessions.sql  │
+│       ├── schema-3-建turns.sql     │ 建表 6 批
+│       ├── schema-4-建items.sql     │ 按 1→6 顺序执行
+│       ├── schema-5-字段注释.sql    │
+│       ├── schema-6-建表自检.sql   ┘
+│       ├── seed-1-清空旧数据.sql    ┐
+│       ├── seed-2-灌sessions.sql   │ 种子 5 批
+│       ├── seed-3-灌turns.sql      │ 按 1→5 顺序执行
+│       ├── seed-4-灌items.sql      │
+│       └── seed-5-验证.sql        ┘
+│
+├── docs/                          ← Day 15 新建：接口契约
+│   └── api-contract.md            ← 第 3 周写接口的唯一依据（§9 是数据模型）
+│
+├── cloudfunctions/                 ← Day 15 新建：CloudBase 云函数
+│   └── health/                    ← GET /api/health（唯一已实现的接口）
+├── cloudbaserc.json               ← Day 15 新建：部署声明（函数 / 静态托管 / 网关路由）
 │
 └── frontend/                       ← 前端（纯静态，可单独部署）
     ├── serve.py                    ← 开发用本地服务（发 no-store，见上文）
@@ -153,14 +315,25 @@ VibeCoding/
 ```
 
 > P2 / P3 / P4 的渲染逻辑目前**内联在各自的 HTML 里**，还没拆成 `js/pages/` 下的独立文件——拆不拆以 `TECH_DESIGN.md` §4.1 为准。
+>
+> `frontend/` 下另有四个开发自查工具（`regress.js` / `a11y-check.js` / `flt-verify.js` / `serve.py`），**不部署到公网**，详见 `TECH_DESIGN.md` §4.1。
 
-**还没创建**（见 `TECH_DESIGN.md` §4.1）：`frontend/js/speech.js`（真实录音与转写）、`frontend/js/api.js`（对后端的唯一出口）、`frontend/js/pages/` 下 P2–P4 的逻辑文件、整个 `backend/` 目录、`docs/` 目录。
+**还没创建**（见 `TECH_DESIGN.md` §4.1）：`frontend/js/speech.js`（真实录音与转写）、`frontend/js/api.js`（对后端的唯一出口）、`frontend/js/pages/` 下 P2–P4 的逻辑文件、`backend/` 目录（已被 `cloudfunctions/` 取代，见 `TECH_DESIGN.md` §4.1 Day 15 修订④）。
 
 ---
 
 ## 一条安全约定
 
-后端一旦开始写（`backend/`），**API 密钥只能放在 `backend/.env` 里**，且 `.env` 必须进 `.gitignore`、永远不提交。前端任何文件、聊天记录里都不能出现密钥。
+后端一旦开始写，**API 密钥只能放在密钥管理或环境变量里**，且绝不能进Git 仓库。
+前端任何文件、聊天记录里都不能出现密钥。
+
+> **Day 15 实际情况**：密钥已配在 CloudBase 的**云函数环境变量**里，
+> 不落地成文件，所以 `.gitignore` 里目前没有 `.env` 也不影响安全。
+> `TECH_DESIGN.md` §4.2 规矩 3 原写「密钥只在 `backend/.env` 出现」——
+> 后端形态改成云函数后这条要跟着改，Day 17 写第一个真接口时一并处理。
+>
+> **数据库账号密码是另一回事**：它存在 CloudBase 控制台的「账号管理」里，
+> **不要写进代码、不要贴进聊天**。本README 只告诉你去哪个页面创建，不记录任何具体密码。
 
 ---
 
