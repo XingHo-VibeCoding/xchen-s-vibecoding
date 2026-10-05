@@ -81,6 +81,36 @@ const PROBE = `(() => {
   return { overflow: overflow, small: small, w: window.innerWidth };
 })()`;
 
+/* Day 17 新增：记录页专属判据「数据源声明」。
+   ------------------------------------------------------------
+   为什么单独加一条而不并进 PROBE：
+     PROBE 是四页通用的（溢出 / 触控 / 视口宽），records 没有的判据
+     放在这里会让另外三页凭空多出一个恒为空的字段。
+
+   判的是什么：
+     P4 页面上的条目可能来自**后端真实数据**，也可能来自**本地假条目**
+     （读接口当前返回 DB_CONNECTION_REFUSED，见 api-contract §2.1）。
+     无论走哪条路，页面底部的 #rec-mock 都**必须如实说明**用的是哪一种——
+     否则用户会把假条目当成自己真练出来的记录，这是诚实性问题，不是体验问题。
+
+   两条硬要求：
+     ① #rec-mock 存在且有文字（不能空着）
+     ② 走本地假数据时，文字里必须出现「假条目」三个字
+   */
+const PROBE_RECORDS = `(() => {
+  const bar = document.getElementById('rec-mock');
+  if (!bar) return { noBar: true };
+  const text = (bar.textContent || '').trim();
+  return {
+    barText: text,
+    barClass: bar.className || '',
+    saysFake: text.indexOf('假条目') >= 0,
+    itemCount: document.querySelectorAll('#all-list .item').length,
+    childCount: document.getElementById('all-list') ?
+      document.getElementById('all-list').children.length : -1
+  };
+})()`;
+
 (async () => {
   const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
     '--remote-debugging-port=' + PORT,
@@ -105,15 +135,35 @@ const PROBE = `(() => {
     for (const w of WIDTHS) {
       await cmd('Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: w < 700 });
       await cmd('Page.navigate', { url: 'http://localhost:8010/pages/' + pg + '.html' });
-      await sleep(1600);
+      // 记录页要等后端取数（含 25s 超时上限，但本地是无 404 快返），多给 600ms
+      await sleep(pg === 'records' ? 2200 : 1600);
       const r = await cmd('Runtime.evaluate', { expression: PROBE, returnByValue: true });
       const v = r.result && r.result.result && r.result.result.value;
       if (!v) { console.log('  ' + w + 'px → 取不到读数'); fail++; continue; }
       const issues = [];
       if (v.overflow) issues.push('横向溢出 ' + v.overflow);
       if (v.small.length) issues.push('触控<44px ' + v.small.length + ' 处: ' + v.small.slice(0, 3).join(' / '));
+
+      // Day 17：记录页追加「数据源声明」判据（见上方 PROBE_RECORDS 注释）
+      let recNote = '';
+      if (pg === 'records') {
+        const r2 = await cmd('Runtime.evaluate', { expression: PROBE_RECORDS, returnByValue: true });
+        const rv = r2.result && r2.result.result && r2.result.result.value;
+        if (!rv || rv.noBar) issues.push('找不到 #rec-mock 说明条');
+        else if (!rv.barText) issues.push('#rec-mock 是空的，没说明数据来源');
+        else if (rv.saysFake) recNote = ' · 数据源：本地假条目（已如实标注）';
+        else recNote = ' · 数据源：后端真实数据';
+        // 条目数为 0 时把现场读数一起打出来，否则只有一句「一条都没有」没法定位
+        if (rv && rv.itemCount === 0) {
+          issues.push('#all-list 一条都没有（诊断：条数=' + rv.itemCount +
+            '，说明条文字数=' + (rv.barText ? rv.barText.length : -1) +
+            '，说明条前 30 字=' + JSON.stringify((rv.barText || '').slice(0, 30)) +
+            '，#all-list 子节点数=' + rv.childCount + '）');
+        }
+      }
+
       if (issues.length) { console.log('  ' + w + 'px → ✗ ' + issues.join('；')); fail++; }
-      else { console.log('  ' + w + 'px → ✓ 无溢出 / 触控全达标'); pass++; }
+      else { console.log('  ' + w + 'px → ✓ 无溢出 / 触控全达标' + recNote); pass++; }
     }
     console.log('');
   }

@@ -1,0 +1,11 @@
+{
+  "name": "chat",
+  "version": "1.0.0",
+  "description": "POST /api/chat —— AI 对话接口骨架，Day 17 建架构、Day 18 起填实现。刻意不依赖 pg：契约 §9.8 第 1 条规定它不查库",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

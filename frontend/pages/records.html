@@ -84,10 +84,13 @@
   </div>
 
   <!-- 加载顺序（同 topics.html / result.html）：
-       storage → interact → item-card → 页面逻辑 -->
+       storage → interact → item-card → **api** → 页面逻辑
+       api.js 插在 item-card 之后、页面逻辑之前：
+       页面逻辑要调 window.Api，而 Api 只依赖 fetch，不依赖上面三个组件。 -->
   <script src="../js/storage.js"></script>
   <script src="../js/components/interact.js"></script>
   <script src="../js/components/item-card.js"></script>
+  <script src="../js/api.js"></script>
   <script>
     // P4 错误记录页逻辑（Day 11）：
     //   ① 按时间倒序列出历次会话的条目（数据来自 data/mock-items.json 的假条目）
@@ -357,21 +360,64 @@
         // 要看「加载中」这一态就停在这里，不再往下走
         if (FORCED === 'loading') return;
 
-        fetch('../../data/mock-items.json', { cache: 'no-store' })
+        /* ---------- Day 17：数据来源从「只有本地 mock」改成「后端优先」----------
+           原来直接 fetch mock-items.json。现在先取本地 mock 作为**兜底**，
+           再并发去问后端要真实数据：
+             后端成功 → 用真实数据渲染
+             后端失败 → 用本地 mock 渲染，并**在页面上说明为什么是假数据**
+
+           为什么失败也要渲染而不是清空：
+             读接口当前返回 DB_CONNECTION_REFUSED（个人版连不上 PG，
+             见 api-contract §2.1「已知的未通项」）。若失败就清空，
+             记录页会变成一片空白 —— 那比「显示假数据」糟得多：
+             用户分不清是「我没记录」还是「页面坏了」。
+
+           为什么仍要保留 mock：
+             PRD D5 定的路线乙是「数据存在本机」，用户真练出来的记录
+             此刻还在 localStorage 里，不在库里。所以**长期来看，
+             这里的真实数据来源是 Day 18 的写入接口**，读接口只是提前打通链路。
+           ------------------------------------------------------------------ */
+        var localPromise = fetch('../../data/mock-items.json', { cache: 'no-store' })
           .then(function (res) {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.json();
           })
-          .then(function (data) {
-            var rows = flatten(data);
+          .catch(function () { return null; });   // 本地也没有 → 传 null，不阻断
 
-            /* Day 13 补：强制空态。
-               与成功态的区别是**数据先真的取到了**再决定显示空 ——
-               所以 ?state=empty 与「筛选没命中」是两回事：
-                 · ?state=empty    请求成功，但一条记录也没有（数据层为空）
-                 · notFoundBox()   请求成功、有数据，只是筛选词没命中
-               两者都确定「结果为空」，但原因不同，文案也不同。*/
+        /* 收藏走后端（api-contract §2.1的 R5 只读侧）
+           ★ 用OrLocal 版而不是 getFavorites —— 后者失败时会 **reject**，
+             而这里是 Promise.all，一旦有一个 reject 整个 then 都不走，
+             直接掉进 catch 的错误态，页面变成「记录没能加载」。
+             那正是 api.js 头注释约定 ② 要避免的事：接口一挂，页面不该空。
+             OrLocal 把失败转成 { items: [], degraded: true, errorCode }，
+             下游用 degraded 标志决定走真数据还是本地 mock。 */
+        var favPromise = window.Api
+          ? window.Api.getFavoritesOrLocal({ limit: 100 }, [])
+          : Promise.resolve(null);
+
+        /* 全部条目走后端：sessions 与 items 是两张表，
+           先取收藏（已是 items 的形态），再用 sessions 补出「所属主题与时间」。
+           同理用 OrLocal：sessions 拿不到不该连累 items。 */
+        var sessionsPromise = window.Api
+          ? window.Api.getSessionsOrLocal({ limit: 100 }, [])
+          : Promise.resolve(null);
+
+        Promise.all([localPromise, favPromise, sessionsPromise])
+          .then(function (r) {
+            var local = r[0];
+            var remoteFav = r[1];
+            var remoteSessions = r[2];
+
+            /* Day 13 补：强制空态（与成功态的区别是**数据先真的取到了**再决定显示空）。
+               ?state=empty  请求成功但一条记录也没有；
+               notFoundBox() 请求成功、有数据，只是筛选词没命中。*/
             if (FORCED === 'error') throw new Error('演示用：强制错误状态');
+
+            var degraded = !!(remoteFav && remoteFav.degraded);
+            var rows = (degraded || !remoteFav)
+              ? (local ? flatten(local) : [])
+              : rowsFromRemote(remoteFav.items, remoteSessions ? remoteSessions.sessions : []);
+
             if (rows.length === 0 || FORCED === 'empty') {
               CACHE.rows = rows;
               renderEmpty();
@@ -380,13 +426,58 @@
 
             CACHE.rows = rows;
             paint(rows);
-            mockBar.textContent =
-              '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json），' +
-              '不是你真练出来的。收藏状态存在本机浏览器里，刷新后仍在。';
+
+            /* 底部说明条：这一行是**诚实性要求**。
+               页面上的数据来自哪里，必须写清楚 —— 否则用户会把假数据当成真记录。
+               降级时更要说清是「接口暂时读不到」而不是含糊地提一句。 */
+            if (degraded || !remoteFav) {
+              var why = (remoteFav && remoteFav.errorCode)
+                ? remoteFav.errorCode + '：' + (remoteFav.errorMessage || '读不到后端数据')
+                : '后端数据读不到';
+              mockBar.textContent =
+                '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json）。' +
+                '后端暂时读不到真实记录（' + why + '），所以还没切换过去。';
+              mockBar.classList.add('mock-bar-warn');
+            } else {
+              mockBar.textContent =
+                '以上 ' + rows.length + ' 条来自后端数据库。' +
+                '收藏状态仍存在本机浏览器里（写库接口 Day 18 起接入）。';
+              mockBar.classList.remove('mock-bar-warn');
+            }
           })
           .catch(function (err) {
             renderError(err && err.message ? err.message : '');
           });
+      }
+
+      /* ---------- 把后端的两张表拼成本页要的「一行一条目」 ----------
+         页面的渲染逻辑要的是 { item, sessionId, topicName, topicId, at } 一行一条目，
+         而后端给的是 sessions 数组 + items 数组两张表。
+         ★ items 刻意带了 topic_id 冗余（api-contract §9.5），所以**不用 join**
+           sessions 就能知道每条属于哪个主题；只有「主题中文名」要从 sessions 带出来，
+           拿不到就退回显示编号——主题名在 topics.json 里，接口查不到不是缺陷。 */
+      function rowsFromRemote(items, sessions) {
+        var byId = {};
+        (sessions || []).forEach(function (s) { byId[s.sessionId] = s; });
+
+        var rows = (items || []).map(function (it) {
+          var s = byId[it.sessionId];
+          return {
+            item: it,
+            sessionId: it.sessionId,
+            topicId: it.topicId,
+            /* 主题中文名的来源：库里没有 topics 表（TECH_DESIGN §5.2
+               已定主题只在 topics.json 里维护），所以这里拿到的是编号。
+               拿不到名字时退回编号—— 不编造一个名字出来。 */
+            topicName: (s && s.topicId) || it.topicId,
+            at: it.createdAt
+          };
+        });
+
+        rows.sort(function (a, b) {
+          return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0);
+        });
+        return rows;
       }
 
       /* ---------- 空态（Day 13 补：可单独看） ----------
