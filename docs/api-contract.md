@@ -47,8 +47,12 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 | `/api/chat` | `{基址}/api/chat` |
 
 > **为什么基址不写进代码**：`TECH_DESIGN §4.2` 规矩 1 定了「`api.js` 是前端访问后端的唯一出口」——
-> 换环境只改那一个文件，页面代码一个字不动。**今天前端还没有 `api.js`**（`§4.1` 里列了，
-> 尚未创建），Day 16 接第一个接口时一并建。
+> 换环境只改那一个文件，页面代码一个字不动。`frontend/js/api.js` 已于 Day 17 建立。
+>
+> **⚠️ `api.js` 里的 `BASE` 按 hostname 判断（Day 18 实测）**：
+> 本地（`localhost`/`127.0.0.1`）→ 云端域名绝对地址；其他 → 留空 = 当前域名走同域免跨域。
+> **本地不能用空串**：本地静态服务只 serve 文件、不转发也不代理，「同域」在本地根本不成立，
+> 空串会让请求打到本地服务得到 **501**（`serve.py` 打的），症状与「跨域被拦」极像。
 >
 > **为什么接口路径都以 `/api` 开头**：与静态托管的 `/` 共用同一个域名，靠路径前缀区分
 > （`cloudbaserc.json` 的 `gateway.routes` 里`/api` 排在 `/` **之前**，顺序反了接口会被静态托管抢走）。
@@ -334,46 +338,73 @@ bash verify.sh
 
 <a id="s3"></a>
 
-## 三、待实现（占位）：`POST /api/chat` 🟡
+## 三、已实现：`POST /api/chat` 🟢
 
 **用途**：用户说了一句 → AI 回一句（F1）。**与判断逻辑是两条独立的路**（`§6.1`，这是 B9 的技术落地）。
+
+> Day 18（10-05）上线。云函数 `cloudfunctions/chat`，密钥只从环境变量读、**不查库**。
+> 实测：8 主题开场白 / 接话 / 沉默催促 / `FREE` 自由对话 / 跑题后拉回，五种场景全部达标、零降级。
 
 ### 请求
 
 ```json
 {
   "topicId": "T1",
+  "kind": "reply",
   "history": [
     { "turn": 1, "userText": "We are a bit behind on the API.", "aiText": "Okay. Which part exactly?" }
   ],
   "userText": "The backend part. I think we can finish it.",
-  "silenceSeconds": 0
+  "silenceSeconds": 0,
+  "role": "Alex from the backend team",
+  "anchor": "the API is behind schedule",
+  "followUps": ["Which part exactly?", "Finish it by when?"]
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `topicId` | string | 是 | `"T1"`–`"T8"` 或 `"FREE"`。用于取 `opening` / `followUps` / `anchor` |
-| `history` | object[] | 是 | 已有轮次，**只传文本不传音频** |
-| `userText` | string | 是 | 本轮用户说的话（转写结果） |
+| `topicId` | string | 是 | `"T1"`–`"T8"` 或 `"FREE"`。用于取追问边界 |
+| `kind` | string | 否 | 本轮性质：`"open"`（AI 先开口）/ `"reply"`（回应用户）/ `"silence"`（沉默催促）。**默认 `"reply"`** |
+| `history` | object[] | 否 | 已有轮次，**只传文本不传音频**。实现只取**最近 6 轮** |
+| `userText` | string | **条件必填** | 本轮用户说的话。**`kind="open"` 或 `silenceSeconds>0` 时可空**（见下方说明） |
 | `silenceSeconds` | number | 否 | 沉默秒数。**8 主题阈值 8 秒，`FREE` 阈值 5 秒**（`§6.2`） |
+| `role` | string | 否 | AI 的身份/人设，取自 `topics.json` 的 `role`。`FREE` 无此字段 |
+| `anchor` | string | 否 | 主题锚点，**追问不许跑出这个范围**。`FREE` 无此字段 |
+| `followUps` | string[] | 否 | 预设追问句，**8 主题给中文追问意图**（`topics.json` 的 `followUps`）。`FREE` 无此字段 |
+
+> **★ Day 18 修正的一处契约错配（原先本节把 `userText` 标成「必填」）**：
+> 8 主题一进对话就该由 AI 先说 `opening`，`FREE` 沉默 5 秒后 AI 也先开口——
+> **这两种场景用户根本还没说话，`userText` 天然是空的**。按原契约会一进页面就报
+> `400 INVALID_PARAMS`。现在改成条件必填：仅「回应用户发言」的场景才校验非空。
+>
+> **约束数据（`role`/`anchor`/`followUps`）为什么由前端传**：云函数读不到
+> `frontend/data/topics.json`（静态托管目录里的文件，云函数访问不到）。
+> 缺这三个字段接口照样能跑，但追问会跑出主题外。
 
 ### 响应（成功）
 
 ```json
 {
   "ok": true,
-  "aiText": "Finish it by when?",
-  "kind": "follow_up",
-  "followUpType": "vague"
+  "data": {
+    "aiText": "Finish it by when?",
+    "kind": "follow_up",
+    "followUpType": "vague",
+    "model": "deepseek-chat"
+  }
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `aiText` | string | AI 要说的那句话（前端同时出文字 + 朗读，B2） |
-| `kind` | string | `"normal"` / `"follow_up"` / `"nudge"`（催促） |
+| `aiText` | string | AI 要说的那句话（前端同时出文字 + 朗读，B2）。**超 400 字会被截断** |
+| `kind` | string | `"normal"` / `"follow_up"` / `"nudge"`（催促）。**服务端校验过**，模型返回契约外的值会被兜底 |
 | `followUpType` | string | `kind="follow_up"` 时才有：`"too_short"` / `"vague"` / `"incomplete"` |
+| `model` | string | 实际用的模型名，排错用 |
+
+> **为什么 `kind` 要服务端兜底**：模型偶尔会返回契约没列出的值（比如把 `kind` 说成
+> `question`），前端 `switch` 会走进 `else` 显示奇怪内容。服务端白名单校验后统一纠正。
 
 ### 三条硬约束（不可放宽）
 
@@ -388,16 +419,36 @@ bash verify.sh
 |---|---|---|
 | 追问方向约束 | 受 `anchor` 约束 | **无** |
 | 提示词取向 | "不迁就"三条硬规则 | 不评价、不下结论、不灌鸡汤 |
-| 沉默时| 后端生成催促 | **前端直接取 `topics.json` 的 `openerPool` 下一句上屏**，不走本接口 |
+| 沉默时 | 后端生成催促 | **后端生成催促**（阈值 5 秒） |
 
-> Day 14现状：`FREE` **不调本接口**，接话全部来自 `topics.json` 的本地文案池。
-> 接上后「界面与流程一个字不用改」，前端只把文案池换成本接口。
+> Day 14 现状：`FREE` 完全不调本接口，接话全部来自 `topics.json` 的本地文案池。
+> Day 18 已接通：`FREE` 的**沉默催促也走本接口由模型生成**，不再取 `openerPool`。
+> 「界面与流程一个字不用改」，前端只是把文案池换成本接口。
 
 ### 响应（失败）
 
 ```json
 { "ok": false, "errorCode": "LLM_TIMEOUT", "message": "AI 没有及时回应" }
 ```
+
+### 云函数环境变量（Day 18）
+
+| 变量 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `LLM_API_KEY` | **是** | — | 模型厂商密钥。**没配直接返回 `LLM_NOT_CONFIGURED`** |
+| `LLM_BASE_URL` | 否 | `https://api.deepseek.com` | 换厂商只改这个 |
+| `LLM_MODEL` | 否 | `deepseek-chat` | 模型名 |
+| `LLM_TIMEOUT_MS` | 否 | `55000` | 等模型的上限 |
+
+> **⚠️ 密钥只能在控制台手配，不能用 CLI 推。** 实测 `tcb fn env` **只有 `pull` 没有 `push`**。
+>
+> **⚠️ `tcb fn deploy` 会清空控制台配好的环境变量。** 它会 apply `cloudbaserc.json` 里的
+> `functions[].envVariables` 配置，而 `chat` 函数**没有这个字段** → 部署等于删除线上密钥。
+> **控制台配好变量后，只更新代码的命令是**：
+>
+> ```bash
+> tcb fn code update chat --dir cloudfunctions/chat
+> ```
 
 ---
 
