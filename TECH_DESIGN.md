@@ -843,16 +843,28 @@ flowchart TD
 
 只有后端需要环境变量。**`.env` 绝不提交，`.env.example` 要提交。**
 
-| 变量名 | 必填 | 说明 | 示例（**假值**） | 在哪用 |
+> **Day 17 修订（「在哪用」一列全部改了）**
+>
+> 原表写的`backend/services/llm.js`、`backend/routes/*.js` 指的是 Day 7–14 设想的
+> 「自建 Node 轻后端」。Day 15 已定稿 CloudBase（[§10.1](#t10)），
+> `backend/` 目录被 `cloudfunctions/` 取代——**环境变量配在云函数里，不在 `.env` 文件里**。
+> 所以「在哪用」这一列现在指**哪个云函数会读它**。
+>
+> **★ 为什么 LLM_* 只能属于 `chat` 函数，不能和 `read` 共用**（Day 17 定的三条之一）：
+> 超时预算不同（读库毫秒级 / 等模型秒级）、密钥要隔离（改读接口不该重新部署带密钥的函数）、
+> 连接池不互相拖累（读库故障不能拖垮 AI 响应）。详见 `cloudfunctions/chat/index.js` 文件头。
+
+| 变量名 | 必填 | 说明 | 示例（**假值**） | 在哪用（Day 17 修订） |
 |---|---|---|---|---|
-| `LLM_API_KEY` | ✅ 是 | 大模型接口的密钥。**整个项目唯一需要保密的东西** | `sk-xxxxxxxxxxxxxxxx` | `backend/services/llm.js` |
+| `LLM_API_KEY` | ✅ 是 | 大模型接口的密钥。**整个项目唯一需要保密的东西** | `sk-xxxxxxxxxxxxxxxx` | `cloudfunctions/chat/`（**只有它读**） |
 | `LLM_BASE_URL` | ✅ 是 | 模型接口地址（换供应商时只改这里） | `https://api.example.com/v1` | 同上 |
 | `LLM_MODEL` | ✅ 是 | 用哪个模型（对话与判断可以分别指定） | `gpt-4o-mini` | 同上 |
-| `LLM_MODEL_ANALYZE` | 否 | 判断用模型，不填则同 `LLM_MODEL` | `gpt-4o` | `backend/routes/analyze.js` |
-| `PORT` | 否 | 后端监听端口，默认 `3000` | `3000` | `backend/server.js` |
-| `SILENCE_SECONDS` | 否 | 沉默多久触发催促，默认 `8`（PRD §6.1 暂定值，Q2 待实测定稿） | `8` | `backend/routes/chat.js` |
-| `FREE_SILENCE_SECONDS` | 否 | **自由对话（F6）**沉默多久由 AI 先开口，默认 `5`（PRD §6.6，用户拍板） | `5` | 接入后由 `backend/routes/chat.js` 使用；**本期前端用同名常量**（值 `5`），不读环境变量 |
-| `MAX_RETRY` | 否 | 接口失败重试次数，默认 `1`（**不要调大**，避免重复扣费，R2） | `1` | `backend/services/llm.js` |
+| `LLM_MODEL_ANALYZE` | 否 | 判断用模型，不填则同 `LLM_MODEL` | `gpt-4o` | `cloudfunctions/analyze/`（Day 18–19 建，**刻意与 chat 分开**：判断是批量调用，超时更长、失败要重试） |
+| ~~`PORT`~~ | — | ~~后端监听端口~~ **已作废**：HTTP 云函数的端口写死 `0.0.0.0:9000`，平台只认这个 | ~~`3000`~~ | — |
+| `SILENCE_SECONDS` | 否 | 沉默多久触发催促，默认 `8`（PRD §6.1 暂定值，Q2 待实测定稿） | `8` | `cloudfunctions/chat/` |
+| `FREE_SILENCE_SECONDS` | 否 | **自由对话（F6）**沉默多久由 AI 先开口，默认 `5`（PRD §6.6，用户拍板） | `5` | `cloudfunctions/chat/`；**本期前端用同名常量**（值 `5`），不读环境变量 |
+| `MAX_RETRY` | 否 | 接口失败重试次数，默认 `1`（**不要调大**，避免重复扣费，R2） | `1` | `cloudfunctions/chat/` |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | ❌ **当前不需要** | 数据库直连信息。**2026-10-05 实测：本环境包版本是「体验版」，云函数走 TCP 直连 PG 被拒**（`DB_CONNECTION_REFUSED`，非认证问题），所以这几个变量现在**配了也没用**。等升级标准版开内网才需要 | — | `cloudfunctions/read/` |
 
 ### 9.2 密钥安全的三条硬规矩
 

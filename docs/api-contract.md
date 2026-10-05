@@ -6,9 +6,13 @@
 > `DAY15` 只上线了 `GET /api/health` 一个接口（见 [§2](#s2)），其余全部是**占位**。
 > Day 16–20 写代码时回来对照本文件，**不要即兴发明字段**。
 >
-> **Day 16 更新**：建表与种子脚本已写好（**PostgreSQL 方言**，尚未在真实库里执行），表结构登记在 [§9](#s9)（三张表：
+> **Day 16 更新**：建表与种子脚本已写好（**PostgreSQL 方言**），表结构登记在 [§9](#s9)（三张表：
 > `sessions` / `turns` / `items`）。§6.2 与 §8 里「不建表」的说法已按实际修订。
-> 接口仍然一个都没写。
+> **Day 17 上午复核：脚本已在真实库里执行，三张表5/17/7 行俱在。**
+>
+> **Day 17 更新**：第一个读接口已实现并部署 —— `GET /api/sessions` 与 `GET /api/favorites`（见 [§2.1](#s21)）。
+> **清单原写的 `/api/hot`（今日热搜）不适用**，已与用户拍板换成契约 §6.1 登记的 R1 与 R5 只读侧，理由见 §2.1 开头。
+> 云函数**当前还读不到数据**（本环境是**体验版**，云函数无内网访问权限，见 §2.1 末尾「已知的未通项」）。
 >
 > **写代码时本文档若与`TECH_DESIGN.md` 冲突，以 `TECH_DESIGN.md` 为准**，
 > 并回头改本文档——契约是从文档派生出来的，不是反过来。
@@ -21,8 +25,8 @@
 | 建立 | Day 15（第 3 周，板块 ④） |
 | 上游依据 | `TECH_DESIGN.md` §5（数据对象）/ §6（API 列表）/ §8（错误处理） |
 | 公网基址 | `https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com` |
-| 状态 | 🔴 1 个已实现（health）· 🟡 3 个占位待实现（chat / analyze / speech-to-text）· ⚪ 4 个预留（不启用）· 🟡 **数据表脚本已写、未执行（Day 16，见 §9）** |
-| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」） |
+| 状态 | 🟢 2 个已实现（health / **sessions·favorites**）· 🟡 3 个占位待实现（chat / analyze / speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7） |
+| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1） |
 
 ---
 
@@ -154,6 +158,150 @@ curl https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
    `/health`（**前缀没了**）。所以函数同时认 `/health`、`/api/health`、`/`。
 2. **端口固定 `0.0.0.0:9000`**：CloudBase HTTP 云函数只认 9000，且必须绑 `0.0.0.0`
    ——写 `127.0.0.1` 会本地能测、线上全挂。
+
+---
+
+<a id="s21"></a>
+
+## 二之一、已实现（Day 17）：`GET /api/sessions` 与 `GET /api/favorites` 🟡
+
+> **状态说明**：代码已实现、已部署、已通过离线自测，**但接口当前返回 `DB_CONNECTION_REFUSED`——
+> 读不到数据**。这是环境限制（本环境是体验版，云函数无内网访问权限），不是接口没写完。
+> 等升级标准版开通内网后即可通，**不需要改代码**。
+
+### 为什么不是清单上写的 `/api/hot`
+
+Day 17 清单给的示例接口是「`/api/hot`（今日热搜）」与「`/api/favorites`」，来自官方
+「打卡 / 热搜」类项目模板。**本项目不是那一类**，三条理由：
+
+1. **没有这个需求**：三张表是 `sessions` / `turns` / `items`，PRD 里没有任何要展示热搜的场景
+2. **要造第四张表**：接外部热搜必须新建表，撞清单「今日不做：改表结构」
+3. **§6.2 早已写明**：Day 15 定的口径是「本项目不是打卡应用」，线上数据只有会话、条目、收藏标记
+
+清单自己末尾的 guidance 也印证了这个判断：「对大多数同学：你的真实数据不是外部接口，
+而是你自己数据库里的用户数据」。按「三个问题」对本项目的真实答案：
+`sessions` / `items` 是**用户产出的**数据 + **要回看历史** → 必须存库（Day 16 已建）
+→ 今天只是**从库里读出真实数据**，不接任何外部 API。
+
+**已拍板（Day 17 用户采纳）**：
+
+| 原清单 | 改为 | 对应本文件 |
+|---|---|---|
+| `GET /api/hot`（热搜） | **`GET /api/sessions`** | §6.1 **R1**（核心表 `sessions` 列表） |
+| `GET /api/favorites` | **`GET /api/favorites`**（保留） | §6.1 **R5** 只读侧（`items` 里 `is_favorited = TRUE`） |
+
+> 「一个函数两条路径」是刻意的：`read` 同时服务两个读接口，
+> 因为**它们共用同一份连接池与同一套出口映射规则**（§9.8 第4、5 条）。
+> 但**它与 `/api/chat` 刻意分开**成两个云函数——理由见 §3 开头的 Day 17 补充。
+
+### 请求
+
+```
+GET /api/sessions?topicId=T1&limit=20
+GET /api/favorites?topicId=T1&limit=20
+```
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `topicId` | 否 | 白名单`T1`–`T8` / `FREE`；不传 = 全部主题。**非白名单值返回 400** |
+| `limit` | 否 | 1–100 的整数，默认 `20`。**非数字或越界返回 400** |
+
+### 响应（成功）
+
+```json
+{
+  "ok": true,
+  "data": {
+    "sessions": [
+      {
+        "sessionId": "S-MOCK-01",
+        "topicId": "T1",
+        "nickname": "小陈",
+        "startedAt": "2026-09-28T20:11:16+08:00",
+        "endedAt": "2026-09-28T20:14:20+08:00",
+        "durationSeconds": 184,
+        "errorCount": 2,
+        "goodSentenceCount": 1,
+        "turnCount": 4,
+        "isComplete": true,
+        "aborted": false
+      }
+    ],
+    "count": 1
+  },
+  "error": null
+}
+```
+
+`favorites` 的 `data` 形状是 `{"items": [...], "count": N}`，条目字段与 §6.1 的示例一致
+（`itemId` / `sessionId` / `topicId` / `type` / `turn` / `originalText` / `reminder` /
+`correction` / `isFavorited` / `note` / `favoritedAt` / `createdAt`）。
+
+#### 三个实施决定（都不是 §6.1 写着的，是 Day 17 定的）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | `data` 里用 `sessions` / `items` 作键，**不直接返回数组** | 留出扩展位（将来加 `nextCursor` 不算破坏契约）。这**偏离了 §6.1 的示例**，是Day 17 有意为之 |
+| 2 | 额外返回 `aborted`（`endedAt === null`） | B6「中途退出也是有效数据」在接口层的显式标记，前端不必自己推断。**`endedAt` 本身仍返回 `null`，不会被转成空串** |
+| 3 | `nickname` 为空串时返回 `null` | 库里存 `''`，接口层转`null`，**「你没填昵称」与「你填了空昵称」在接口层分不开**——这是已知的信息损失，前端两种情况都显示「你」 |
+
+###响应（失败）
+
+| 情况 | HTTP | `error.code` |
+|---|---|---|
+| `limit` 非数字 / 越界 | 400 | `INVALID_PARAMS` |
+| `topicId` 不在白名单 | 400 | `INVALID_PARAMS` |
+| 方法不是 GET | 405 | `METHOD_NOT_ALLOWED` |
+| 路径不认识 | 404 | `NOT_FOUND`（带 `gotPath`） |
+| **连不上数据库** | 200 | `DB_CONNECTION_REFUSED` |
+| 认证失败 / 表不存在等 | 200 | `DB_AUTH_FAILED` / `DB_TABLE_MISSING` / … |
+
+> **★ 错误分类是新加的排错设计（Day 17）**
+> 原先所有库错误一律返回 `INTERNAL_ERROR`，只能靠翻云端日志判断根因。
+> 但实测 **`tcb fn log` 对 HTTP 函数查不到调用日志**（返回 `No invocation logs`），
+> 等于没有排错入口。所以把根因分类**直接写进 `error.code`**：
+> `DB_CONNECTION_REFUSED` / `DB_AUTH_FAILED` / `DB_HOST_UNREACHABLE` /
+> `DB_TIMEOUT` / `DB_TABLE_MISSING` / `DB_QUERY_FAILED`。
+> **不依赖日志就能定位问题**——今天正是靠它一眼确认了「是网络不通，不是密码错」。
+>
+> 错误详情（连接串、表名）**只进日志不进响应体**，不泄露给公网。
+
+### 已知的未通项（诚实记录）
+
+| 项 | 状态 |
+|---|---|
+| 接口能否通到公网 | ✅ 通。返回 200（不是 404） |
+| SQL 是否正确 | ✅ 已用真实库验证过：`tcb db execute` 跑同样的 SELECT，返回 5 行 / 3 行 |
+| 出口 JSON 形状是否正确 | ✅ `db/selftest-read.js` 用真实行跑，**9 项断言全通过** |
+| **能否读到数据** | ❌ **`DB_CONNECTION_REFUSED`**。**准确原因（Day 17 实测）**：本环境包版本是**体验版**（`tcb env list` 显示创建于 2026-10-03），云函数没有内网访问权限，走 TCP 直连 PG 被拒（社区 issue #1237 同因）。**不是认证问题，配密码也没用** |
+| 跨域白名单 | ❌ 未配（前端要跨域调才需要；同域名静态托管不需要） |
+| 前端 `api.js` | ✅ 已建（`frontend/js/api.js`）。页面**已接后端**，失败自动回落本地 mock 并在页面标注 |
+
+**补救路径（Day 17 已实测评估，按用户拍板暂不做）**：
+走 CloudBase HTTP API（`https://<envId>.api.tcloudbasegateway.com` + Bearer token，PostgREST）。
+
+> **Day 17 补测（原来这里只是推理，现在实测过）**：该网关**是可达的**——
+> 打 `/health` 返回 `HTTP 401 MISSING_CREDENTIALS`（而不是超时或 404），
+> 说明服务本身活着，只差 Bearer token。**所以这条路技术上通，不是死路。**
+
+**仍然不选它的理由（不变）**：它只支持简单查询，将来 Day 18+ 要写库（`POST /api/sessions`）时那套很别扭，
+**最终还是要回 `pg`**——先卡着、等升级标准版一次性解决，比现在做一层马上要拆的适配更省事。
+
+**解开卡点的最短路径**：升级环境包版本到标准版（`tcb env modify`）→云函数拿到内网访问权限
+→ 配 `PG*` 五个环境变量 → 跑 `verify.sh`。**零代码改动。**
+
+### 怎么验证（可复现）
+
+```bash
+# 1. 接口通不通（现在会返回 DB_CONNECTION_REFUSED，这是预期的已知状态）
+curl https://cxj1528-…ap-shanghai.app.tcloudbase.com/api/sessions
+
+# 2. SQL 对不对（绕过接口，直接查库；应返回 5 行）
+tcb db execute -e cxj1528-… --sql "SELECT session_id, topic_id FROM sessions ORDER BY started_at DESC"
+
+# 3. 出口形状对不对（9 项断言，用真实库行喂出口函数）
+cd db && node selftest-read.js
+```
 
 ---
 

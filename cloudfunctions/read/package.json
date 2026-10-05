@@ -1,0 +1,13 @@
+{
+  "name": "read",
+  "version": "1.0.0",
+  "description": "GET /api/sessions 与 GET /api/favorites —— 第一个读接口，读 sessions / items 两张表（Day 17）",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -11,6 +11,25 @@
       "timeout": 10,
       "memorySize": 256,
       "installDependency": true
+    },
+    {
+      "name": "read",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/read",
+      "runtime": "Nodejs20.19",
+      "timeout": 20,
+      "memorySize": 256,
+      "installDependency": true
+    },
+    {
+      "name": "chat",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/chat",
+      "runtime": "Nodejs20.19",
+      "description": "Day 17 建的骨架，Day 18 起填 AI 实现。超时给到 60 秒（AI 要等模型回话，与 read 的 20 秒是两回事）",
+      "timeout": 60,
+      "memorySize": 256,
+      "installDependency": true
     }
   ],
   "hosting": [
@@ -23,6 +42,26 @@
   ],
   "gateway": {
     "routes": [
+      {
+        "path": "/api/sessions",
+        "target": "function:read",
+        "enablePathTransmission": true
+      },
+      {
+        "path": "/api/favorites",
+        "target": "function:read",
+        "enablePathTransmission": true
+      },
+      {
+        "path": "/api/items/favorites",
+        "target": "function:read",
+        "enablePathTransmission": true
+      },
+      {
+        "path": "/api/chat",
+        "target": "function:chat",
+        "enablePathTransmission": true
+      },
       {
         "path": "/api",
         "target": "function:health"
