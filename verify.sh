@@ -51,6 +51,19 @@ curl -s --max-time 25 "$BASE/api/favorites" | jqq "[i['correction'] is None for 
   && ok "非 logic 类型条目的 correction 全是 null" || bad "有非 logic 条目的correction 不是 null"
 
 say "6. ★ 改一行数据 → 接口跟着变（清单完成标准）"
+#★ 先确认接口真的能读到数据再动库。
+#   这个顺序不能反：接口读不到时 nickname 取到的是空串，
+#   若照样执行 UPDATE 再用空串改回，**原值就被永久写成空字符串了**
+#   （Day 17 首跑时 S-MOCK-01 的 nickname 恰好本就是空，才没出事——
+#    在有真实昵称的库上跑这脚本会真丢数据）。
+PROBE=$(curl -s --max-time 25 "$BASE/api/sessions" | jqq "d['data']['count']")
+if [ -z "$PROBE" ]; then
+  bad "接口还读不到数据，跳过本步（**没有动库**）"
+  say "结果"
+  printf '\033[31m有项目未通过\033[0m\n'
+  exit $FAILED
+fi
+
 BEFORE=$(curl -s --max-time 25 "$BASE/api/sessions" | jqq "[s['nickname'] for s in d['data']['sessions'] if s['sessionId']=='S-MOCK-01'][0]")
 echo "  改之前 S-MOCK-01 的 nickname = '$BEFORE'"
 MARK="验证戳$(date +%H%M%S)"

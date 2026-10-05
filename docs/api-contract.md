@@ -303,6 +303,33 @@ tcb db execute -e cxj1528-… --sql "SELECT session_id, topic_id FROM sessions O
 cd db && node selftest-read.js
 ```
 
+###★ 环境打通后：跑 `verify.sh`（一条命令验全部完成标准）
+
+`verify.sh` 在仓库根目录，**6 组检查全自动**，包含清单要求的「改一行数据库数据 → 接口跟着变」。
+
+```bash
+bash verify.sh
+```
+
+| 组 | 验什么 | 期望 |
+|---|---|---|
+| 1–2 | `/api/sessions`、`/api/favorites` 的返回形状 | `data.count` 存在 |
+| 3 | **参数化**：`topicId=T1` / `limit=1` / 非法参数 | T1 得 2场、limit 得 1 条、非法值报 `INVALID_PARAMS` |
+| 4 | **B6**：中途退出的场次 | `endedAt` 是 `null`（不是字符串 `"null"`） |
+| 5 | **B7**：非 logic 类型条目 | `correction` 全是 `null` |
+| 6 | ★ **改一行库数据 → 刷新接口 → 返回跟着变** | 改后接口返回新值，且自动改回原值 |
+
+退出码 `0` = 全通过，`1` = 有项目未通过。
+
+> **⚠️ 第 6 组会真的 UPDATE 库**（改 `S-MOCK-01` 的 `nickname`，验完自动改回）。
+> 脚本**先确认接口能读到数据才动库**——读不到就直接跳过并打印「**没有动库**」。
+> 这个顺序是Day 17 首跑后补的：原先接口读不到时 `BEFORE` 取到空串，
+> 却照样执行 UPDATE 再用空串改回，**在有真实昵称的库上会永久丢数据**。
+> 所以「先探测、再改库」不能省。
+
+**它依赖的东西**：Git Bash（或 Linux/macOS）+ `curl` + `python`（解析 JSON）+ tcb CLI 已登录。
+`jq` 没装也行，脚本内部已退化用 python 解析。
+
 ---
 
 <a id="s3"></a>
