@@ -29,14 +29,31 @@
 (function () {
   'use strict';
 
-  /* ★ 基址：不写进每个页面，只写在这里（规矩 1）。
-     留空字符串 = 用当前域名（本地是 localhost:8010，线上是 CloudBase 域名）。
-     将来若接口与页面不同源，把绝对地址填在这里即可，页面无需改动。 */
-  var BASE = '';
+  /* ★ 基址：一处判断，本地与线上各自对（规矩 1）。
+     留空字符串 = 用当前域名。
+
+     ★ Day 18 踩过的坑：原先 BASE 写死空字符串，本地跑时页面在 localhost:8010，
+       请求就打到了**本地静态服务** —— POST /api/chat 得到 **501**（serve.py 打的，
+       不是云端），AI 于是永远在降级。查这个问题花了几轮。
+
+     现在按 hostname 判断，两边都不用改别的地方：
+       localhost / 127.0.0.1 → 云端域名（本地静态服务不提供 API）
+       其他（线上 CloudBase 域名）→ 留空 = 当前域名，与接口同域、免跨域
+
+     为什么本地不能用空串：本地静态服务只 serve 静态文件，不转发也不代理，
+     所以「同域」在本地根本不成立。 */
+  var CLOUD_BASE = 'https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com';
+  var IS_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  var BASE = IS_LOCAL ? CLOUD_BASE : '';
 
   /* 读接口的超时。CloudBase 是按需启停的（空闲会挂起），
      第一次请求可能有冷启动延迟，所以给得比一般接口宽一些。 */
   var TIMEOUT_MS = 25000;
+
+  /* chat 单独一个超时：AI 要等模型回话（普遍 3–15 秒，DeepSeek 偶尔更久），
+     读库是毫秒级。沿用 25 秒会在模型慢一点时误判为失败 ——
+     而「误判失败」在这里的代价是用户看到一句突兀的降级台词。 */
+  var CHAT_TIMEOUT_MS = 60000;
 
   /* ---------- 底层：带超时的 fetch ---------- */
   /* fetch 本身没有超时能力，不加控制台会一直转圈。
@@ -155,12 +172,86 @@
     });
   }
 
+  /* ---------- 写接口：POST /api/chat（Day 18）----------
+     ★ 与上面两个 GET 的三点不同：
+       ① 用 POST —— 聊天要发一大段history，query 放不下也不该放
+       ② body 用 JSON.stringify —— GET 只带参数，这里带数组与嵌套对象
+       ③ 超时更长（60 秒）—— AI 要等模型回话，读库是毫秒级
+
+     ★ 约束数据（role / anchor / followUps）由**调用方**一起带上来，
+     云函数读不到 frontend/data/topics.json（那是静态目录里的文件）。
+     云端已有这三个字段的实现，缺了它也能跑但追问会跑出主题外。 */
+  function chat(params) {
+    return postWithTimeout('/api/chat', {
+      topicId: params.topicId,
+      userText: params.userText,
+      history: params.history || [],
+      silenceSeconds: params.silenceSeconds || 0,
+      /* kind 让云函数区分「这轮用户有没有开口」：
+         open / silence 两种场景用户还没说话，userText 天然为空，
+         云函数据此跳过 userText 的必填校验（否则一进对话就报 INVALID_PARAMS）。 */
+      kind: params.kind || 'reply',
+      role: params.role || '',
+      anchor: params.anchor || '',
+      followUps: params.followUps || []
+    }, CHAT_TIMEOUT_MS).then(function (data) {
+      return {
+        aiText: data.aiText,
+        kind: data.kind,
+        followUpType: data.followUpType,
+        model: data.model
+      };
+    });
+  }
+
+  /* ---------- POST 版请求（带独立超时）----------
+     为什么不用上面的 request()：它是 GET，没有 body、也没有 body 解析。
+     与其给 request() 加一堆 if (method === 'POST') 分支，不如把两件事分开写 ——
+     分支越少，读代码时越不容易猜错。 */
+  function postWithTimeout(path, bodyObj, timeoutMs) {
+    var url = BASE + path;
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+
+    var opt = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(bodyObj)
+    };
+    if (controller) opt.signal = controller.signal;
+
+    return fetch(url, opt).then(function (res) {
+      return res.text().then(function (txt) {
+        var body = null;
+        try { body = JSON.parse(txt); } catch (e) {}
+
+        if (!res.ok || !body) {
+          var e2 = new Error(body ? ''
+            : 'HTTP ' + res.status + '（返回的不是 JSON，多半是路径没接到后端）');
+          e2.code = body ? 'HTTP_' + res.status : 'HTTP_' + res.status + '_NOT_JSON';
+          throw e2;
+        }
+        /* 契约 §1.2：只看 ok。业务失败是 200 + ok:false。 */
+        if (body.ok !== true) {
+          var e = body.error || {};
+          var err = new Error(e.message || '接口返回失败');
+          err.code = e.code || 'UNKNOWN';
+          throw err;
+        }
+        return body.data;
+      });
+    }).finally(function () {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
   window.Api = {
     BASE: BASE,
     getSessions: getSessions,
     getFavorites: getFavorites,
     getSessionsOrLocal: getSessionsOrLocal,
     getFavoritesOrLocal: getFavoritesOrLocal,
+    chat: chat,
     mapItem: mapItem,
     typeLabelOf: typeLabelOf
   };

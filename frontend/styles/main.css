@@ -1527,6 +1527,30 @@ body::before {
   color: var(--night-accent);   /* 6.89 压在 night-raised 上 */
 }
 
+/* Day 18 · 降级说明行：AI 那句改用预设台词时，紧跟其后的一行小字。
+   ---------------------------------------------------------------
+   为什么它是「说明」而不是「错误」：
+     它表示的是**临时状态**（接口暂时读不到），不是出了什么错。
+     所以刻意不做成警示色 —— 珊瑚色在本项目里专管偏题/卡点/失败
+     （§视觉规范的三色分工），拿它表示「正在降级」会污染这条约定。
+
+   为什么用小字而不是醒目提示：
+     用户不需要为它做任何事，放太显眼只会打断练习节奏。
+     但**必须写出来** —— 用户若把固定台词当成模型的即时回应，
+     会误以为「AI 就这个水平」，那比报错更伤（诚实性要求，
+     与记录页的 #rec-mock 同源）。
+
+   对比度：text-secondary 压在页面暖奶油底上 5.31:1，达标（≥4.5）。 */
+.tr-note {
+  display: block;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-secondary);   /* 5.31:1 达标 */
+  padding: var(--space-1) 0 var(--space-2);
+  padding-left: var(--space-3);    /* 与气泡文字左缘对齐 */
+  border-left: 2px solid var(--border-soft);   /* 令牌实际名（--border-subtle 不存在） */
+}
+
 .tr-text {
   font-size: var(--text-base);
   line-height: 1.75;

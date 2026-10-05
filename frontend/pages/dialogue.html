@@ -142,9 +142,12 @@
 
   </div>
 
-  <!-- 加载顺序有讲究：storage 在前、页面逻辑在后 —— 下面那段脚本要用 window.Storage。
-       （TECH_DESIGN.md §4.2 规矩 2：storage.js 是 localStorage 的唯一出口） -->
+  <!-- 加载顺序有讲究：storage 在前、api 在中、页面逻辑在后——
+       storage.js 是 localStorage 的唯一出口（TECH_DESIGN.md §4.2 规矩 2），
+       api.js 是后端唯一出口（规矩 1，Day 17 新建）。
+       页面逻辑要用 window.Storage 与 window.Api，所以两者都必须先加载。 -->
   <script src="../js/storage.js"></script>
+  <script src="../js/api.js"></script>
   <script>
     // P2 对话页逻辑（Day 10 升级）：
     //   ① 从地址栏取主题编号并在顶部显示主题名
@@ -246,6 +249,8 @@
       var turns = 0;
 
       /* AI 的三串台词（全部来自 topics.json，本页不写死句子）。
+         ★ Day 18 起它们**降级为兜底**：主路径是问 /api/chat 要一句即时回应，
+           只有接口失败才用这里的固定台词（并在页面上标明）。
          open    —— 8 主题一进对话就说的第一句
          silence —— 用户沉默时 AI 先开口的接话
          reply   —— 用户说完一句之后 AI 的回应
@@ -256,6 +261,18 @@
         silence: { lines: [], at: 0 },
         reply:   { lines: [], at: 0 }
       };
+
+      /* 当前主题的约束数据（来自 topics.json）。
+         ★ Day 18 新增用途：这三个字段是**随请求带给 /api/chat 的**——
+           云函数读不到静态目录里的 topics.json，缺了它们追问会跑出主题外。
+           「拿到约束数据」和「拿到兜底台词」是同一次 fetch 的两处用途。 */
+      var TOPIC = { role: '', anchor: '', followUps: [] };
+
+      /* 本场对话的完整往来，供送给后端当history。
+         结构刻意是扁平的 [{who, text}, ...] 而不是 {userText, aiText} 成对 ——
+         因为记录区上屏的顺序、谁先谁后都是真实的，
+         成对结构在「用户说完但 AI 还没回应」那一刻会记出一个不完整的对子。 */
+      var transcript = [];
       /* rounds 的起点不是 0 而是「该主题已完成的次数」：
          进来时若之前练过 1 次，本轮就是第 2 轮，显示「第 2 轮」；
          没练过则保持 0 → 由 render() 显示「准备开始」。 */
@@ -400,6 +417,10 @@
         // 第一条真发言到了，空态那句话就该退场
         if (el.trEmpty && el.trEmpty.parentNode) el.trEmpty.parentNode.removeChild(el.trEmpty);
 
+        /* 记进 transcript：下一轮问AI 时要把它当上下文发过去（Day 18）。
+           只记用户与 AI 的话，降级说明那行不记 —— 它不是对话内容。 */
+        transcript.push({ who: who, text: text });
+
         var row = document.createElement('div');
         row.className = 'tr-row' + (who === 'ai' ? ' is-ai' : '');
 
@@ -450,17 +471,114 @@
         }, SILENCE_MS);
       }
 
-      /* AI 说一句。delay 见文件开头的 AI_DELAY_MS。
-         说完之后**重新起算沉默计时** —— 这正是 PRD §6.6 那句
-         "每次 AI 说完之后"：所以自由对话里 AI 会一直递话，
-         而不是只在第一次递一句。 */
-      function aiSay(name, delay) {
+      /* ---------- AI 说一句：先问后端，失败回落本地句库（Day 18）----------
+         改造前的做法是直接 takeLine(name) 取一句本地台词。
+         现在改为：先向 /api/chat 要一句**模型现场生成**的话，
+         拿不到（或超时、或没配好密钥）才回落本地句库。
+
+         ★ 为什么保留本地句库而不是直接报错：
+           接口一挂，页面就变成一片死寂 —— 用户看到的是「我说了话但没人理」，
+           那比「显示固定台词」糟得多（记录页同一条理由，见 Day 17）。
+           固定台词虽然机械，但**页面永远能继续练下去**。
+
+         ★ 为什么必须标明降级：
+           固定台词是假的「即时回应」。用户若分不清，
+           会以为模型就是这种水平 —— 那比直接报错更伤。
+           所以降级时在记录区留一行小字说明（见 noteDegraded）。
+
+         silenceSeconds 的传递很关键：
+           0 → 正常回应；>0 → 模型知道用户在沉默，走的是「把人拉回来」的提示词，
+           与「继续聊天」是两种语气（云函数里分开写的）。
+         -------------------------------------------------------------- */
+      var CHAT_BUSY = false;   // AI 正在等后端（防重复提交）
+
+      function askAi(opts) {
+        if (!window.Api || !topicId) return Promise.resolve(null);
+
+        var payload = {
+          topicId: topicId,
+          userText: opts.userText || '',
+          history: historyForApi(),
+          silenceSeconds: opts.silenceSeconds || 0,
+          /* ★ kind 要告诉云函数「这轮用户有没有开口」：
+             open（8 主题开场）与 silence（沉默催促）时用户还没说话，
+             userText 天然为空；云函数据此跳过 userText 的必填校验。
+             不传的话开场白会被判INVALID_PARAMS —— 实测踩过。 */
+          kind: opts.silenceSeconds > 0 ? 'silence' : (opts.kind || 'reply'),
+          role: TOPIC.role || '',
+          anchor: TOPIC.anchor || '',
+          followUps: TOPIC.followUps || []
+        };
+
+        return window.Api.chat(payload).then(function (r) {
+          return (r && r.aiText) ? r.aiText : null;
+        }).catch(function (err) {
+          /* 只记错误码，不把技术细节写给用户看。
+             密钥、路径、厂商报错都不该出现在练习界面上。 */
+          lastChatError = (err && err.code) ? err.code : 'UNKNOWN';
+          return null;
+        });
+      }
+
+      /* 送给后端的历史：格式就是契约 §3 的 {turn, userText, aiText}。
+         ★ 只带已完成的往返，不带 aiSay 正在等的那句（那还没上屏）。 */
+      function historyForApi() {
+        var out = [];
+        for (var i = 0; i < transcript.length; i += 2) {
+          var u = transcript[i], a = transcript[i + 1];
+          if (u && u.who === 'user') {
+            out.push({ turn: out.length + 1, userText: u.text, aiText: a ? a.text : '' });
+          }
+        }
+        return out.slice(-6);   // 与云函数 MAX_HISTORY 一致，两边都截
+      }
+
+      /* 本地台词池：模式不同，装配方式见文件末尾那段 topics.json 加载 */
+      function localLine(name) {
+        return takeLine(name);
+      }
+
+      var lastChatError = '';
+
+      /* AI 说一句。kind 只影响语气标签，当前界面不显示它，
+         但记进 transcript 便于将来做「追问」样式（契约 §3 的 followUpType）。 */
+      function aiSay(name, delay, opts) {
         if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
         aiTimer = setTimeout(function () {
           aiTimer = null;
-          appendLine('ai', takeLine(name));
-          armSilence();
+          CHAT_BUSY = true;
+
+          var isSilence = (name === 'silence');
+          askAi({
+            userText: (opts && opts.userText) || '',
+            kind: name === 'open' ? 'open' : 'reply',
+            silenceSeconds: isSilence ? Math.round(SILENCE_MS / 1000) : 0
+          }).then(function (aiText) {
+            CHAT_BUSY = false;
+            if (aiText) {
+              appendLine('ai', aiText);
+            } else {
+              appendLine('ai', localLine(name));
+              noteDegraded(lastChatError);
+            }
+            armSilence();
+          });
         }, delay || 0);
+      }
+
+      /* 降级说明：紧跟在 AI 那句后面显示一行小字。
+         为什么用小字而不是醒目提示：这是**临时状态说明**，不是错误警告——
+         用户不需要为它做什么，放太显眼反而打断练习节奏。 */
+      function noteDegraded(code) {
+        var why = code && code !== 'UNKNOWN'
+          ? '（' + code + '）'
+          : '';
+        var hint = '这一句用的是预设台词，不是即时回应' + why;
+        var row = document.createElement('div');
+        row.className = 'tr-note';
+        row.textContent = hint;
+        el.trList.appendChild(row);
+        el.trList.scrollTop = el.trList.scrollHeight;
       }
 
       // ---------- 事件 ----------
@@ -523,13 +641,16 @@
         e.preventDefault();
         var text = (el.sayInput.value || '').trim();
         if (!text) return;               // 空的一句不算发言，也不重置沉默计时
+        if (CHAT_BUSY) return;           // AI 还在回上一句，不连着发
 
         clearSilence();                  // 用户开口了，沉默计时停
         appendLine('user', text);
         turns += 1;
         updateCount();
         el.sayInput.value = '';
-        aiSay('reply', AI_DELAY_MS);     // 先接住，再轻轻往下问
+        /* ★ userText 传下去：模型要看到用户**这一句**才谈得上「接话」。
+           不传的话它只能泛泛追问，那和固定句库就没区别了。 */
+        aiSay('reply', AI_DELAY_MS, { userText: text });
       });
 
       // ---------- 主题名、职场角色、AI 台词池 ----------
@@ -553,6 +674,15 @@
               roleEl.hidden = false;
             }
             if (!hit) return;
+
+            /* ★ Day 18：把约束数据存起来，随请求带给 /api/chat。
+               云函数读不到这份文件（它在静态目录里），
+               所以 role / anchor / followUps 必须由前端传上去。
+               FREE 没有这三项，TOPIC 保持空对象—— 云函数那边 FREE 本就不需要约束
+               （F6 不判偏题，见 PRD §6.3）。 */
+            TOPIC.role = hit.role || '';
+            TOPIC.anchor = hit.anchor || '';
+            TOPIC.followUps = hit.followUps || [];
 
             if (isFree) {
               pools.silence.lines = [hit.opening].concat(hit.openerPool || []).filter(Boolean);
