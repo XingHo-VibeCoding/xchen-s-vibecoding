@@ -14,7 +14,7 @@
      <script src="../js/components/interact.js"></script>
      <script src="../js/components/item-card.js"></script>
      container.appendChild(Components.item({
-       item: itemObject,          // 来自 data/mock-items.json 的一条
+       item: itemObject,          // 一条已映射成展示层形态的记录
        onToggle: function (next, api) { ... }   // 同 interact.js 的契约
      }));
 

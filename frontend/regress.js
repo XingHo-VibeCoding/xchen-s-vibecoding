@@ -88,26 +88,38 @@ const PROBE = `(() => {
      放在这里会让另外三页凭空多出一个恒为空的字段。
 
    判的是什么：
-     P4 页面上的条目可能来自**后端真实数据**，也可能来自**本地假条目**
-     （读接口当前返回 DB_CONNECTION_REFUSED，见 api-contract §2.1）。
-     无论走哪条路，页面底部的 #rec-mock 都**必须如实说明**用的是哪一种——
-     否则用户会把假条目当成自己真练出来的记录，这是诚实性问题，不是体验问题。
+     P4 页面上的条目来自后端数据库。**读接口当前返回 DB_CONNECTION_REFUSED**
+     （体验版没有 VPC 权限，见 api-contract §2.1与 notes/cloudbase-pg.md），
+     所以正常打开看到的是**错误态**而不是列表。
 
-   两条硬要求：
+   ★ Day 19 改判据的依据（原先那版已作废）：
+     原判据是「#all-list 必须有 .item 条目」，那是在**还有本地假条目兜底**的前提下写的
+     —— mock-items.json 没了之后，接口不通就必然是0 条，那条判据变成永远失败。
+     现在改成：**有条目** 或 **处于明确的错��/空态** 两者之一就算过。
+     真正要守住的不变 —— 页面必须如实说明数据的来处，
+     尤其不能让人把空白误读成「我没有记录」。
+
+   三条硬要求：
      ① #rec-mock 存在且有文字（不能空着）
      ② 走本地假数据时，文字里必须出现「假条目」三个字
+     ③ 0 条时必须是**说清楚了原因**的错态/空态，不能是空白页
    */
 const PROBE_RECORDS = `(() => {
   const bar = document.getElementById('rec-mock');
   if (!bar) return { noBar: true };
   const text = (bar.textContent || '').trim();
+  const list = document.getElementById('all-list');
   return {
     barText: text,
     barClass: bar.className || '',
     saysFake: text.indexOf('假条目') >= 0,
     itemCount: document.querySelectorAll('#all-list .item').length,
-    childCount: document.getElementById('all-list') ?
-      document.getElementById('all-list').children.length : -1
+    childCount: list ? list.children.length : -1,
+    /* ★ 是否有说清原因的错态（.state-error）—— 0 条时靠它区分
+       「页面坏了」与「明确告诉你为什么没有」 */
+    hasErrorState: !!document.querySelector('#all-list .state-error'),
+    /* 0 条时说明条必须给出原因，不能只是一句干巴巴的「没有记录」 */
+    explainsWhy: text.indexOf('读不到') >= 0 || text.indexOf('不是') >= 0
   };
 })()`;
 
@@ -136,7 +148,10 @@ const PROBE_RECORDS = `(() => {
       await cmd('Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: w < 700 });
       await cmd('Page.navigate', { url: 'http://localhost:8010/pages/' + pg + '.html' });
       // 记录页要等后端取数（含 25s 超时上限，但本地是无 404 快返），多给 600ms
-      await sleep(pg === 'records' ? 2200 : 1600);
+      /* ★ records 页要多等：它要连后端才判出错态，而本环境连 PG 会等到
+     连接超时才返回 DB_CONNECTION_REFUSED（实测要好几秒）。
+     2200ms 只够渲染骨架，判据会读在「什么都没拿到」的中间态上。 */
+await sleep(pg === 'records' ? 9000 : 1600);
       const r = await cmd('Runtime.evaluate', { expression: PROBE, returnByValue: true });
       const v = r.result && r.result.result && r.result.result.value;
       if (!v) { console.log('  ' + w + 'px → 取不到读数'); fail++; continue; }
@@ -152,13 +167,19 @@ const PROBE_RECORDS = `(() => {
         if (!rv || rv.noBar) issues.push('找不到 #rec-mock 说明条');
         else if (!rv.barText) issues.push('#rec-mock 是空的，没说明数据来源');
         else if (rv.saysFake) recNote = ' · 数据源：本地假条目（已如实标注）';
-        else recNote = ' · 数据源：后端真实数据';
-        // 条目数为 0 时把现场读数一起打出来，否则只有一句「一条都没有」没法定位
+        else if (rv.itemCount > 0) recNote = ' · 数据源：后端真实数据';
+        else recNote = ' · 数据源：后端读不到（已如实标出错态）';
+        /* ★ 0 条不算失败 —— 但必须是**说清原因的错态**，不能是空白页。
+           mock 删掉之前这里要求「必须有条目」，那是拿假数据凑出来的通过；
+           现在守住的是诚实性：页面要讲明白为什么没有记录。 */
         if (rv && rv.itemCount === 0) {
-          issues.push('#all-list 一条都没有（诊断：条数=' + rv.itemCount +
-            '，说明条文字数=' + (rv.barText ? rv.barText.length : -1) +
-            '，说明条前 30 字=' + JSON.stringify((rv.barText || '').slice(0, 30)) +
-            '，#all-list 子节点数=' + rv.childCount + '）');
+          if (!rv.hasErrorState) {
+            issues.push('#all-list 一条都没有，且没有错态（说明：条数=' + rv.itemCount +
+              '，子节点数=' + rv.childCount + '，说明条=' + JSON.stringify((rv.barText || '').slice(0, 30)) + '）');
+          } else if (!rv.explainsWhy) {
+            issues.push('是错态，但 #rec-mock 没说明原因（用户会误以为自己没有记录）：' +
+              JSON.stringify((rv.barText || '').slice(0, 30)));
+          }
         }
       }
 

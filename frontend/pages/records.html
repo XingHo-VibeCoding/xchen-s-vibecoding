@@ -93,12 +93,14 @@
   <script src="../js/api.js"></script>
   <script>
     // P4 错误记录页逻辑（Day 11）：
-    //   ① 按时间倒序列出历次会话的条目（数据来自 data/mock-items.json 的假条目）
+    //   ① 按时间倒序列出历次会话的条目
     //   ② 收藏区：只列已收藏的条目，**按收藏时间倒序**（PRD.md §6.4 第 468 行）
     //   ③ 两处都能收藏 / 取消收藏，并且**改一处两处同时更新**
     //   ④ 筛选条（Day 12）：一个输入框同时筛两块，口径见 PRD.md §7.4
     //   ⑤ 四态开关（Day 13）：?state=loading / empty / error 三态可单独看，
     //     写法与 P1 的 topics.js:31 完全一致 —— 见下方「Day 13」注释
+    //   ⑥ Day 19：删掉本地假条目兜底 —— 后端读不到就显示错误态，
+    //     不用假数据把页面填满（理由见 render() 上方那段注释）
     //
     // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
     //   收藏状态只有一份，存在 localStorage（Storage 的 favoriteItems 键）。
@@ -106,8 +108,8 @@
     //   在结果页收藏的条目，打开本页时自然就在收藏区里，不需要任何同步机制。
     //   这也是为什么取消收藏后能立刻从收藏区消失：重算一遍即可。
     //
-    // 本页与结果页的区别（由 mock 数据的结构决定）：
-    //   结果页 = 本次会话的 items
+    // 本页与结果页的区别：
+    //   结果页 = 本次会话（从待分析转写现算，见 result.html）
     //   本页   = 历次会话（sessions 数组）里的所有条目，跨会话混排
 
     (function () {
@@ -163,11 +165,11 @@
 
       /* ---------- 筛选相关（Day 12） ----------
          为什么要缓存 + 分「重取」与「重画」两层：
-           筛选是**纯前端**的（数据已经在内存里），每敲一个字就重新 fetch 一遍
-           mock-items.json 属于把简单事做复杂，还会打断输入。
+           筛选是**纯前端**的（数据已经在内存里），每敲一个字就重新向后端要一遍
+           属于把简单事做复杂，还会打断输入。
            所以 render() 只在首次/收藏变化时取数据并缓存 rows，
            输入关键词时走 paint() —— 只重画，不重取。
-           （这与 checks.md §收藏同步 是同一个思路：状态一份，视图现场算。）
+           （这与 checks.md §收藏同步是同一个思路：状态一份，视图现场算。）
 
          match() 为什么用「全部字段拼成一段小写文本」而不是逐字段判断：
            五个字段任一命中即为匹配，逐字段写是五遍几乎相同的 indexOf；
@@ -265,43 +267,6 @@
         }, FAV_DELAY_MS);
       }
 
-      // 把 mock 数据摊平成「历次会话的所有条目，按时间倒序」，
-      // 并给每条补上所属会话信息（本页每条要显示所属主题与时间，PRD §7.3 P4）
-      function flatten(data) {
-        var rows = [];
-        var sessions = (data.sessions || []).slice();
-
-        // 第一段 session（当前那次）+ sessions 数组，合成一张会话表
-        if (data.session) {
-          sessions.push({
-            sessionId: data.session.sessionId,
-            topicId: data.session.topicId,
-            topicName: data.session.topicName,
-            at: data.session.at,
-            durationSec: data.session.durationSec,
-            items: data.items || []
-          });
-        }
-
-        sessions.forEach(function (s) {
-          (s.items || []).forEach(function (it) {
-            rows.push({
-              item: it,
-              sessionId: s.sessionId,
-              topicName: s.topicName,
-              topicId: s.topicId,
-              at: s.at
-            });
-          });
-        });
-
-        // 时间倒序：最近的在最上面（PRD.md §6.5 第 487 行）
-        rows.sort(function (a, b) {
-          return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0);
-        });
-        return rows;
-      }
-
       // 会话时间显示成「9 月 28 日 20:15」这种，不显示秒
       function fmtTime(iso) {
         var d = new Date(iso);
@@ -361,36 +326,25 @@
         if (FORCED === 'loading') return;
 
         /* ---------- Day 17：数据来源从「只有本地 mock」改成「后端优先」----------
-           原来直接 fetch mock-items.json。现在先取本地 mock 作为**兜底**，
-           再并发去问后端要真实数据：
-             后端成功 → 用真实数据渲染
-             后端失败 → 用本地 mock 渲染，并**在页面上说明为什么是假数据**
+         Day 19：**mock 兜底整段删除**。原来是「后端成功用真数据、失败用假条目」，
+         现在只有一条路 —— 后端。理由：假条目会让用户把
+         「我没说过的话」当成自己的记录看，而那正是这个产品最不该出的错
+         （契约 §4 硬约束 1 的同一条底线）。
 
-           为什么失败也要渲染而不是清空：
-             读接口当前返回 DB_CONNECTION_REFUSED（个人版连不上 PG，
-             见 api-contract §2.1「已知的未通项」）。若失败就清空，
-             记录页会变成一片空白 —— 那比「显示假数据」糟得多：
-             用户分不清是「我没记录」还是「页面坏了」。
+         所以后端读不到时，本页显示**错误态并说清原因**，
+         而不是渲染几条编出来的记录把页面填满。
+         ★ 这个取舍是有代价的：写库接口做出来之前，历次记录本来就是空的
+         （PRD D5 路线乙「数据存在本机」，用户练出来的记录还在 localStorage 里，
+         没进过库）。空白 + 一句「读不到」比「看着像真的」诚实。
+         ------------------------------------------------------------------ */
 
-           为什么仍要保留 mock：
-             PRD D5 定的路线乙是「数据存在本机」，用户真练出来的记录
-             此刻还在 localStorage 里，不在库里。所以**长期来看，
-             这里的真实数据来源是 Day 18 的写入接口**，读接口只是提前打通链路。
-           ------------------------------------------------------------------ */
-        var localPromise = fetch('../../data/mock-items.json', { cache: 'no-store' })
-          .then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.json();
-          })
-          .catch(function () { return null; });   // 本地也没有 → 传 null，不阻断
-
-        /* 收藏走后端（api-contract §2.1的 R5 只读侧）
-           ★ 用OrLocal 版而不是 getFavorites —— 后者失败时会 **reject**，
+        /* 收藏走后端（api-contract §2.1 的 R5 只读侧）
+           ★ 用 OrLocal 版而不是 getFavorites —— 后者失败时会 **reject**，
              而这里是 Promise.all，一旦有一个 reject 整个 then 都不走，
              直接掉进 catch 的错误态，页面变成「记录没能加载」。
              那正是 api.js 头注释约定 ② 要避免的事：接口一挂，页面不该空。
              OrLocal 把失败转成 { items: [], degraded: true, errorCode }，
-             下游用 degraded 标志决定走真数据还是本地 mock。 */
+             下游用 degraded 标志决定显示什么。 */
         var favPromise = window.Api
           ? window.Api.getFavoritesOrLocal({ limit: 100 }, [])
           : Promise.resolve(null);
@@ -402,21 +356,29 @@
           ? window.Api.getSessionsOrLocal({ limit: 100 }, [])
           : Promise.resolve(null);
 
-        Promise.all([localPromise, favPromise, sessionsPromise])
+        Promise.all([favPromise, sessionsPromise])
           .then(function (r) {
-            var local = r[0];
-            var remoteFav = r[1];
-            var remoteSessions = r[2];
+            var remoteFav = r[0];
+            var remoteSessions = r[1];
 
             /* Day 13 补：强制空态（与成功态的区别是**数据先真的取到了**再决定显示空）。
                ?state=empty  请求成功但一条记录也没有；
                notFoundBox() 请求成功、有数据，只是筛选词没命中。*/
             if (FORCED === 'error') throw new Error('演示用：强制错误状态');
 
-            var degraded = !!(remoteFav && remoteFav.degraded);
-            var rows = (degraded || !remoteFav)
-              ? (local ? flatten(local) : [])
-              : rowsFromRemote(remoteFav.items, remoteSessions ? remoteSessions.sessions : []);
+            /* 后端读不到（DB_CONNECTION_REFUSED / 网络问题）→ 错误态。
+               这一条现在**直接落到 renderError**，不再退回假条目。 */
+            if (remoteFav && remoteFav.degraded) {
+              renderError(remoteFav.errorMessage || '', { code: remoteFav.errorCode });
+              return;
+            }
+            if (!remoteFav) {
+              renderError('NO_API', '这一页要访问后端取记录，但页面脚本没加载成功。');
+              return;
+            }
+
+            var rows = rowsFromRemote(remoteFav.items,
+              remoteSessions ? remoteSessions.sessions : []);
 
             if (rows.length === 0 || FORCED === 'empty') {
               CACHE.rows = rows;
@@ -427,23 +389,13 @@
             CACHE.rows = rows;
             paint(rows);
 
-            /* 底部说明条：这一行是**诚实性要求**。
-               页面上的数据来自哪里，必须写清楚 —— 否则用户会把假数据当成真记录。
-               降级时更要说清是「接口暂时读不到」而不是含糊地提一句。 */
-            if (degraded || !remoteFav) {
-              var why = (remoteFav && remoteFav.errorCode)
-                ? remoteFav.errorCode + '：' + (remoteFav.errorMessage || '读不到后端数据')
-                : '后端数据读不到';
-              mockBar.textContent =
-                '以上 ' + rows.length + ' 条是本地假条目（data/mock-items.json）。' +
-                '后端暂时读不到真实记录（' + why + '），所以还没切换过去。';
-              mockBar.classList.add('mock-bar-warn');
-            } else {
-              mockBar.textContent =
-                '以上 ' + rows.length + ' 条来自后端数据库。' +
-                '收藏状态仍存在本机浏览器里（写库接口 Day 18 起接入）。';
-              mockBar.classList.remove('mock-bar-warn');
-            }
+            /* 底部说明条：说清收藏状态存在哪。
+               页面上的数据来自后端数据库，这是真的；
+               但收藏状态此刻仍在本机浏览器里（写库接口尚未做）。 */
+            mockBar.textContent =
+              '以上 ' + rows.length + ' 条来自后端数据库。' +
+              '收藏状态仍存在本机浏览器里（写库接口尚未接入）。';
+            mockBar.classList.remove('mock-bar-warn');
           })
           .catch(function (err) {
             renderError(err && err.message ? err.message : '');
@@ -494,31 +446,45 @@
         mockBar.textContent = '空态：本页已经取到数据，只是数据里一条记录也没有。';
       }
 
-      /* ---------- 错误态（Day 13：从 render 的 catch 里抽出来） ----------
-         文案与原 catch 分支**逐字相同**，只是把「渲染进all-list」升级成
-         「两块都渲染」—— 原写法只填 all-list，收藏区会留着加载态的骨架卡，
-         那不是「出错后这一屏该有的样子」。 */
-      function renderError(detail) {
-        var msg = emptyBox('记录没能加载',
-          '页面本身没问题，是数据没读上来。' +
-          (detail ? '（' + detail + '）' : '') +
-          '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。');
+      /* ---------- 错误态（Day 13 抽出，Day 19 扩成两种） ----------
+         现在有两种到达方式，说法必须不同：
+           ① 后端读接口返回 degraded（DB_CONNECTION_REFUSED 等）——
+              这是**当前环境的已知状态**（体验版没有 VPC 权限，详见 api-contract §2.1），
+              重试没用，得升级套餐，所以按钮换成「回到主题列表」而不是「重新加载」
+           ② 其它异常（网络抖动、页面被双击打开）—— 重新加载有可能就好 */
+      function renderError(detail, opts) {
+        var o = opts || {};
+        var backendsDown = (o.code === 'DB_CONNECTION_REFUSED') || (o.code === 'DB_ERROR');
+
+        var msg = emptyBox(
+          backendsDown ? '后端暂时读不到记录' : '记录没能加载',
+          (backendsDown
+            ? '你的练习记录存在服务器上，而当前环境连不上数据库（' + (detail || o.code || '未知原因') + '）。'
+            : '页面本身没问题，是数据没读上来。' +
+              (detail ? '（' + detail + '）' : '') +
+              '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'));
         msg.className = 'empty state-error';
 
         var btn = document.createElement('button');
         btn.className = 'primary';
-        btn.textContent = '重新加载';
+        /* 后端连不上时不给「重新加载」：点了也是同一个错误，
+           白白让用户以为是自己操作的问题。换成一条能真的走出去的路。 */
+        btn.textContent = backendsDown ? '回到主题列表' : '重新加载';
         btn.style.marginTop = '16px';
-        // 去掉地址栏上的 ?state= 再重来，避免又落回被强制出来的错误态
         btn.addEventListener('click', function () {
-          location.href = location.pathname;
+          /* 去掉地址栏上的 ?state= 再来 —— 否则又落回被强制出来的状态 */
+          location.href = backendsDown ? 'topics.html' : location.pathname;
         });
         msg.appendChild(btn);
 
-        favList.replaceChildren(emptyBox('收藏没能读上来', '先把记录加载出来，再看收藏。'));
+        favList.replaceChildren(
+          emptyBox('收藏也读不到', '记录要先从服务器取回来，收藏是从里面筛出来的。'));
         allList.replaceChildren(msg);
         countEl.textContent = '没能读到记录';
-        mockBar.textContent = '错误态：数据没读上来，页面本身没问题。';
+        mockBar.textContent = backendsDown
+          ? '错误态：后端数据库暂时读不到，所以这里没有任何条目——不是「你没有记录」。'
+          : '错误态：数据没读上来，页面本身没问题。';
+        mockBar.classList.add('mock-bar-warn');
       }
 
       // 筛选输入：改 KEY → 只重画，不重取。
