@@ -530,7 +530,7 @@ bash verify.sh
 ### 三条硬约束
 
 1. **`originalText` 必须从 `transcript[].userText` 原样取出**，禁止模型重新生成——
-   **B8 的技术保障**。实现方式：让模型只返回 `turn` 编号，**原文由后端按编号取回**，模型碰不到原句字符串
+   **B8 的技术保障**。实现方式：让模型只返回 `turn` 编号，**原文由后端按编号取回**
 2. **偏题条目的 `correction` 由后端强制置 `null`**（不依赖模型自觉）
 3. **`FREE` 时后端强制丢弃所有 `type="offtopic"` 的条目**；该模式下 `errorCount`
    **只由逻辑错误条目计算**（PRD §8.3）
@@ -538,13 +538,47 @@ bash verify.sh
 > 第 2、3 条为什么必须后端强制而不是前端过滤：前端过滤会让「偏题条目确实被生成过」
 > 这个事实留在链路里，将来换前端、加导出功能时它就漏出来了。**口径要卡在数据源头那一层。**
 
+> **★★ Day 19 实测修正：约束 1 的实现方式从「输入侧封锁」改为「输出侧覆盖」**
+>
+> 原写法是「模型碰不到原句字符串」—— 提示词里**只给 turn 编号**，
+> 连用户说了什么都不给。**实测结果是判断能力直接归零**：
+>
+> ```
+> 输入：turn 3「We have some issues but I think it's ok.」（自相矛盾）
+>      turn 4「I really like the coffee machine on the third floor」（明显偏题）
+> 输出：{"issues": [], "goodSentences": [{turn:1},{2},{3},{4},{6}]}
+>       ——矛盾句没抓、偏题句没抓，连偏题那句都被夸成「精彩句子」
+> ```
+>
+> 原因是**判断的前提就是看到内容**。只给「turn 1: [user spoke]」这样的空标签，
+> 模型的唯一合理解读就是「既然没看出问题，那就都是好句子」。
+>
+> 现改为：**给模型看原句，但它只需回 turn 编号**；
+> 最终产出的 `originalText` 一律来自 `byTurn`（后端自己的 transcript），
+> `normalizeIssue` **根本不看**模型可能多回的那个字段。
+> 所以约束 1 仍然成立，只是**从输入侧封锁变成了输出侧覆盖** ——
+> 目标没变：**用户看到的必须是他自己说过的话**。
+>
+> **修完的实测**（同一段输入）：
+> ```
+> logic   turn 3  「We have some issues but I think it's ok.」
+>                 提醒：先说"有问题"又说"没问题"，前后自相矛盾
+>                 改法：We have some issues, but they are minor and we have a plan...
+> offtopic turn 4 「By the way, I really like the coffee machine on the third floor.」
+>                 提醒：与项目进度、延期原因和补救计划无关
+>                 correction: null
+> goodSentences: turn 1 / 2 / 6
+> ```
+> 注意 logic 那条：模型给的改法里补了逗号（`issues, but`），
+> 而 `originalText` 仍是用户原样那句`...issues but I think it's ok.`（无逗号）——
+> 这就是覆盖生效的直接证据。
+>
+> **FREE 模式实测**：矛盾句被报为 `logic`，聊天话题（猫、天气）未被误判成偏题 ✓
+
 > **★ Day 19 实现补充：约束 1 靠「查不到就丢弃」来兜底。**
 > 模型偶尔会编一个不存在的 `turn`，或引用用户根本没说话的那一轮。
 > 这两种情况一律**整条丢弃**（不产出条目），**绝不退化成「让模型再写一遍原句」**——
 > 后者等于把约束 1 重新打开，而「收藏一句我没说过的话」是这个产品最不能出的错。
->
-> 这也是**提示词里刻意不给原句**的原因：模型看不到 `userText`，只能看到 `turn` 编号与
-> 「这轮用户有没有发言」的标记。它**给不出 aiText**，也就无法把「用户的回应」当成被判断的对象。
 >
 > 三条约束的单测在 `.test-analyze.js`（18 项，含「模型编造 turn=99 被丢弃」、
 > 「模型塞的 originalText 被无视」、「偏题给改法也被强制置 null」等关键项）。

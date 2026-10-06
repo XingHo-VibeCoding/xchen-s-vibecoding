@@ -18,23 +18,32 @@
      transcript，不需要读会话、不需要读条目。写库是另一件事（Day 20+）。
 
    -------------------------------------------------------------
-   二、★ 本文件最重要的一件事：原文不由模型生成
+   二、★ 原文不由模型决定 —— 但**要给模型看**（Day 19 实测修正）
 
-   契约 §4 硬约束 1 写死了：
-     originalText 必须从 transcript[].userText 原样取出，
-     **让模型只返回 turn 编号，原文由后端按编号取回**。
+   契约 §4 硬约束 1 要求 originalText 从 transcript[].userText 原样取出。
+   这一点从头到尾没变过。
 
-   为什么必须这么设计（B8 的技术保障）：
-     模型生成「用户原话」时必然发生两件事 ——
-     ① 顺手把语法改通顺（"We have issues but I think it's ok" 会被写成
-        "We have some issues, but I think it's OK."，引号就找不到了）
-     ② 改写措辞以贴合它给的判断
-     两种情况下用户看到的都不是他自己说过的话。
-     而「收藏一个我没说过的话」是这个产品最不能出的错。
+   ★ 但 Day 19 第一版实现踩了一个大坑，值得记下来：
+     我原本理解成「模型碰不到原句字符串」，于是提示词里**连内容都不给**，
+     只发「turn 1: [user spoke]」这样的空标签。
 
-   所以整个 prompts 都只给模型 **turn 编号**，它碰不到原句字符串。
-   实现上体现在 pickTurn()：拿模型给的编号回transcript 查，
-   **查不到就丢弃该条目**，绝不退化成让模型再写一遍。
+     实测结果：模型输出 issues: [] 并把几乎每一轮都列进 goodSentences——
+     连「I really like the coffee machine on the third floor」（明显偏题）
+     与「We have some issues but I think it's ok」（自相矛盾）都被当成亮点。
+
+     **原因是判断的前提就是看到内容。** 无内容可判时，
+     模型的唯一合理解读就是「既然没看出问题，那就都是好句子」。
+
+     现在改成：**给模型看原句，但最终产出前一律用后端取回的原文覆盖**
+     （normalizeIssue 根本不看模型可能多回的 originalText 字段）。
+     判断力回来了，硬约束 1 也仍然成立——
+     约束从「输入侧封锁」改成了「输出侧覆盖」，
+     而目标是同一个：**用户看到的必须是他自己说过的话**。
+
+  契约 §4 的措辞已同步修正（见那一节的 Day 19 记录）。
+
+   ★ 只给**用户说的话**，不给 AI 说了什么——
+     给了 AI 的话，模型会把「对方的回应」当成该判断的对象。
 
    -------------------------------------------------------------
    三、三条硬约束（契约 §4，均在本文件强制，用户已拍板只在后端做）
@@ -208,13 +217,34 @@ function statusToCode(httpStatus) {
 }
 
 /* ---------- 提示词 ---------- */
-/* ★ 与 chat 最本质的差别：这里**不能**让模型看到原句。
-   看到原句它就会顺手改写，而「原样取回」是B8 的硬要求。
-   所以每轮只给 turn 编号 + 一个极简的角色标签。 */
+/* ★★ Day 19 实测踩出来的重大设计错误（已修）
+   原设计是「连原句都不给模型，只给 turn 编号」—— 理由是想彻底杜绝
+   模型改写原句（硬约束 1）。**结果是模型无从判断**：
+
+     实测输入：turn 3「We have some issues but I think it's ok.」（自相矛盾）
+               turn 4「I really like the coffee machine」（明显偏题）
+     实测输出：{"issues": [], "goodSentences": [{turn:1},{2},{3},{4},{6}]}
+               ——矛盾句没抓、偏题句没抓，连偏题那句都被当成「精彩句子」夸了
+
+   原因很直白：**判断的前提是看到内容**。只给「turn 1: [user spoke]」
+   这样的空标签，模型无法知道说了什么，
+   唯一可能的输出就是「既然没看出问题，那就都是好句子」。
+
+   现在的做法（原句给它看，但产出前全部覆盖）：
+     · 模型**能看见** userText—— 判断力回来了
+     · 但它**只需回turn 编号**；即便它擅自多回一个 originalText，
+       normalizeIssue 也**根本不看那个字段**，
+       最终产出的 originalText 一律来自 byTurn（我们自己的 transcript）
+     · 所以硬约束 1 仍然成立：**原句由后端说了算，模型碰不到产出路径**
+
+   ★ 与契约 §4 原文的差异（契约写的是「模型碰不到原句字符串」）：
+     现在是「模型看得到、但说不上来」。这是把约束从「输入侧封锁」
+     改成「输出侧覆盖」—— 目标没变（用户看到的必须是他自己说过的话），
+     但为了让判断真的能发生，必须这么改。契约 §4 已同步记录这个变更。 */
 function systemPromptFor(isFree, topicInfo) {
   const lines = [
     'You are an English conversation coach reviewing a completed practice session.',
-    'You will be given numbered turns. You must NOT rewrite anyone\'s words.',
+    'The user\'s own words are shown below, numbered by turn.',
     '',
     'Return ONLY a JSON object, no markdown fence, no explanation. Shape:',
     '{',
@@ -228,10 +258,11 @@ function systemPromptFor(isFree, topicInfo) {
   ];
 
   lines.push('Hard rules:');
-  lines.push('1. For each issue, cite ONLY the turn number. Never output the original sentence.');
+  lines.push('1. For each issue and each good sentence, cite ONLY the turn number.');
+  lines.push('   Do NOT output the original sentence anywhere — just the number.');
   lines.push('2. "offtopic" = the speaker wandered away from the session\'s subject.');
-  lines.push('3. "logic" = the speaker contradicted themselves, or asserted something');
-  lines.push('   that undercuts what they just said.');
+  lines.push('3. "logic" = the speaker contradicted themselves within what they said,');
+  lines.push('   or asserted something that undercuts their own point.');
   lines.push('4. For "offtopic", correction MUST be null. For "logic", correction MUST be');
   lines.push('   an English sentence that fixes the problem. Never null for logic.');
   lines.push('5. "reminder" must be in Chinese, one short sentence, telling the learner what to');
@@ -265,17 +296,17 @@ function systemPromptFor(isFree, topicInfo) {
   return lines.join('\n');
 }
 
-/* 轮次文本：只给编号 + 一层极简标签。
-   ★ 为什么连 aiText 都不给原文：模型看到 AI 说了什么，
-     就有可能把「用户的回应」当成该被判断的对象。
-     契约要判断的只有用户说的话。 */
+/* 轮次文本：原句给模型看，但标清编号。
+   ★ 只给**用户说的话**，不给 AI 说了什么 ——
+     给了 AI 的话，模型会把「对方的回应」当成该判断的对象，
+     而契约要判断的只有用户说的话。 */
 function userPromptFor(turns) {
-  const lines = ['The turns of this session (number: what kind of turn it was):'];
+  const lines = ['Here are the turns the user spoke in:'];
   turns.forEach((t) => {
-    lines.push(t.turn + ': [' + (t.userText ? 'user spoke' : 'no user speech') + ']');
+    lines.push('turn ' + t.turn + ': "' + t.userText + '"');
   });
   lines.push('');
-  lines.push('Judge ONLY the turns where the user spoke. Cite those turn numbers.');
+  lines.push('Judge only these turns. Cite the turn numbers in your JSON.');
   return lines.join('\n');
 }
 
@@ -501,10 +532,11 @@ async function handleAnalyze(req, res) {
   /* ---------- 调模型（带一次重试）---------- */
   let parsed = null;
   let lastHint = '';
+  let rawText = '';              /* 提出来供下面的 DEBUG 块用（原来在循环里是块作用域）*/
   for (let attempt = 0; attempt < 2; attempt++) {
-    let rawText;
+    let attemptText;
     try {
-      rawText = await callLLM(buildMessages(isFree, topicInfo, turns, attempt === 0 ? '' : lastHint));
+      attemptText = await callLLM(buildMessages(isFree, topicInfo, turns, attempt === 0 ? '' : lastHint));
     } catch (err) {
       const code = err.code || 'LLM_ERROR';
       const msgMap = {
@@ -522,9 +554,11 @@ async function handleAnalyze(req, res) {
     }
 
     try {
-      parsed = extractJSON(rawText);
+      parsed = extractJSON(attemptText);
+      rawText = attemptText;
       break;
     } catch (err) {
+      rawText = attemptText;
       lastHint = err.hint || 'invalid json';
       console.warn('[analyze] 第 ' + (attempt + 1) + ' 次输出无法解析：' + err.message.slice(0, 150));
     }
@@ -538,6 +572,18 @@ async function handleAnalyze(req, res) {
   }
 
   /* ---------- 落地三条硬约束 ---------- */
+  /*★ 临时诊断开关（Day 19，验完必删）：把模型原始输出与被丢弃的条目带出来。
+     为什么需要：首轮实测发现该报的没报（矛盾句与偏题句都漏了），
+     但「响应为空」有两种相反的成因 ——
+       ① 模型根本没报（提示词不管用）→ 要改提示词
+       ② 模型报了但被 normalizeIssue 丢掉（校验太严）→ 要改校验
+     不看原始输出就无法区分，而 `tcb fn log` 对 HTTP 函数查不到日志
+     （Day 18 实测：返回 No invocation logs）→ 只能从响应里带出来。
+     设 ANALYZE_DEBUG=1 时才生效，默认完全不影响生产响应。
+
+     ★ 注意：开启后响应里会带出模型看到的原文，也就是**用户说过的话**。
+       只在排查时临时开，绝不能长期留着。 */
+
   const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
   const issues = [];
   for (let i = 0; i < rawIssues.length && issues.length < MAX_ISSUES; i++) {
@@ -556,7 +602,7 @@ async function handleAnalyze(req, res) {
      「没发现问题」，**不硬凑条目**）。 */
   const noIssueFound = issues.length === 0;
 
-  sendJSON(res, 200, {
+  const resp = {
     ok: true,
     data: {
       issues: issues,
@@ -564,7 +610,24 @@ async function handleAnalyze(req, res) {
       noIssueFound: noIssueFound,
       model: LLM_MODEL
     }
-  });
+  };
+
+  /* 排错开关：DEBUG 模式下把模型原始输出挂到响应上。
+     为什么走响应而不是日志：`tcb fn log` 对 HTTP 函数返回
+     No invocation logs（Day 18 实测），拿不到。
+     ★ 开这个开关等于把用户说过的话暴露到公网响应里 ——
+       只在排查时临时开。日常保持关闭（Day 19 用完即关）。 */
+  if (process.env.ANALYZE_DEBUG === '1') {
+    resp.debug = {
+      rawText: String(rawText).slice(0, 1200),
+      parsedIssues: Array.isArray(parsed.issues) ? parsed.issues : null,
+      parsedGood: Array.isArray(parsed.goodSentences) ? parsed.goodSentences : null,
+      byTurnKeys: Object.keys(byTurn),
+      rawIssuesCount: Array.isArray(parsed.issues) ? parsed.issues.length : -1
+    };
+  }
+
+  sendJSON(res, 200, resp);
 }
 
 /* ---------- 路由 ---------- */
