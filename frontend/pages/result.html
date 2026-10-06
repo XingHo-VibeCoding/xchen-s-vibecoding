@@ -39,10 +39,11 @@
           条目里数条数（口径 PRD §8.3「错误次数 = 偏题条数 + 逻辑错误条数」、
           「精彩句子呈现次数 = 条数」）。自由对话下偏题条目已被剔除，
           所以这个式子自然退化成「错误次数 = 逻辑错误条数」，满足 B26。
-          条目本身仍是本地假数据，这一层没有变。 -->
+         Day 19：条目本身**不再是本地假数据** —— 由 /api/analyze 读你这一场的原话生成，
+          所以「四个字段」现在全是真值。 -->
     <div class="card">
       <h2>本次数据</h2>
-      <p class="hint" id="stat-hint">错误次数 = 本次问题条目的条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。</p>
+      <p class="hint" id="stat-hint">错误次数 = 本次问题条目的条数；精彩句子呈现次数 = 精彩句子条数。</p>
       <div class="field-grid">
         <div class="cell">
           <div class="label">昵称</div>
@@ -65,17 +66,18 @@
 
     <!-- 问题清单：偏题（只提醒）与逻辑错误（提醒 + 纠正）两类
          注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2）
-         Day 11：改为由 data/mock-items.json 的手写条目渲染，条目上带收藏按钮（线 2-B）。
-         真正的判断功能（AI 读用户原话生成条目）仍属第 3 周，本页的条目是假数据。
          Day 14（F6 · 第 4 步）：自由对话（?topic=FREE）下**这一类只剩逻辑错误** ——
           偏题条目不再渲染，且**页面上不出现「偏题」字样**（PRD §9.2 B25 比 §6.6 更严：
-          不只是不显示条目，是连字样都不许有）。因此 hint 与空态文案都按 isFree 换一版。 -->
+          不只是不显示条目，是连字样都不许有）。因此 hint 与空态文案都按 isFree 换一版。
+         Day 19：条目改由 /api/analyze 从你这一场的原话生成（不再有本地假条目）。
+          loading 那一态是**运行时**由 renderLoading() 填的，HTML 里只留一句兜底，
+          这样即使脚本没跑起来，也不会让人以为「加载中」。 -->
     <div class="card">
       <h2>问题清单</h2>
-      <p class="hint" id="issue-hint">偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。</p>
+      <p class="hint" id="issue-hint">偏题只提醒、逻辑错误给纠正。</p>
       <div class="item-list" id="issue-list" aria-live="polite">
-        <div class="empty empty-solid">
-          <div class="big">正在读取条目…</div>
+        <div class="empty">
+          <div class="big">正在读你这一场说过的话…</div>
         </div>
       </div>
       <div class="mock-bar" id="issue-mock"></div>
@@ -85,11 +87,7 @@
     <div class="card">
       <h2>这次说得好的</h2>
       <p class="hint">这里的条数就是「精彩句子呈现次数」这个字段的值。</p>
-      <div class="item-list" id="good-list" aria-live="polite">
-        <div class="empty empty-solid">
-          <div class="big">正在读取条目…</div>
-        </div>
-      </div>
+      <div class="item-list" id="good-list" aria-live="polite"></div>
     </div>
 
     <footer class="page-foot">
@@ -98,27 +96,31 @@
 
   </div>
 
-  <!-- 加载顺序（同 topics.html）：storage → interact → item-card → 页面逻辑 -->
+  <!-- 加载顺序（同 topics.html）：storage → api → interact → item-card → 页面逻辑 -->
   <script src="../js/storage.js"></script>
+  <script src="../js/api.js"></script>
   <script src="../js/components/interact.js"></script>
   <script src="../js/components/item-card.js"></script>
   <script>
     // P3 结果页逻辑：
     //   ① 从地址栏取主题编号，在标题下方显示主题名
     //   ② Day 10：读取对话页传来的对话时长（?dur=秒数）并渲染成 mm:ss
-    //   ③ Day 11：渲染问题清单与精彩句子（数据来自 data/mock-items.json 的假条目），
-    //      并为每一条挂上收藏按钮（线 2-B）
+    //   ③ Day 11：渲染问题清单与精彩句子，并为每一条挂上收藏按钮（线 2-B）
     //   ④ Day 14（F6 · 第 4 步）：识别自由对话 —— 去掉偏题条目、页面不出现「偏题」字样、
     //      错误次数与精彩句子次数改为真算
+    //   ⑤ Day 19：**条目改由真实会话产生** —— 从 storage 取出对话页传来的转写，
+    //      调 POST /api/analyze 要判断结果，mock-items.json 已删除
     //
     // 口径以 PRD.md §6.2 / §6.4 / §6.6 / §8.3 为准：
     //   - 偏题条目**没有纠正那一格**，逻辑错误条目才有 —— 这是设计（§6.2 第 343 行）
     //   - 收藏对象就是这两类条目 + 精彩句子（§6.4 第 466 行）
-    //   - 收藏状态存 localStorage（Storage.toggleFavorite）。Day 11 的清单要求
-    //     「先使用前端临时状态，不接数据库」，但 PRD 的 A3 要求刷新后仍在，
-    //     两者只能靠 Storage 兜住；第 3 周接库后这两个键迁走。
+    //   - 收藏状态存 localStorage（Storage.toggleFavorite）。第 3 周接库后迁走。
     //
-    // 错误提示怎么演示：见下面 FAIL_MODE 的注释。
+    // 三个坑记在这里，改动时别踩回去：
+    //   ① 转写是 take（取出即删），刷新本页会读不到 —— 这是故意的，
+    //      宁可说「没有对话内容」也不能拿上一场的转写当本次结果展示。
+    //   ② analyze 不给 itemId，收藏键由本页用 topicId-turn-type 编（见 itemIdOf）。
+    //   ③ anchor 要等 topics.json 到位才能给，所以取数不是一条链而是两条 promise。
 
     (function () {
       var params = new URLSearchParams(location.search);
@@ -131,18 +133,73 @@
            ① 问题清单里不渲染偏题条目
            ② 页面上不出现「偏题」字样 —— 所以两处文案要换，不是简单少显示一类
            ③ 错误次数只由逻辑错误条目计算
-         层次说明：TECH_DESIGN §6.3 第 3 条要求**后端在源头丢弃 off_topic 条目**。
-         今天没有后端，所以先在前端拦一道，保证 B25 现在就验得了；
-         接上后端后这一段过滤仍在（前端不假设上游一定干净）。 */
+         ★ 云函数已在服务端丢弃 FREE 下的 offtopic 条目（契约 §4 硬约束 3），
+           但前端这一段过滤**仍保留**：前端不假设上游一定干净
+           （换前端、加导出功能时它就漏出来了，api-contract §4 原话）。 */
       var isFree = topicId === 'FREE';
+
+      /* ---------- 先取转写（**取 = 取出即删**）----------
+         ★ 为什么必须在算 isFree / 换文案**之前**取：
+           下面的 isFree、hint 文案、anchor 判定全都依赖 topicId，
+           而 topicId 有两个来源（URL 与转写里带的）。先取转写才能保证
+           后面所有分支看到的是同一个topicId —— 否则可能出现
+           「按FREE 的文案渲染，却拿T1 的转写去问接口」这种自相矛盾。
+
+           take 语义见 storage.js：**读一次就删**。刷新、手输地址、收藏夹打开
+           本页都会读不到 —— 这是故意的。宁可显示「没有这一场的对话内容」，
+           也不能拿上一场的转写当本次结果展示（那比空白危险得多）。*/
+      var pending = window.Storage ? window.Storage.takePendingTranscript() : null;
+
+      /* 主题以转写里带的为准：万一有人改了地址栏的 ?topic=，
+         用 A 主题的转写去问 B 主题，读出来的东西会自相矛盾。
+         转写里没有才信地址栏（此时按「没有对话内容」处理，见 render）。*/
+      if (pending && pending.topicId) topicId = pending.topicId;
+      isFree = topicId === 'FREE';
+
+      /* 对话页写localStorage 失败时会带一个标记过来（无痕模式 / 配额满）。
+         它的作用是**把原因说清楚** —— 否则用户只会看到「没有对话内容」，
+         而那句话会让他以为是页面坏了。 */
+      var NOT_SAVED = params.get('transcript-not-saved') === '1';
+
+      /* ---------- 主题信息：名字 + 偏题判定依据 ----------
+         Day 19 之前只需要 name；接了 /api/analyze 之后**还需要 anchor** ——
+         8主题的偏题判定要有「主题是什么」的依据，而云函数读不到
+         frontend/data/topics.json（那是静态目录里的文件），所以由前端随请求带上
+         （同 /api/chat 的 role/anchor，理由见 api.js）。
+         一次请求取完，name 与 anchor 一起拿。 */
+      var TOPIC = null;
+      var topicReady = false;   // topics.json 拿到没有（不管找没找到这个主题）
+
+      function whenTopicReady(fn) {
+        if (topicReady) { fn(TOPIC); return; }
+        fetch('../../data/topics.json', { cache: 'no-store' })
+          .then(function (res) { return res.json(); })
+          .then(function (topics) {
+            TOPIC = topics.filter(function (t) { return t.topicId === topicId; })[0] || null;
+          })
+          .catch(function () { TOPIC = null; })
+          .then(function () { topicReady = true; fn(TOPIC); });
+      }
+
+      whenTopicReady(function (hit) {
+        if (!topicId) return;
+        if (hit) {
+          line.textContent = '本次练习主题：' + hit.name + '（' + topicId + '）';
+        } else if (isFree) {
+          // FREE 不在 topics.json 里（自由对话本来就没有主题卡），这不是错误
+          line.textContent = '本次练习主题：自由对话';
+        } else {
+          line.textContent = '本次练习主题：' + topicId + '（主题数据没能加载）';
+        }
+      });
 
       // 文案按模式换一版（②）：自由对话下「偏题」两个字都不能出现
       document.getElementById('stat-hint').textContent = isFree
-        ? '错误次数 = 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。'
-        : '错误次数 = 偏题条数 + 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。条目来自本地假数据。';
+        ? '错误次数 = 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。'
+        : '错误次数 = 偏题条数 + 逻辑错误条数；精彩句子呈现次数 = 精彩句子条数。';
       document.getElementById('issue-hint').textContent = isFree
-        ? '逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。'
-        : '偏题只提醒、逻辑错误给纠正。判断功能尚未接入，下面是本地假条目。';
+        ? '逻辑错误给纠正。'
+        : '偏题只提醒、逻辑错误给纠正。';
 
       // ---------- 对话时长（秒 → mm:ss） ----------
       var durRaw = params.get('dur');
@@ -155,30 +212,12 @@
         }
       }
 
-      if (topicId) {
-        fetch('../../data/topics.json')
-          .then(function (res) { return res.json(); })
-          .then(function (topics) {
-            var hit = topics.filter(function (t) { return t.topicId === topicId; })[0];
-            line.textContent = '本次练习主题：' + (hit ? hit.name + '（' + topicId + '）' : topicId);
-          })
-          .catch(function () {
-            line.textContent = '本次练习主题：' + topicId + '（主题数据没能加载）';
-          });
-      }
-
-      /* ============================================================
-         收藏：失败路径怎么演示
-
-         今天没有后端，所以「失败」得自己造一个。两种触发方式：
-           ?favfail=1      收藏必定失败 —— 演示与截图时用这个，可控
-           不带参数时      约 1/6 概率失败 —— 这样正常点击也能偶尔撞见错误提示，
-                          不至于「这条提示永远看不到 = 验收不了」
-         为什么要有随机失败：Day 11 的清单要求「发生错误时显示可理解的提示」，
-         若失败路径永远走不到，这条要求就没有可观察的证据。
-         （这是为达成清单要求加的演示开关，第 3 周接上真实请求后整段删掉。）
-         ============================================================ */
-      var FAIL_MODE = params.get('favfail') === '1';
+      /* 收藏：失败路径怎么演示
+         Day 19 起收藏**只写localStorage**（写库接口尚未做，PRD D5 路线乙数据在本机），
+         没有网络请求可失败。所以原来那段「1/6 概率随机失败」的演示开关
+         已随 mock 一起删除 —— 保留它就是**为了演示而制造假的失败**，
+         而收藏这条路径本来就不该失败。
+         ?favfail=1 现在什么也不做（本地存储不可用的情况仍会提示，见 handleFavorite）。 */
       var FAV_DELAY_MS = 320;      // 与 topics.js 的 PIN_DELAY_MS 同值，交互手感一致
 
       function handleFavorite(next, api, item) {
@@ -188,16 +227,10 @@
         }
 
         setTimeout(function () {
-          if (FAIL_MODE || (!FAIL_MODE && Math.random() < 1 / 6)) {
-            api.reject('没能保存收藏，请再试一次。');
-            return;
-          }
-
           var ok = window.Storage.toggleFavorite(item.itemId, {
             type: item.type,
             topicId: topicId || ''
           });
-
           if (ok !== next) {
             api.reject('没能保存收藏，可能是浏览器不允许本地存储。');
             return;
@@ -210,89 +243,157 @@
         }, FAV_DELAY_MS);
       }
 
-      /* ---------- 渲染条目 ---------- */
-      function render() {
-        fetch('../../data/mock-items.json', { cache: 'no-store' })
-          .then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.json();
-          })
-          .then(function (data) {
-            var all = data.items || [];
-            /* 自由对话下先剔掉偏题条目（①）：F6 没有判定锚点，本来就不该判偏题
-               （PRD §6.6 边界与约定第 1 条）。注意判据用的是 type 的**实现值**
-               `'offtopic'`（见 mock-items.json 与 item-card.js）；
-               TECH_DESIGN §5.3 的表里写的是 `"off_topic"`，两处取值不一致 —— **已报给用户待定**。 */
-            var issues = all.filter(function (it) {
-              if (it.type === 'good') return false;
-              if (isFree && it.type === 'offtopic') return false;
-              return true;
-            });
-            var goods = all.filter(function (it) { return it.type === 'good'; });
+      /* ---------- 条目编号：analyze 不给 itemId，前端自己编 ----------
+         ★ 为什么需要编：收藏按钮的键就是 itemId（interact.js 的契约），
+           而契约 §4 的 analyze 响应里**没有这个字段**（它要判的是「这句话有没有问题」，
+           不需要编号；mock 里那三条的手写编号是给人看的）。
+           键不存在 → toggleFavorite 拿到 falsy 直接 return false → 收藏永远点不动。
 
-            /* 两个数字改为真算（PRD §8.3）：
-                 错误次数 = 偏题条数 + 逻辑错误条数 —— 也就是上面 issues 的条数。
-                   自由对话下偏题已被剔掉，这个式子自动退化成「= 逻辑错误条数」（B26）。
-                 精彩句子呈现次数 = 精彩句子条数。
-               条数取的是**本页真正渲染出来的条目**，不是另一份统计，
-               这样屏幕上的清单和上面两个数字永远对得上。 */
-            document.getElementById('f-errors').textContent = issues.length;
-            document.getElementById('f-good').textContent = goods.length;
+           编法：`topicId + '-' + turn + '-' + type`，如 `T1-3-logic`。
+             为什么用 type 而不是只用到 turn：同一轮里既可能有逻辑错误
+             又可能被夸成精彩句子（模型认为后半部分说得好），两个都要能独立收藏。
+             为什么不用随机数/ 时间戳：要**稳定** —— 用户收藏后刷新页面，
+             同一个键才能读回「已收藏」；随机键每次刷新都是新条目，收藏就丢了。
 
-            var issueList = document.getElementById('issue-list');
-            var goodList = document.getElementById('good-list');
+           ★ 已知局限（用户 Day 19 拍板接受）：同一主题的同一轮同类型条目
+             在两场对话里会撞键 —— 收藏了上一场那场，这场同位置也显示已收藏。
+             当前阶段无感（结果页只显示本次一场，条目也还没落库）；
+             **接写入接口时必须改成真 sessionId + 序号**。 */
+      function itemIdOf(it, type) {
+        return (topicId || 'X') + '-' + (it.turn || 0) + '-' + type;
+      }
 
-            if (issues.length) {
-              var f1 = document.createDocumentFragment();
-              issues.forEach(function (it) {
-                f1.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
-              });
-              issueList.replaceChildren(f1);
-            } else {
-              // 真正的空态：判断结果确实为空时才出现（PRD.md §6.2 第 323 行）
-              var e1 = document.createElement('div');
-              e1.className = 'empty empty-solid';
-              e1.appendChild(Object.assign(document.createElement('div'), {
-                className: 'big',
-                textContent: isFree ? '本次没有发现逻辑错误' : '本次没有发现偏题或逻辑错误'
-              }));
-              issueList.replaceChildren(e1);
-            }
+      /* ---------- 四态：先把骨架摆出来 ----------
+         本页的「加载中」比别的页长得多：要等模型把整场逐条判完
+         （普遍 10–30 秒）。所以加载态必须**说清在做什么**，
+         否则用户等十几秒看到「正在读取条目…」会以为页面坏了。 */
+      function renderLoading() {
+        var box = document.getElementById('issue-list');
+        var e = document.createElement('div');
+        e.className = 'empty';
+        e.appendChild(Object.assign(document.createElement('div'), {
+          className: 'big', textContent: '正在读你这一场说过的话…'
+        }));
+        e.appendChild(Object.assign(document.createElement('div'), {
+          className: 'small', textContent: '接下来要逐条判断有没有偏题或前后矛盾，通常十几秒。'
+        }));
+        box.replaceChildren(e);
+        // 精彩句子区此时没有内容，清掉上一轮可能残留的提示
+        document.getElementById('good-list').replaceChildren();
+      }
 
-            if (goods.length) {
-              var f2 = document.createDocumentFragment();
-              goods.forEach(function (it) {
-                f2.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
-              });
-              goodList.replaceChildren(f2);
-            } else {
-              var e2 = document.createElement('div');
-              e2.className = 'empty empty-solid';
-              e2.appendChild(Object.assign(document.createElement('div'), {
-                className: 'big', textContent: '本次还没有标记出精彩句子'
-              }));
-              goodList.replaceChildren(e2);
-            }
+      function emptyBox(big, small) {
+        var e = document.createElement('div');
+        e.className = 'empty empty-solid';
+        e.appendChild(Object.assign(document.createElement('div'), { className: 'big', textContent: big }));
+        if (small) {
+          e.appendChild(Object.assign(document.createElement('div'), { className: 'small', textContent: small }));
+        }
+        return e;
+      }
 
-            // 数据来源提示条（Day 11 临时，接真数据后删）
-            document.getElementById('issue-mock').textContent =
-              '以上 ' + issues.length + ' 条是本地假条目（data/mock-items.json），' +
-              '不是你真练出来的。判断功能接入后会换成你的原话。';
-          })
-          .catch(function (err) {
-            var box = document.getElementById('issue-list');
-            var e = document.createElement('div');
-            e.className = 'empty state-error';
-            e.appendChild(Object.assign(document.createElement('div'), {
-              className: 'big', textContent: '条目没能加载'
-            }));
-            e.appendChild(Object.assign(document.createElement('div'), {
-              className: 'small',
-              textContent: '（' + (err && err.message ? err.message : '') + '）' +
-                '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'
-            }));
-            box.replaceChildren(e);
+      function renderError(big, small) {
+        var e = document.createElement('div');
+        e.className = 'empty state-error';
+        e.appendChild(Object.assign(document.createElement('div'), { className: 'big', textContent: big }));
+        if (small) {
+          e.appendChild(Object.assign(document.createElement('div'), { className: 'small', textContent: small }));
+        }
+        document.getElementById('issue-list').replaceChildren(e);
+      }
+
+      /* ---------- 真正渲染条目 ----------
+         issues / goods 是 analyze 已经映射好的展示层形态
+         （quote / fix / typeLabel 都已翻好，见 api.js 的 mapItem）。 */
+      function paint(issues, goods) {
+        /* 两个数字真算（PRD §8.3）：
+             错误次数 = 偏题条数 + 逻辑错误条数 —— 也就是上面 issues 的条数。
+               自由对话下偏题已被剔掉，这个式子自动退化成「= 逻辑错误条数」（B26）。
+             精彩句子呈现次数 = 精彩句子条数。
+           条数取的是**本页真正渲染出来的条目**，不是另一份统计，
+           这样屏幕上的清单和上面两个数字永远对得上。 */
+        document.getElementById('f-errors').textContent = issues.length;
+        document.getElementById('f-good').textContent = goods.length;
+
+        var issueList = document.getElementById('issue-list');
+        var goodList = document.getElementById('good-list');
+
+        if (issues.length) {
+          var f1 = document.createDocumentFragment();
+          issues.forEach(function (it) {
+            it.itemId = it.itemId || itemIdOf(it, it.type);
+            f1.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
           });
+          issueList.replaceChildren(f1);
+        } else {
+          /* 真正的空态：判断结果确实为空时才出现（PRD §6.2第 323 行）。
+             这与「没找到对话内容」是两件事 —— 后者是错态，上面分开画。 */
+          issueList.replaceChildren(emptyBox(
+            isFree ? '本次没有发现逻辑错误' : '本次没有发现偏题或逻辑错误',
+            isFree ? '' : '下一场留意一下：有没有说到与主题无关的事。'));
+        }
+
+        if (goods.length) {
+          var f2 = document.createDocumentFragment();
+          goods.forEach(function (it) {
+            it.itemId = it.itemId || itemIdOf(it, 'good');
+            f2.appendChild(window.Components.item({ item: it, onToggle: handleFavorite }));
+          });
+          goodList.replaceChildren(f2);
+        } else {
+          goodList.replaceChildren(emptyBox('本次还没有标记出精彩句子'));
+        }
+      }
+
+      /* ---------- 取转写 → 调 analyze → 渲染 ---------- */
+      function render() {
+        renderLoading();
+
+        /* ① 转写已在页面开头取过（**必须**在算 isFree 之前，见上面注释） */
+        if (!pending) {
+          renderError('没有这一场的对话内容',
+            NOT_SAVED
+              ? '这个浏览器没能保存下这一场说的话（无痕模式或存储空间满时会这样），' +
+                '所以没法判断。换一个窗口再练一次就好。'
+              : '本页要看的是你刚结束那一场说的话。请回到对话页练完再点「结束对话」。');
+          return;
+        }
+
+        /* ② anchor 要等 topics.json 拿到（偏题判定的依据，云函数读不到这个文件） */
+        whenTopicReady(function (hit) {
+          var anchor = (hit && !isFree) ? (hit.anchor || '') : '';
+
+          window.Api.analyze({
+            topicId: topicId || '',
+            transcript: pending.transcript,
+            anchor: anchor
+          }).then(function (r) {
+            /* FREE 下再滤一道 offtopic：云函数已在服务端强制丢弃（硬约束 3），
+               这里留着是因为前端不假设上游一定干净。判据用实现值 'offtopic'
+               （TECH_DESIGN §5.3 的表里写的 "off_topic" 与实现不一致，已报给用户待定）。 */
+            var issues = r.issues.filter(function (it) {
+              return !(isFree && it.type === 'offtopic');
+            });
+            paint(issues, r.goodSentences || []);
+
+            /* 失败兜底：analyzeOrLocal 只在失败时返回 degraded。
+               真成功时不写任何提示条 —— 页面上的条目本来就是你真练出来的，
+               没有需要说明的来源问题（这一条是 Day 11 那条 mock 提示条的替代品）。*/
+            if (r.degraded) {
+              var bar = document.getElementById('issue-mock');
+              bar.textContent = '这次没能完成判断（' + (r.errorCode || '未知原因') +
+                '），所以下面没有条目。';
+              bar.classList.add('mock-bar-warn');
+            } else {
+              document.getElementById('issue-mock').textContent = '';
+              document.getElementById('issue-mock').classList.remove('mock-bar-warn');
+            }
+          }).catch(function (err) {
+            renderError('这次没能完成判断',
+              (err && err.message ? err.message : '') +
+              ' 这一场的话已经存过了，你可以回到对话页再练一次。');
+          });
+        });
       }
 
       render();
