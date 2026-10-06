@@ -22,6 +22,15 @@
    两者只能用本文件兜住。**第 3 周接上 /api 后，这两个键整体迁走**，
    届时删掉本节内容即可 —— 这是把它们集中放在这里、而不是写进页面的原因。
 
+   ---- Day 19 新增一个键（临时，读完即删）----
+   vibecoding.pendingTranscript  { topicId, transcript: [{turn,userText,aiText}] }
+   为什么需要它：对话页要把整场转写交给结果页去调 /api/analyze，但**不能走 URL**——
+   一场对话几十轮、几百字，塞进查询串会超长度，而且用户说过的话会进浏览器历史。
+   localStorage 是页面之间唯一现成的载体。
+   为什么是「取」（take）而不是「读」（read）：**结果页读完就删**。
+   若留着，用户下一次直接打开 result.html（手输地址、收藏夹）会读到上一场的转写，
+   拿旧转写去分析、然后展示成「本次结果」—— 这是比空白更糟的错。
+
    怎么用（经典 script，必须先于页面逻辑加载）：
      <script src="../js/storage.js"></script>                ← 本文件
      <script src="../js/pages/dialogue.js"></script>         ← 页面逻辑
@@ -40,6 +49,10 @@
      Storage.toggleFavorite(itemId, meta)   → boolean，切换后的新状态；meta 存 { type } 等
      Storage.favoriteIds()                  → string[]，已收藏条目编号（最近收藏的在前）
 
+     ---- Day 19 新增（页面间传递转写，读完即删）----
+     Storage.savePendingTranscript(payload) → boolean，写入成功为 true
+     Storage.takePendingTranscript()        → object|null，**取出并删除**；没有或损坏返回 null
+
    容错（照 TECH_DESIGN.md E8 / E9 的要求）
      E9 读损坏：JSON 解析失败时**按空数据返回**，不抛错、不覆盖原数据
      E8 写失败：无痕模式 / 配额满时**不阻断功能**，返回原值让页面继续跑
@@ -51,6 +64,7 @@
   var KEY_SCHEMA = NS + '.schemaVersion';
   var KEY_PINNED = NS + '.pinnedTopics';       // Day 11 新增（临时）
   var KEY_FAVORITE = NS + '.favoriteItems';    // Day 11 新增（临时）
+  var KEY_PENDING = NS + '.pendingTranscript'; // Day 19 新增（临时，读完即删）
   var SCHEMA_VERSION = 1;
 
   /* localStorage 在某些环境会直接抛错（Safari 无痕模式访问 setItem），
@@ -235,6 +249,68 @@
     return ok ? next : !next;
   }
 
+  /* ============================================================
+     Day 19：待分析的转写（对话页 → 结果页，读完即删）
+
+     与上面两张表不同，这里存的是**数组**，不是对象，
+     所以不能用 readObject/writeObject（它们会拒掉数组，E9 规则）。
+
+     容错口径与全文件一致：
+       E9 读损坏 → 返回 null，不抛错、不覆盖现场
+       E8 写失败 → 返回 false，让调用方知道「没存下来」而不是以为存好了
+     ============================================================ */
+
+  /* 写入待分析的转写。
+     payload 形如 { topicId: 'T1', transcript: [{turn, userText, aiText}] }。
+     为什么还要包一层 topicId：结果页的 URL 上本来就有 topic 参数，
+     但**不依赖它** —— 万一用户改了地址栏的 topic，页面就会拿A 主题的转写
+     去问 B 主题，读出来的东西就自相矛盾了。两处都有时，以转写里的为准。 */
+  function savePendingTranscript(payload) {
+    var ls = store();
+    if (!ls) return false;
+    var p = payload || {};
+    if (!p.transcript || !p.transcript.length) return false;   // 空的没必要写
+    try {
+      ls.setItem(KEY_PENDING, JSON.stringify({
+        topicId: p.topicId || '',
+        transcript: p.transcript
+      }));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* 取出并删除。
+     ★ 名字里的 take 就是「取走」的意思—— 读完立刻 removeItem，
+       下次再来（刷新、手输地址、收藏夹）读到的是 null 而不是上一场。
+       这个键是**用一次就作废的一次性通道**，不是历史记录。 */
+  function takePendingTranscript() {
+    var ls = store();
+    if (!ls) return null;
+    var raw = null;
+    try { raw = ls.getItem(KEY_PENDING); } catch (e) { return null; }
+    if (!raw) return null;
+
+    /* 先删再解析：即使下面的解析失败（或消费方压根没走到解析），
+       这个键也已经作废了 —— 一个解析不过期的陈旧值留在键里，
+       比解析失败本身更危险。E9 说「不覆盖原数据」，指的是不覆盖**读不出来的东西**，
+       而这个键的语义本就是「一次性」，用掉就删是它的定义。 */
+    try { ls.removeItem(KEY_PENDING); } catch (e) { /* 删不掉就让它留着，不阻断 */ }
+
+    try {
+      var obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+      if (!obj.transcript || !Array.isArray(obj.transcript) || !obj.transcript.length) return null;
+      return {
+        topicId: typeof obj.topicId === 'string' ? obj.topicId : '',
+        transcript: obj.transcript
+      };
+    } catch (e) {
+      return null;   // E9：损坏按「没有」处理
+    }
+  }
+
   window.Storage = {
     practiceCount: practiceCount,
     bumpPracticeCount: bumpPracticeCount,
@@ -245,6 +321,9 @@
     togglePin: togglePin,
     isFavorite: isFavorite,
     favoriteIds: favoriteIds,
-    toggleFavorite: toggleFavorite
+    toggleFavorite: toggleFavorite,
+    // Day 19 新增（临时）
+    savePendingTranscript: savePendingTranscript,
+    takePendingTranscript: takePendingTranscript
   };
 })();
