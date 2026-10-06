@@ -66,39 +66,111 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 ```json
 {
   "ok": false,
-  "errorCode": "LLM_TIMEOUT",
-  "message": "AI 没有及时回应"
+  "data": null,
+  "error": { "code": "LLM_TIMEOUT", "message": "AI 没有及时回应" }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `ok` | boolean | 是 | 恒为 `false` |
-| `errorCode` | string | 是 | 机器可读的错误码，见 §1.4 |
-| `message` | string | 是 | **中文**、给用户看的一句话（不堆栈、不暴露内部信息） |
+| `data` | null | 是 | **失败时恒为 `null`**（成功时它装业务数据，失败时一律留空） |
+| `error.code` | string | 是 | 机器可读的错误码，见 §1.4 |
+| `error.message` | string | 是 | **中文**、给用户看的一句话（不堆栈、不暴露内部信息） |
 
-> **已实现的口径参照**：`GET /api/health` 今天已上线，它的实际错误返回是
-> `{"ok":false,"errorCode":"NOT_FOUND","message":"...","gotPath":"/xxx"}`——
-> 多出的`gotPath` 是**排错字段**（见 §1.5）。
+> **★ 为什么是 `error.code` 而不是顶层 `errorCode`**（Day 19 定的，之前写错过）：
+> 前端 `api.js` 只认 `body.error.code` 这一个路径，读不到就退化成 `UNKNOWN`。
+> 原先 `GET /api/health` 写的是顶层 `errorCode`，与其余三个接口不一致 ——
+> 两套并存的风险是**以后谁照着旧文案写新接口，前端读不到错误码**。
+> Day 19 已把 health 改成与其余三个一致，并 curl 实测过三种响应。
+>
+> **以代码为准，不以文档为准**：前端已上线，改代码的成本远高于改文档。
+> 写新接口时先照 `cloudfunctions/analyze/index.js` 的 `sendError()` 抄形状。
 
 ### 1.4 错误码清单
 
-沿用 `TECH_DESIGN §8.2` 的 E 编号，**一个错误码对一个 E 编号**，不另造一套：
+**本清单是 Day 19 按线上代码逐个核出来的**（此前只列了 6 个，实际实现了 21 个）。
+分类按前缀走，一眼能看出根因在哪一层。
 
-| `errorCode` | 对应 | 场景 | HTTP |
-|---|---|---|---|
-| `LLM_TIMEOUT` | E4 | AI 没及时回应 | 200 + `ok:false` |
-| `LLM_BAD_FORMAT` | E5 | 模型返回结构不合格，重试后仍不合格 | 200 + `ok:false` |
-| `NOT_FOUND` | — | 路径不存在（health 已实现） | 404 |
-| `METHOD_NOT_ALLOWED` | — | 方法不对（health 已实现） | 405 |
-| `INVALID_PARAMS` | — | 必填参数缺失或类型不对 | 400 |
-| `RATE_LIMITED` | — | 超频（Day 16 起加限频时启用） | 429 |
-
-> **为什么错误也用 HTTP 200 + `ok:false` 返回业务错误**：业务失败（AI 超时）不是HTTP 层错误，
-> 用 200 让前端不必区分「网络失败」与「业务失败」两套处理逻辑。
-> **但「路径不存在」「方法不对」用真实的 404 / 405** —— 那是真的请求错了，
-> 属于开发期问题，不该和业务失败混在一起。
+> **★ 为什么后端错误码不用 E 编号**：`TECH_DESIGN §8.2` 的 E1–E12 是**用户可见的前端错误**清单
+> （E1 麦克风未授权、E2 转写为空、E8 localStorage 写满、E10 没声音…），
+> 与「后端返回了什么」是两回事，混用一套编号会互相污染。
+> 所以后端码另立一套并用 `LLM_` / `DB_` 前缀区分，**只有两处交叉**（下表已标出）。
+> 「对应」列留空 = 无对应 E 编号（前端不可见，属开发期/运维期错误）。
 >
+> 下面三张表合计 **21 个码**，其中有 E 编号的 2 个、无编号的 19 个。
+> 数字以表为准，别口头转述——写这份文档时用脚本跟代码交叉核对过。
+> ⚠️ 核对时注意：错误码在代码里有**两种写法**，
+> 一种是 `sendError(res, 400, 'CODE', …)`，另一种是 `e.code = 'CODE'` 挂在抛出的错误上，
+> **只 grep `sendError` 会漏掉后面这半**（Day 19 就是这么漏了 `INVALID_JSON` 与 `PAYLOAD_TOO_LARGE` 的）。
+
+#### 通用（4 个，全接口共用）
+
+| `error.code` | 对应 | 场景 | HTTP | 出现在 |
+|---|---|---|---|---|
+| `INVALID_PARAMS` | — | 必填参数缺失或类型不对 | 400 | chat / analyze / read |
+| `NOT_FOUND` | — | 路径不存在 | 404 | 全部四个 |
+| `METHOD_NOT_ALLOWED` | — | 方法不对（本接口只接受 GET） | 405 | 全部四个 |
+| `INTERNAL_ERROR` | — | 服务器内部错误（兜底，**只在非预期异常时**） | 500 | chat / analyze |
+
+#### LLM 类（11 个，chat 与 analyze）
+
+| `error.code` | 对应 | 场景 | chat | analyze |
+|---|---|---|:-:|:-:|
+| `LLM_NOT_CONFIGURED` | — | 环境变量没配（`LLM_API_KEY` 等三个） | ✅ | ✅ |
+| `LLM_TIMEOUT` | **E4** | 55 秒内没回应（`LLM_TIMEOUT_MS`） | ✅ | ✅ |
+| `LLM_UNREACHABLE` | — | **网络层**连不上模型服务 | ✅ | ✅ |
+| `LLM_BAD_RESPONSE` | — | 拿到响应但状态码不在 200/401/402/403/429 里 | ✅ | — |
+| `LLM_BAD_FORMAT` | **E5** | 响应正常但**内容**解析不出结构，重试一次后仍失败 | — | ✅ |
+| `LLM_AUTH_FAILED` | — | 模型返回 401/403 → 密钥无效 | ✅ | ✅ |
+| `LLM_NO_CREDIT` | — | 模型返回 402 → 额度不足 | ✅ | ✅ |
+| `LLM_RATE_LIMITED` | — | **模型侧**返回 429 → 厂商限流 | ✅ | ✅ |
+| `LLM_ERROR` | — | 兜底：抛出的 err 上没有 `.code`（不在上表分类里的意外错误） | ✅ | ✅ |
+| `INVALID_JSON` | — | 请求体不是合法 JSON | ✅ | ✅ |
+| `PAYLOAD_TOO_LARGE` | — | 请求体超限 | ✅ | ✅ |
+
+> **`LLM_ERROR` 为什么要留兜底**：调用模型失败时统一 `const code = err.code || 'LLM_ERROR'`。
+> 有了它，前端永远拿得到一个非空错误码；没有的话 `body.error.code` 会是 `undefined`，
+> 前端只能显示 `UNKNOWN`，排错时连方向都没有。
+>
+> **`INVALID_JSON` / `PAYLOAD_TOO_LARGE` 属于「请求本身不对」**，与 `INVALID_PARAMS` 同类，
+> 返回 **400**（不是 200），因为重试也没用——是客户端发错了。
+
+> **⚠️ `LLM_BAD_RESPONSE` 与 `LLM_BAD_FORMAT` 是最容易混的两个**（analyze 的三次实测全靠分清它们才排对）：
+>
+> | | `LLM_BAD_RESPONSE` | `LLM_BAD_FORMAT` |
+> |---|---|---|
+> | 拦在哪 | `statusToCode()`，看**HTTP 状态码** | 解析响应体之后，看**内容结构** |
+> | 典型场景 | 模型返回 500/503、返回了 HTML 错误页 | 返回 200 且是 JSON，但字段缺了/格式不对 |
+> | 谁的锅 | 模型服务 | 模型的输出习惯 |
+> | 重试策略 | 不重试（重试大概率同样错） | **重试一次**，并把错误告诉模型让它自己改格式 |
+>
+> 只有 `LLM_BAD_FORMAT` 值得重试 —— 这是它与前者的关键差别，也是 analyze 多写的那点代码。
+
+#### DB 类（6 个，read）
+
+`read` 把 pg 抛的错**分类成 6 种**，而不是一律返回 `INTERNAL_ERROR`。这么做的原因：
+实测 `tcb fn log` 对 HTTP 函数**查不到调用日志**（返回 `No invocation logs`），
+等于没有排错入口 —— 所以根因必须写进响应体，不依赖日志就能定位。
+
+| `error.code` | pg 侧对应 | 排错方向 |
+|---|---|---|
+| `DB_CONNECTION_REFUSED` | `ECONNREFUSED` / Connection refused | **端口或内网访问不通**（本环境当前就是这个） |
+| `DB_HOST_UNREACHABLE` | `ENOTFOUND` / getaddrinfo | `PGHOST` 不对，或内网 DNS 不可用 |
+| `DB_TIMEOUT` | `ETIMEDOUT` / timeout | 常见于内网未打通 |
+| `DB_AUTH_FAILED` | password authentication failed / no pg_hba | 账号或密码不对（**不是网络问题**，与上一条要分清） |
+| `DB_TABLE_MISSING` | relation does not exist | 建表脚本没在库里执行 |
+| `DB_QUERY_FAILED` | 其余所有 | 兜底，查 SQL 本身 |
+
+> ★ `DB_CONNECTION_REFUSED` 与 `DB_AUTH_FAILED` 的区分是这套分类的重点：
+> 前者是**网络不通**，配对密码也没用；后者是**认证失败**，网络是通的。
+> 不分开的话，每次都要把两个方向都试一遍。
+
+> **为什么错误也用 HTTP 200 + `ok:false` 返回业务错误**：业务失败（AI 超时）不是 HTTP 层错误，
+> 用 200 让前端不必区分「网络失败」与「业务失败」两套处理逻辑。
+> **但「路径不存在」「方法不对」「参数不对」用真实的 404 / 405 / 400** —— 那是真的请求错了，
+> 属于开发期问题，不该和业务失败混在一起。
+
 > ⚠️ **第 2 周反面教材**：Day 14踩过一个坑——验证线上有没有生效时**只 grep 关键词**，
 > 结果 HTML 注释里写「曾改成中文…」被当成「中文版还在」，连着 4 个假警报。
 > **契约要能被验证**：每条接口都要能用 `curl` 直接打出响应，不靠"看代码觉得对"。
@@ -111,6 +183,11 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 **约定**：所有接口的 4xx / 5xx 响应**带 `gotPath` 或 `gotParams` 字段**，回显实际收到的路径或参数。
 代价是多几十字节，收益是排错时能区分「部署/路由错」与「业务逻辑错」。
+
+> **★ 位置约定（Day 19 定）**：这类排错字段放**响应体顶层**，不进 `error` 对象里——
+> 它不是错误原因的一部分，而是「我实际收到了什么」的现场记录。
+> 放进 `error` 里会让人误以为它是错误类别之一。
+> 现成的例子就是 health 的 404：`{"ok":false,"data":null,"error":{...},"gotPath":"/xxx"}`。
 
 ### 1.6 时间与标识
 
@@ -153,8 +230,11 @@ curl https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 | 情况 | HTTP | 响应体 |
 |---|---|---|
-| 路径不对 | 404 | `{"ok":false,"errorCode":"NOT_FOUND","message":"本函数目前只提供健康检查（/api/health）","gotPath":"/xxx"}` |
-| 方法不是 GET | 405 | `{"ok":false,"errorCode":"METHOD_NOT_ALLOWED","message":"本接口只接受 GET"}` |
+| 路径不对 | 404 | `{"ok":false,"data":null,"error":{"code":"NOT_FOUND","message":"本函数目前只提供健康检查（/api/health）"},"gotPath":"/xxx"}` |
+| 方法不是 GET | 405 | `{"ok":false,"data":null,"error":{"code":"METHOD_NOT_ALLOWED","message":"本接口只接受 GET"}}` |
+
+> 上表是 Day 19 线上 curl 实测的原样响应，不是手写的示例。
+> `gotPath` 放顶层不进 `error`，理由见 §1.5。
 
 ### 实现上的两个约定
 
@@ -428,8 +508,10 @@ bash verify.sh
 ### 响应（失败）
 
 ```json
-{ "ok": false, "errorCode": "LLM_TIMEOUT", "message": "AI 没有及时回应" }
+{ "ok": false, "data": null, "error": { "code": "LLM_TIMEOUT", "message": "AI 没有及时回应" } }
 ```
+
+失败的完整错误码清单见 §1.4 的「LLM 类」表（11 个）。
 
 ### 云函数环境变量（Day 18）
 
@@ -517,7 +599,10 @@ bash verify.sh
 > 3. **`goodSentences[]` 没有 `type` 字段**：契约只让模型回 `turn`。前端 `api.js` 必须显式补 `type='good'` ——
 >    **不补会被 `typeLabelOf()` 的兜底分支标成「偏题」**（Day 19 实测写单测抓到的）
 >
-> 另：失败响应的外壳原本写的是 `{ok, errorCode, message}`，实现用的是统一的 `{ok:false, data:null, error:{code, message}}`（同 `/api/chat`）——**这就是 §1.4 已记的那处外壳不一致**，本轮同样未改，等拍板。
+> 另：失败响应的外壳 Day 19 已统一 —— 本节原写作 `{ok, errorCode, message}`，
+> 而实现用的是 `{ok:false, data:null, error:{code, message}}`（同 `/api/chat`）。
+> **当时的分歧已解决**：前端 `api.js` 只认 `body.error.code`，故以代码为准，
+> 契约与 `health` 函数都在 Day 19 改成了这一套。详见 §1.3。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -586,11 +671,11 @@ bash verify.sh
 ### 响应（失败）
 
 ```json
-{ "ok": false, "errorCode": "LLM_BAD_FORMAT", "message": "这次没能整理出记录，再试一次好吗" }
+{ "ok": false, "data": null, "error": { "code": "LLM_BAD_FORMAT", "message": "这次没能整理出记录，再试一次好吗" } }
 ```
 
-> 上面这行是**待拍板的旧写法**，实现用的是统一外壳
-> `{ok:false, data:null, error:{code, message}}`（同 §3）。
+> 上面这行的外壳 Day 19 已与 §1.3 统一（原先本节写的是旧的顶层 `errorCode`）。
+> `LLM_BAD_FORMAT` 的含义与 `LLM_BAD_RESPONSE` 的区别见 §1.4 的对照表。
 
 ### Day 19 实测记录的三个实现选择
 
@@ -613,7 +698,7 @@ bash verify.sh
 | v1 状态 | **不启用**。接口位置预留，前端 `speech.js` 里留一个开关 |
 | 请求 | 音频文件（`multipart/form-data`） |
 | 响应 | `{ "ok": true, "text": "..." }` |
-| 失败 | `{ "ok": false, "errorCode": "ASR_FAILED", "message": "..." }` |
+| 失败 | `{ "ok": false, "data": null, "error": { "code": "ASR_FAILED", "message": "..." } }` |
 | 代价 | 按量费用 + 一份密钥 + 一段网络延迟 |
 | 触发条件 | Day 6 实测（Q-T1）不通过才启用 |
 
@@ -692,11 +777,15 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 >
 > 转换只发生在云函数出口那一处：读库拿到 `TIMESTAMP` → 直接拼上 `+08:00`。
 
-| 错误码 | HTTP | 场景 |
-|---|---|---|
-| `INVALID_PARAMS` | 400 | `limit` 不是数字等 |
-| `NOT_FOUND` | 404 | 指定的 `sessionId` 不存在 |
-| `RATE_LIMITED` | 429 | 超频 |
+> **本表是「预留接口设计」，不是已实现清单**（这些接口属§6.1，v1 不实现）。
+> 已实现的 21 个错误码见 §1.4。
+>
+> 两处与已实现代码的差异，将来实现时要留意：
+>
+> | 本表写的 | 已实现代码的情况 |
+> |---|---|
+> | `NOT_FOUND` =「指定的 `sessionId` 不存在」 | `read/index.js` 目前的 `NOT_FOUND` **只用于「路径不对」**（路由匹配失败时）。查不到 sessionId 走的是 `200 + {items:[], count:0}`，不是 404 |
+> | `RATE_LIMITED` = 超频（**我们自己**限用户调用频次） | 代码里的 `LLM_RATE_LIMITED` 是**模型厂商**返回 429，含义完全不同。我们**尚未实现**用户级限频 |
 
 ### 6.2 为什么这些接口先不实现（重要）
 
