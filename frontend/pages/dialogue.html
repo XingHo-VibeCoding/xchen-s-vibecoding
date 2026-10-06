@@ -285,6 +285,7 @@
       var elapsed = 0;      // 累计秒数（不含暂停时段）
       var timerId = null;
       var tickStart = 0;    // 本轮计时起点（毫秒）
+      var saveHint = '';    // Day 19：转写没存成的标记，只在点「结束对话」时赋值
 
       function fmt(sec) {
         var m = Math.floor(sec / 60), s = sec % 60;
@@ -525,14 +526,68 @@
       /* 送给后端的历史：格式就是契约 §3 的 {turn, userText, aiText}。
          ★ 只带已完成的往返，不带 aiSay 正在等的那句（那还没上屏）。 */
       function historyForApi() {
+        return transcriptTurns(6);      // 与云函数 MAX_HISTORY 一致，两边都截
+      }
+
+      /* 转成 {turn, userText, aiText} 的共用转换。
+         maxTurns 传 null 表示**全量**（analyze 要整场，契约 §4 的 transcript）。
+
+         为什么 chat 只取最后 6 轮、analyze 要全量：chat 是「接着这一句往下聊」，
+         给太多历史模型会顾此失彼（而且每次都要重发，更慢更贵）；
+         analyze 是「回头把整场逐条判一遍」，只给 6 轮会漏掉前面说过的话，
+         用户会发现「我明明说错了一句，页面上却没有」。
+
+         ★★ Day 19 实测修正：**不能按 `i += 2` 等间隔配对**。
+           原写法假设「下标 0 一定是 user，然后 user/ai 严格交替」——
+           8 主题里因为 AI 一进场就说opening，下标 0 恰好是 user，一直没出事。
+           但FREE 模式 AI 不先说话（PRD §6.6），第一句是用户说的沉默催促之后
+           才接的，实际数组长这样：
+
+               ["ai", "user", "ai", "user", "ai", "ai"]
+                        ↑ 下标 1 才是 user
+
+           按 i += 2 去看就全错位，一个 user 都配不出来 →
+           转写变成空数组 → analyze 收不到任何内容。
+           实测症状很隐蔽：**界面完全正常**（记录区照样显示 AI 说的话），
+           只有结果页说「没有这一场的对话内容」，
+           而那看起来像存储坏了，不像配对逻辑错了。
+
+           现在改成**顺序扫描**：记住「最近一条 user 的原话」，
+           遇到 ai 就把它当成那条 user 的回应。
+           这样无论数组从谁开始、交替是否严格，都不会漏。 */
+      function transcriptTurns(maxTurns) {
         var out = [];
-        for (var i = 0; i < transcript.length; i += 2) {
-          var u = transcript[i], a = transcript[i + 1];
-          if (u && u.who === 'user') {
-            out.push({ turn: out.length + 1, userText: u.text, aiText: a ? a.text : '' });
+        var pending = null;      // 最近一条还没配上 AI 回应的 user 发言
+        for (var i = 0; i < transcript.length; i++) {
+          var it = transcript[i];
+          if (!it) continue;
+          if (it.who === 'user') {
+            /* 连着来了两句 user（AI 还没回上一句时用户又说了）——
+               上一条没等到回应就作废，不硬凑一个空 aiText 给它，
+               否则 analyze 会以为「用户说了这句，AI 回了个空」。 */
+            pending = { turn: out.length + 1, userText: it.text, aiText: '' };
+            out.push(pending);
+          } else if (it.who === 'ai' && pending) {
+            pending.aiText = it.text;
+            pending = null;
           }
+          /* ai 在 pending 为空时（用户还没说话就先开口）直接跳过 ——
+             没有对应的用户发言，它不是任何一轮的回应。 */
         }
-        return out.slice(-6);   // 与云函数 MAX_HISTORY 一致，两边都截
+
+        if (maxTurns === null || out.length <= maxTurns) return out;
+
+        /* ★ 截断后**重新编号**（turn 从 1 连续起算），不能沿用原下标。
+           为什么：turn 是 analyze 引回原句的唯一依据（契约 §4 硬约束 1
+           ——「模型只回编号，原文由后端按编号取回」）。
+           云函数把 transcript 建成 byTurn[turn]，模型回 7 它就取 byTurn[7]。
+           若这里截断后给出的是 5..10，而云函数收到的数组下标其实是 0..5，
+           两边对不上 → 取不到原句 → 整条被丢弃（约束 1 的「查不到就丢弃」）。
+           所以编号必须**从 1 开始连续** —— 它标的是「这是本次请求里的第几轮」，
+           不是「这是整场的第几轮」。 */
+        var tail = out.slice(-maxTurns);
+        for (var k = 0; k < tail.length; k++) tail[k].turn = k + 1;
+        return tail;
       }
 
       /* 本地台词池：模式不同，装配方式见文件末尾那段 topics.json 加载 */
@@ -627,10 +682,27 @@
         if (window.Storage && topicId && state !== 'idle') {
           rounds = window.Storage.bumpPracticeCount(topicId);
         }
+
+        /* ★ Day 19：把整场转写交给结果页（它要拿去调 /api/analyze）。
+           在跳转**之前**写 —— location.href 之后的代码不会执行。 */
+        if (window.Storage) {
+          var okSave = window.Storage.savePendingTranscript({
+            topicId: topicId || '',
+            transcript: transcriptTurns(null)      // 全量，不能像 chat 那样只取 6 轮
+          });
+          /* 存不进去（无痕模式/配额满）时不静默：结果页会因为读不到转写而
+             显示「没找到这一场的对话内容」，那句话对用户毫无意义 ——
+             真正的理由得在这儿说出来。反正马上就要跳走了。 */
+          if (!okSave) { saveHint = 'transcript-not-saved=1'; }
+        }
+
         var q = [];
         if (topicId) q.push('topic=' + encodeURIComponent(topicId));
         q.push('turns=' + rounds);
         q.push('dur=' + elapsed);
+        /* 转写没存成的标记跟着走（只有一个短标记，不带内容）。
+           结果页拿它把提示说清楚，而不是显示一句「没找到对话内容」。 */
+        if (saveHint) q.push(saveHint);
         location.href = 'result.html?' + q.join('&');
       });
 
