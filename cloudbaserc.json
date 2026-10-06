@@ -30,6 +30,16 @@
       "timeout": 60,
       "memorySize": 256,
       "installDependency": true
+    },
+    {
+      "name": "analyze",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/analyze",
+      "runtime": "Nodejs20.19",
+      "description": "整场结束后的偏题与逻辑判断接口,契约第四章。与 chat 分开:chat 每轮调等一句话,analyze 整场调一次吃整份 transcript",
+      "timeout": 60,
+      "memorySize": 256,
+      "installDependency": true
     }
   ],
   "hosting": [
@@ -60,6 +70,11 @@
       {
         "path": "/api/chat",
         "target": "function:chat",
+        "enablePathTransmission": true
+      },
+      {
+        "path": "/api/analyze",
+        "target": "function:analyze",
         "enablePathTransmission": true
       },
       {
