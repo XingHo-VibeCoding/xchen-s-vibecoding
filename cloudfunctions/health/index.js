@@ -39,10 +39,16 @@ const server = http.createServer((req, res) => {
   // 只认 GET。别的 method 直接给 405，省得后面每个接口各写一遍判断。
   if (req.method !== 'GET') {
     res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+    // ★ Day 19：外壳与其余三个接口统一成 {ok, data, error:{code,message}}。
+    //   原先这里写的是 {ok, errorCode, message}（照契约 §1.3 的旧文案），
+    //   但 chat / analyze / read 三个都用了另一套，而**前端 api.js 只认那一套**
+    //   （body.error.code）。两套并存的风险：以后谁照着旧文案写新接口，
+    //   前端读不到 code，错误码就退化成 'UNKNOWN'。
+    //   契约 §1.3 已同步改成与代码一致，**以代码为准**（前端已上线，改代码成本高得多）。
     res.end(JSON.stringify({
       ok: false,
-      errorCode: 'METHOD_NOT_ALLOWED',
-      message: '本接口只接受 GET'
+      data: null,
+      error: { code: 'METHOD_NOT_ALLOWED', message: '本接口只接受 GET' }
     }));
     return;
   }
@@ -79,10 +85,13 @@ const server = http.createServer((req, res) => {
   // 走到这里说明：函数活着，但请求的路径不是它认识的。
   // 这本身是有用信息——它能区分「部署失败」与「路径写错」。
   res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+  // gotPath 保留在**顶层**：契约 §1.5 约定「错误分支要带我实际收到了什么」，
+  // 而它不是错误原因的一部分，是现场记录 —— 放进 error 里会让人误以为它是错误类别之一。
+  // 这个字段当初救过一命：部署成功但访问 404，是它一眼看出网关把 /api 前缀剥掉了。
   res.end(JSON.stringify({
     ok: false,
-    errorCode: 'NOT_FOUND',
-    message: '本函数目前只提供健康检查（/api/health）',
+    data: null,
+    error: { code: 'NOT_FOUND', message: '本函数目前只提供健康检查（/api/health）' },
     gotPath: path
   }));
 
