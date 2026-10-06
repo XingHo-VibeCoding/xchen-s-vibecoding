@@ -185,8 +185,11 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │   ├── data/
 │   │   ├── topics.json            ← 主题配置（内容，不是机制）：
 │   │   │                             T1–T8 八个职场主题 + 一条 FREE（自由对话，见 §5.2）
-│   │   ├── mock-items.json        ← 【Day 11 新增】P3 / P4 的条目与精彩句子（本地假数据）：
-│   │   │                             第 3 周接上 /api/analyze 后整体删除
+│   │   ├── ~~mock-items.json~~    ← 【Day 19 已删除】P3 / P4 的本地假条目：
+│   │   │                             条目改由 POST /api/analyze 从用户原话生成。
+│   │   │                             删除理由：假条目会让用户把「我没说过的话」
+│   │   │                             当成自己的记录 —— 与契约 §4 硬约束 1 同一条底线。
+│   │   │                             P4 读不到后端时改为显示错态（说清原因），不填假数据
 │   │   └── mock-sessions.json     ← 【Day 8 新增】P1「你的卡点」的历次练习概览（本地假数据）
 │   ├── regress.js                 ← 【Day 12】四页 × 五断点回归（改 main.css 后的必做项）
 │   ├── a11y-check.js              ← 【Day 12】P4 可访问性检查
@@ -269,7 +272,7 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 | # | 理由 | 依据 |
 |---|---|---|
 | 1 | **路由库要付出[3.3](#t3) 已明确不付的代价** | [3.3](#t3) 选路线的核心理由是「零构建工具、不学框架」。引入路由库要么装npm 依赖（重新引入 `node_modules` 与构建），要么自己手写一套 hash 解析 —— 两种都在拆自己地基。四个页面各写十几行 `a.href`，代价几乎为零 |
-| 2 | **SPA 的最大好处用不上** | SPA 换来的是"切换不重载、页面间共享内存状态"。但本页四个页面**各有独立数据源**（P1 读 `topics.json` + `mock-sessions.json`，P4 读 `mock-items.json`，P2/P3 靠 `localStorage` 传参），本来就不共享内存；需要跨页传的东西（练习次数、收藏）本来就该落在 `storage.js` 这个唯一出口（[4.2](#t4) 规矩 2），不依赖"页面不重载" |
+| 2 | **SPA 的最大好处用不上** | SPA 换来的是"切换不重载、页面间共享内存状态"。但本页四个页面**各有独立数据源**（P1 读 `topics.json` + `mock-sessions.json`，P2/P4 走后端 API，P3 从 `storage.js` 取转写再调 `/api/analyze`），本来就不共享内存；需要跨页传的东西（练习次数、收藏）本来就该落在 `storage.js` 这个唯一出口（[4.2](#t4) 规矩 2），不依赖"页面不重载" |
 | 3 | **静态托管要求本来就是"一条链接一条路径"** | [10.1](#t10) 前端部署在静态托管上。多页面天然满足；SPA 还要额外配 rewrite 规则（把 `/*` 全部重写到 `index.html`），配错就是 404 |
 
 **四条路径与它们带的参数**（P1 是入口，`README.md` 已写明启动方式）：
@@ -508,14 +511,17 @@ PRD §6.6 定义了 F6。它的配置**也放在 `topics.json` 里，作为一�
 
 > **为什么把 `type` 限制为两个值**：PRD §5.2 D13 砍掉了「表达可简化」类建议。类型只有两种，`errorCount` 才能等于两类条目数之和（B22 逐条核对）。
 
-> **Day 14 修订 · 取值拼写改为实现侧写法**：本节原先写的是 `"off_topic"` / `"logic_error"`，而实现里用的是 `"offtopic"` / `"logic"`（见 `frontend/data/mock-items.json`、`frontend/js/components/item-card.js`、`frontend/js/storage.js`）。现统一为**实现侧写法** —— 这几个字面量已经落进 CSS 类名（`.item-tag-offtopic`）、localStorage 的收藏记录与页面判断分支，改实现比改文档的代价大得多。语义与上面「只允许两个值」的约定一字未变。
+> **Day 14 修订 · 取值拼写改为实现侧写法**：本节原先写的是 `"off_topic"` / `"logic_error"`，而实现里用的是 `"offtopic"` / `"logic"`（见 `frontend/js/api.js` 的 `typeLabelOf()`、`frontend/js/components/item-card.js`、`frontend/js/storage.js`）。现统一为**实现侧写法** —— 这几个字面量已经落进 CSS 类名（`.item-tag-offtopic`）、localStorage 的收藏记录与页面判断分支，改实现比改文档的代价大得多。语义与上面「只允许两个值」的约定一字未变。
+
+> **Day 19 更新 · 假条目文件已删**：这一段原先拿 `frontend/data/mock-items.json` 当「实现侧写法」的证据。该文件在 Day 19 随 P3/P4 接上真数据一并删除（见 §4.1 目录树），现在改用 `frontend/js/api.js` 举证。**取值本身没变**，只是证据换了地方。
 
 > **另有一个 `"good"`，不在本表但在实现里**：精彩句子（[表五](#t5)）在实现中与问题条目**放在同一个 `items` 数组**里，靠 `type: "good"` 区分；收藏记录 `vibecoding.favoriteItems` 里也存这个值。所以实现侧的 `type` 实际会出现三个值。`"good"` 归表五那一类，**不进入 `errorCount`**（B22 仍只数 `offtopic` + `logic` 两类）。
 
 > **Day 15 拍板 · 接口层字段名与前端字段名是两套，不合并**（用户采纳AI 建议）：
 > 本表的 `originalText` / `correction` 是**接口层**（`/api/analyze` 请求与响应的字段名，
-> 见 `docs/api-contract.md` §4）；而 `frontend/data/mock-items.json` 里现存的是
-> `quote` / `fix`，那是**前端展示层**的名字，只服务渲染。
+> 见 `docs/api-contract.md` §4）；而**展示层**用的是 `quote` / `fix`
+> （由 `frontend/js/api.js` 的 `mapItem()` 从上面两个名字翻出来，
+> 只服务渲染）。
 >
 > **为什么分成两套而不是统一成一套**：
 > | 名字 | 绑定的东西 | 能否改 |

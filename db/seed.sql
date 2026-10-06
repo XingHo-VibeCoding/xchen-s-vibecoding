@@ -6,7 +6,7 @@
 -- ★ 方言：PostgreSQL（不是 MySQL）—— 翻译对照见 schema.sql 文末附录。
 --
 -- 数据来自哪里（不是编的，是抄的前端已有 mock）：
---   frontend/data/mock-items.json    → S-MOCK-01（T1）与 S-MOCK-02（T6）的条目
+--   （Day 11 的手写假条目，已于 Day 19 随 P3/P4 接真数据一并删除）
 --   frontend/data/mock-sessions.json → 各主题的练习次数与最后练习时间
 -- 抄它而不是另编一套的理由：前端四个页面现在显示的就是这份 mock 数据，
 -- 数据库里的行和页面上看到的能一一对上，Day 17 接读接口时不会出现
@@ -169,7 +169,7 @@ INSERT INTO items
    original_text, reminder, correction,
    is_favorited, note, favorited_at, created_at)
 VALUES
-  -- S-MOCK-01 的三条：与 mock-items.json 的 items 数组逐条对应
+  -- S-MOCK-01 的三条：与 Day 11 手写假条目逐条对应（该文件 Day 19 已删）
   -- turn 1：精彩句子。correction 为 NULL（§5.6 精彩句子没有「纠正」这个概念）
   ('T1-S1-G1', 'S-MOCK-01', 'T1', 'good', 1,
    'Let me walk you through where we are, and then flag the one thing I need help with.',

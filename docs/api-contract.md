@@ -721,13 +721,13 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 
 ## 七、字段名：接口层 vs 展示层（✅ Day 15 已拍板）
 
-`TECH_DESIGN §5.5` 的字段名与 `mock-items.json` 里已落地的实现不一致。
+`TECH_DESIGN §5.5` 的字段名与实现侧（`frontend/js/api.js` 的 `mapItem()`）已落地的写法不一致。
 **Day 15 由用户拍板：两者并存，不合并。**
 
 | 层 | 字段名 | 谁用 | 能否改名 |
 |---|---|---|---|
 | **接口层** | `originalText` / `correction` | `/api/analyze` 的请求与响应 | ❌ 不能 —— `correction` 绑着 B7 硬约束 |
-| **展示层** | `quote` / `fix` | `mock-items.json`、页面渲染 | ✅ 能 —— 只动展示 |
+| **展示层** | `quote` / `fix` | `api.js` 的 `mapItem()`、页面渲染 | ✅ 能 —— 只动展示 |
 
 **映射发生在前端 `api.js` 一处**（`TECH_DESIGN §4.2` 规矩 1：唯一出口）：
 
@@ -896,7 +896,7 @@ sessions（一场练习 = 一行）
 > **`items.topic_id` 冗余的代价**：理论上可能与 `sessions.topic_id` 写歪。
 > 约定：**由后端从 session 带出，不单独由前端传**。
 >
-> **入库时的一处翻译**：`mock-items.json` 里偏题写的是 `fix: ""`（空串），
+> **入库时的一处翻译**：偏题条目在前端是 `fix: ""`（空串），
 > 入库必须变成**真正的 `NULL`** —— 库里分得清空串与 `NULL`，而前端JS 用 falsy 判断，
 > 两者对它是「都没有」。空串会被 `ck_items_correction` 直接拒绝。
 
