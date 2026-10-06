@@ -55,6 +55,12 @@
      而「误判失败」在这里的代价是用户看到一句突兀的降级台词。 */
   var CHAT_TIMEOUT_MS = 60000;
 
+  /* analyze 又长一档：输入是整份 transcript（几十轮），
+     输出要逐条判断（偏题/逻辑/精彩句子 + 中文提醒 + 英文改法）。
+     比 chat 重得多，用60 秒会在正常场景下误判失败 ——
+     而误判失败在这里的代价是用户练完一场却看不到任何条目。 */
+  var ANALYZE_TIMEOUT_MS = 90000;
+
   /* ---------- 底层：带超时的 fetch ---------- */
   /* fetch 本身没有超时能力，不加控制台会一直转圈。
      AbortController 是标准做法，没有它就没有「等不下去就放弃」这条退路。 */
@@ -111,20 +117,31 @@
   }
 
   /* ---------- 字段映射：接口层 → 展示层（契约 §7） ----------
-     唯一一处翻译。改名只改这里，渲染代码永远只认 quote / fix / typeLabel。 */
-  function mapItem(row) {
+     唯一一处翻译。改名只改这里，渲染代码永远只认 quote / fix / typeLabel。
+
+     ★ typeFallback 是给「接口没给 type」的情况用的兜底，
+       默认值是 'good' —— 因为**只有精彩句子会缺 type**：
+       契约 §4 的 goodSentences[] 项只有 {turn, originalText}，
+       没有 type 字段；而 issues[] 一定有 type。
+       若默认成 'offtopic'，所有精彩句子都会被标成「偏题」
+       （typeLabelOf 的兜底分支就是偏题，Day 14 踩过offtopic/off_topic 的坑）。 */
+  function mapItem(row, typeFallback) {
+    var type = row.type || typeFallback || 'good';
     return {
       itemId: row.itemId,
       sessionId: row.sessionId,
       topicId: row.topicId,
-      type: row.type,
+      type: type,
       /* typeLabel 由 type 查表得到，**不让后端传**（契约 §7 的理由：
          中文界面文案的决定权不该交给后端，改文案就要改后端） */
-      typeLabel: typeLabelOf(row.type),
+      typeLabel: typeLabelOf(type),
       quote: row.originalText,          // 接口 originalText → 展示 quote
       turn: row.turn,
       reminder: row.reminder,
-      fix: row.correction === null ? '' : row.correction,  // 接口 correction → 展示 fix
+      /* ★ undefined 与 null 要分清：契约 §4 规定偏题的 correction 就是 null，
+         映射成展示层的空串（偏题只提醒、不给改法，B7）；
+         但字段整个不存在时也落空串 —— 渲染层只认空/非空，不必再判断。 */
+      fix: row.correction === null || row.correction === undefined ? '' : row.correction,
       isFavorited: row.isFavorited,
       note: row.note,
       favoritedAt: row.favoritedAt,
@@ -169,6 +186,65 @@
     return getFavorites(params).catch(function (err) {
       return { items: localFallback || [], count: (localFallback || []).length,
                degraded: true, errorCode: err.code, errorMessage: err.message };
+    });
+  }
+
+  /* ---------- POST /api/analyze（Day 19）----------
+     整场结束后的偏题 / 逻辑判断与精彩句子提取（契约 §4）。
+
+     ★ 为什么它不叫 items / results：契约 §4 定名 analyze，
+       且「分析」这个词在本项目里只指这一件事（回合中的 AI 不做分析，
+       那是 chat 的提示词里明写的不准做的事，B9）。
+
+     ★ 与chat 的三处不同：
+       ① 传的是整份 transcript，不是单轮 + 若干轮历史
+       ② 超时更长（90 秒）—— 输入是几十轮，输出要逐条判断，
+         比「等一句话」重得多；用60 秒会在正常场景下误判失败
+       ③ 返回的是**数组**，不是单个对象 —— 映射要逐条做
+
+     为什么用 mapItem 而不是自己拼：mapItem 是契约 §7 定的唯一映射处
+     （originalText → quote、correction → fix、type → typeLabel），
+     走它才不会写出第二份翻译。 */
+  function analyze(params) {
+    return postWithTimeout('/api/analyze', {
+      topicId: params.topicId,
+      transcript: params.transcript || [],
+      /* anchor 随请求带上：8 主题的偏题判定要有个「主题是什么」的依据，
+         而云函数读不到 frontend/data/topics.json（理由同 chat 的role/anchor）。
+         FREE 不判偏题，anchor 传空串即可。 */
+      anchor: params.anchor || ''
+    }, ANALYZE_TIMEOUT_MS).then(function (data) {
+return {
+      /* issues 自带 type（契约 §4 规定只允许 offtopic / logic），不传兜底；
+         goodSentences 没有 type 字段，显式给 'good' ——
+         靠 mapItem 的默认兜底虽然也能得到 'good'，
+         但那是「碰巧对」，写出来才知道为什么对。 */
+      issues: (data.issues || []).map(function (row) { return mapItem(row); }),
+      goodSentences: (data.goodSentences || []).map(function (row) { return mapItem(row, 'good'); }),
+        /* B10：没发现问题就是没发现，界面据此显示「没发现问题」，
+           不硬凑条目（mock 阶段这里总是有3 条假条目）。 */
+        noIssueFound: data.noIssueFound === true,
+        model: data.model
+      };
+    });
+  }
+
+  /* ---------- 带回落的 analyze ----------
+     为什么 analyze 也给回落版：判定要等模型（普遍 10–30 秒），
+     比 chat 更久，失败概率更高；而结果页在接口挂掉时
+     **不能变成空白** —— 用户练完一场看到「条目没能加载」，
+     不如看到预设条目 + 一行说明。行为与两个读接口一致（api.js 开头 ②）。 */
+  function analyzeOrLocal(params, localFallback) {
+    var fb = localFallback || { issues: [], goodSentences: [] };
+    return analyze(params).catch(function (err) {
+      return {
+        issues: fb.issues || [],
+        goodSentences: fb.goodSentences || [],
+        noIssueFound: !fb.issues || fb.issues.length === 0,
+        degraded: true,
+        errorCode: err.code,
+        errorMessage: err.message
+      };
     });
   }
 
@@ -252,6 +328,8 @@
     getSessionsOrLocal: getSessionsOrLocal,
     getFavoritesOrLocal: getFavoritesOrLocal,
     chat: chat,
+    analyze: analyze,
+    analyzeOrLocal: analyzeOrLocal,
     mapItem: mapItem,
     typeLabelOf: typeLabelOf
   };

@@ -25,8 +25,8 @@
 | 建立 | Day 15（第 3 周，板块 ④） |
 | 上游依据 | `TECH_DESIGN.md` §5（数据对象）/ §6（API 列表）/ §8（错误处理） |
 | 公网基址 | `https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com` |
-| 状态 | 🟢 2 个已实现（health / **sessions·favorites**）· 🟡 3 个占位待实现（chat / analyze / speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7） |
-| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1） |
+| 状态 | 🟢 4 个已实现（health / sessions·favorites / **chat** / **analyze**）· 🟡 1 个占位待实现（speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7） |
+| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1）；`/api/analyze` 的三条硬约束**只在云函数强制**（Day 19 用户采纳，见 §4） |
 
 ---
 
@@ -454,9 +454,12 @@ bash verify.sh
 
 <a id="s4"></a>
 
-## 四、待实现（占位）：`POST /api/analyze` 🟡
+## 四、已实现 🟢：`POST /api/analyze`
 
-**用途**：整场结束后，一次性给出两类条目 + 精彩句子（F2）。**只在对话结束时调一次**，不是每轮都调。
+**用途**：整场结束后，一次性给出两类条目+ 精彩句子（F2）。**只在对话结束时调一次**，不是每轮都调。
+
+> **Day 19 从占位转实现**。实现落在 `cloudfunctions/analyze/`（独立函数，不并进 chat——输入规模与超时预算都不同）。
+> 三条硬约束**只在云函数强制**（用户 Day 19 拍板），`frontend/js/api.js` 的 `analyze()` 不做这些处理。
 
 ### 请求
 
@@ -473,40 +476,54 @@ bash verify.sh
 |---|---|---|---|
 | `topicId` | string | 是 | `"T1"`–`"T8"` 或 `"FREE"` |
 | `transcript` | object[] | 是 | 整场转写全文，**每项 `{turn, userText, aiText}`** |
+| `anchor` | string | 否 | 8 主题的判偏题依据（主题是什么）。**Day 19 新增的字段**：云函数读不到 `frontend/data/topics.json`，所以这个值由前端随请求带上（同 `role`/`anchor` 在 §3 的理由）。FREE 传空串 |
 
 ### 响应（成功）
 
 ```json
 {
   "ok": true,
-  "issues": [
-    {
-      "type": "logic",
-      "turn": 2,
-      "originalText": "We have some issues but I think it's ok.",
-      "reminder": "先说「有问题」又说「没问题」，前后不一致。",
-      "correction": "We're two days behind on the API, but we can still make Friday."
-    },
-    {
-      "type": "offtopic",
-      "turn": 3,
-      "originalText": "By the way, I really like the coffee here.",
-      "reminder": "这一句偏离了「解释进度和原因」这个主题",
-      "correction": null
-    }
-  ],
-  "goodSentences": [
-    { "turn": 2, "originalText": "We're two days behind because the API spec changed." }
-  ],
-  "noIssueFound": false
+  "data": {
+    "issues": [
+      {
+        "type": "logic",
+        "turn": 2,
+        "originalText": "We have some issues but I think it's ok.",
+        "reminder": "先说「有问题」又说「没问题」，前后不一致。",
+        "correction": "We're two days behind on the API, but we can still make Friday."
+      },
+      {
+        "type": "offtopic",
+        "turn": 3,
+        "originalText": "By the way, I really like the coffee here.",
+        "reminder": "这一句偏离了「解释进度和原因」这个主题",
+        "correction": null
+      }
+    ],
+    "goodSentences": [
+      { "turn": 2, "originalText": "We're two days behind because the API spec changed.",
+        "reminder": "这句说清楚了，值得保留。" }
+    ],
+    "noIssueFound": false,
+    "model": "deepseek-chat"
+  }
 }
 ```
 
+> **★ Day 19 实现时发现并修正的三处契约缺口**（原有示例给不出的字段，都已补在上例里）：
+>
+> 1. **整个业务字段在 `data` 里**，不在顶层。与 `/api/chat` 一致 —— 原 §4 的示例把 `issues` 放在顶层，与实现不符
+> 2. **`goodSentences[]` 带 `reminder`**：展示层的 `item-card.js` 需要它渲染，没这一项界面会空一块
+> 3. **`goodSentences[]` 没有 `type` 字段**：契约只让模型回 `turn`。前端 `api.js` 必须显式补 `type='good'` ——
+>    **不补会被 `typeLabelOf()` 的兜底分支标成「偏题」**（Day 19 实测写单测抓到的）
+>
+> 另：失败响应的外壳原本写的是 `{ok, errorCode, message}`，实现用的是统一的 `{ok:false, data:null, error:{code, message}}`（同 `/api/chat`）——**这就是 §1.4 已记的那处外壳不一致**，本轮同样未改，等拍板。
+
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `issues[].type` | string | 只允许 `"offtopic"` / `"logic"` |
-| `issues[].correction` | string \| null | **偏题必须为 `null`**；逻辑错误必须有值（B7） |
-| `issues.length` | number | 前端据此算 `errorCount`（B22要能对上） |
+| `issues[].type` | string | 只允许 `"offtopic"` / `"logic"`（实现另接受 `off_topic`/`off-topic` 并归一化） |
+| `issues[].correction` | string \| null | **偏题必须为 `null`**；逻辑错误必须有值（B7）。**logic 但 `correction` 为空的条目会被整条丢弃**，不产出「标着逻辑错误却没改法」的条目 |
+| `issues.length` | number | 前端据此算 `errorCount`（B22要能对上）。实现另设上限 **5 条** |
 | `goodSentences[].originalText` | string | **只含用户说的句子**，不含 AI 的 |
 | `noIssueFound` | boolean | `true` 时界面显示"没发现问题"，**不硬凑条目**（B10） |
 
@@ -521,11 +538,33 @@ bash verify.sh
 > 第 2、3 条为什么必须后端强制而不是前端过滤：前端过滤会让「偏题条目确实被生成过」
 > 这个事实留在链路里，将来换前端、加导出功能时它就漏出来了。**口径要卡在数据源头那一层。**
 
+> **★ Day 19 实现补充：约束 1 靠「查不到就丢弃」来兜底。**
+> 模型偶尔会编一个不存在的 `turn`，或引用用户根本没说话的那一轮。
+> 这两种情况一律**整条丢弃**（不产出条目），**绝不退化成「让模型再写一遍原句」**——
+> 后者等于把约束 1 重新打开，而「收藏一句我没说过的话」是这个产品最不能出的错。
+>
+> 这也是**提示词里刻意不给原句**的原因：模型看不到 `userText`，只能看到 `turn` 编号与
+> 「这轮用户有没有发言」的标记。它**给不出 aiText**，也就无法把「用户的回应」当成被判断的对象。
+>
+> 三条约束的单测在 `.test-analyze.js`（18 项，含「模型编造 turn=99 被丢弃」、
+> 「模型塞的 originalText 被无视」、「偏题给改法也被强制置 null」等关键项）。
+
 ### 响应（失败）
 
 ```json
 { "ok": false, "errorCode": "LLM_BAD_FORMAT", "message": "这次没能整理出记录，再试一次好吗" }
 ```
+
+> 上面这行是**待拍板的旧写法**，实现用的是统一外壳
+> `{ok:false, data:null, error:{code, message}}`（同 §3）。
+
+### Day 19 实测记录的三个实现选择
+
+| 选择 | 理由 |
+|---|---|
+| **`temperature: 0.2`**（chat 是 0.7） | 同一场对话判两次若结论都不一样，用户会怀疑这个功能。要的是**判断稳定**，不是花样 |
+| **解析失败重试一次** | 靠正则从散文里抠 JSON 不可靠，抠不出来整场失败、用户白练一场。重试时把错误告诉模型让它自己改格式。**只做一次**：两次都失败说明是系统性问题，再试就是烧钱 |
+| **空 transcript 直接返回 `noIssueFound: true`** | 用户一句话都没说就结束对话是合法的，不该报错。★ **因此密钥检查必须排在参数校验之后**——否则这条正常路径会被「没配好密钥」拦住，而用户**改前端也改不掉**（前端无从判断该不该报这个） |
 
 ---
 
