@@ -19,9 +19,13 @@
      · chat / analyze 不查库、read/write 查库，这四条边界写在契约 §9.8 第 1 条。
 
    ★ 为什么一次写三张表（而不是只写 sessions 一行）：
-     单独插sessions 会留下一场「有汇总、没有内容」的记录 ——
-     记录页能看到它，点进去却什么都没有。三个 INSERT 放在**一个事务**里，
-     要么全成、要么全不成，不会留半场数据。
+     单独插 sessions 会留下一场「有汇总、没有内容」的记录 ——
+     记录页能看到它，点进去却什么都没有。
+     ★ Day 18 改造：这里**不再是「一个事务」**。本环境走 CloudBase HTTP API，
+       BEGIN/ROLLBACK 跨请求不生效（实测 ROLLBACK 后那一行还在），
+       且多语句拼一次调用被 PG 拒（DATABASE_42601）。
+       改成「每表一次请求 + 失败时补偿删父行」，靠批次内原子 + ON DELETE CASCADE
+       保证不留半场数据 —— 详见第八节。
 
    -------------------------------------------------------------
    ★★ 一、B8：原句不由请求方决定（契约 §9.8 第 2 条，本文件第一约束）
@@ -678,7 +682,7 @@ const server = http.createServer(function (req, res) {
 
 server.listen(9000, '0.0.0.0', function () {
   console.log('[write] listening on 0.0.0.0:9000');
-  console.log('[write] route: POST /api/sessions/write（写 sessions + turns + items，一个事务）');
+  console.log('[write] route: POST /api/sessions/write（写 sessions + turns + items，每表一次请求 + 补偿删除）');
   console.log('[write] 硬约束：原句按 turn 取回（B8）/ 偏题 correction 必须为空（B7）/ FREE 丢弃偏题');
   console.log('[write] 防重复：同sessionId 第二次提交 → 主键冲突 → 400 DUPLICATE');
   console.log('[write] db: ' + db.describe());
