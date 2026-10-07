@@ -25,8 +25,8 @@
 | 建立 | Day 15（第 3 周，板块 ④） |
 | 上游依据 | `TECH_DESIGN.md` §5（数据对象）/ §6（API 列表）/ §8（错误处理） |
 | 公网基址 | `https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com` |
-| 状态 | 🟢 4 个已实现（health / sessions·favorites / **chat** / **analyze**）· 🟡 1 个占位待实现（speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7） |
-| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1）；`/api/analyze` 的三条硬约束**只在云函数强制**（Day 19 用户采纳，见 §4） |
+| 状态 | 🟢 **5 个已实现**（health / sessions·favorites / **chat** / **analyze** / **write**）· 🟡 1 个占位待实现（speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7）· 🟢 **读写接口均已连通真实数据库**（Day 18 改走 HTTP API） |
+| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1）；`/api/analyze` 的三条硬约束**只在云函数强制**（Day 19 用户采纳，见 §4）；**写接口路径为 `/api/sessions/write`**，不改名（Day 18 用户采纳，见 [§4.1](#s41)）；**数据访问走 CloudBase HTTP API**、不直连（Day 18，见 [§10](#s10)） |
 
 ---
 
@@ -89,7 +89,8 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 ### 1.4 错误码清单
 
-**本清单是 Day 19 按线上代码逐个核出来的**（此前只列了 6 个，实际实现了 21 个）。
+**本清单是 Day 19 按线上代码逐个核出来的**（此前只列了 6 个，实际实现了 21 个），
+**Day 18 随数据访问层改走 HTTP API 调整为 20 个**（删 2 个失效的、加 1 个 `DUPLICATE`）。
 分类按前缀走，一眼能看出根因在哪一层。
 
 > **★ 为什么后端错误码不用 E 编号**：`TECH_DESIGN §8.2` 的 E1–E12 是**用户可见的前端错误**清单
@@ -98,7 +99,8 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 > 所以后端码另立一套并用 `LLM_` / `DB_` 前缀区分，**只有两处交叉**（下表已标出）。
 > 「对应」列留空 = 无对应 E 编号（前端不可见，属开发期/运维期错误）。
 >
-> 下面三张表合计 **21 个码**，其中有 E 编号的 2 个、无编号的 19 个。
+> 下面三张表合计 **20 个码**，其中有 E 编号的 2 个、无编号的 18 个。
+> （原为 22 → Day 18 删 `DB_CONNECTION_REFUSED` / `DB_HOST_UNREACHABLE`、加 `DUPLICATE`）
 > 数字以表为准，别口头转述——写这份文档时用脚本跟代码交叉核对过。
 > ⚠️ 核对时注意：错误码在代码里有**两种写法**，
 > 一种是 `sendError(res, 400, 'CODE', …)`，另一种是 `e.code = 'CODE'` 挂在抛出的错误上，
@@ -108,9 +110,10 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 | `error.code` | 对应 | 场景 | HTTP | 出现在 |
 |---|---|---|---|---|
-| `INVALID_PARAMS` | — | 必填参数缺失或类型不对 | 400 | chat / analyze / read |
+| `INVALID_PARAMS` | — | 必填参数缺失、类型不对，或被库的 CHECK 挡住 | 400 | chat / analyze / read / write |
 | `NOT_FOUND` | — | 路径不存在 | 404 | 全部四个 |
 | `METHOD_NOT_ALLOWED` | — | 方法不对（本接口只接受 GET） | 405 | 全部四个 |
+| `DUPLICATE` | — | 同一个 `sessionId` 已有记录（PG 23505 主键冲突） | **400** | write |
 | `INTERNAL_ERROR` | — | 服务器内部错误（兜底，**只在非预期异常时**） | 500 | chat / analyze |
 
 #### LLM 类（11 个，chat 与 analyze）
@@ -147,24 +150,38 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 >
 > 只有 `LLM_BAD_FORMAT` 值得重试 —— 这是它与前者的关键差别，也是 analyze 多写的那点代码。
 
-#### DB 类（6 个，read）
+#### DB 类（4 个，read / write）
 
-`read` 把 pg 抛的错**分类成 6 种**，而不是一律返回 `INTERNAL_ERROR`。这么做的原因：
-实测 `tcb fn log` 对 HTTP 函数**查不到调用日志**（返回 `No invocation logs`），
+`read` 与 `write` 把数据库侧的失败**分类成 4 种**，而不是一律返回 `INTERNAL_ERROR`。
+这么做的原因：实测 `tcb fn log` 对 HTTP 函数**查不到调用日志**（返回 `No invocation logs`），
 等于没有排错入口 —— 所以根因必须写进响应体，不依赖日志就能定位。
 
-| `error.code` | pg 侧对应 | 排错方向 |
+| `error.code` | 数据库侧对应 | 排错方向 |
 |---|---|---|
-| `DB_CONNECTION_REFUSED` | `ECONNREFUSED` / Connection refused | **端口或内网访问不通**（本环境当前就是这个） |
-| `DB_HOST_UNREACHABLE` | `ENOTFOUND` / getaddrinfo | `PGHOST` 不对，或内网 DNS 不可用 |
-| `DB_TIMEOUT` | `ETIMEDOUT` / timeout | 常见于内网未打通 |
-| `DB_AUTH_FAILED` | password authentication failed / no pg_hba | 账号或密码不对（**不是网络问题**，与上一条要分清） |
-| `DB_TABLE_MISSING` | relation does not exist | 建表脚本没在库里执行 |
-| `DB_QUERY_FAILED` | 其余所有 | 兜底，查 SQL 本身 |
+| `DB_AUTH_FAILED` | 401 / 403 / `PERMISSION_DENIED` | **`CLOUDBASE_API_KEY` 没配、填错或无权限**（本部署最可能的一类） |
+| `DB_TABLE_MISSING` | 42P01 / `relation does not exist` | 建表脚本没在库里执行 |
+| `DB_TIMEOUT` | 40001 / `ETIMEDOUT` / 死锁 | 数据库忙，稍后重试 |
+| `DB_QUERY_FAILED` | 其余所有（含网络层失败） | 兜底，看 `detail` 与日志 |
 
-> ★ `DB_CONNECTION_REFUSED` 与 `DB_AUTH_FAILED` 的区分是这套分类的重点：
-> 前者是**网络不通**，配对密码也没用；后者是**认证失败**，网络是通的。
-> 不分开的话，每次都要把两个方向都试一遍。
+> ★★ **Day 18 删除两个码（原表里的 `DB_CONNECTION_REFUSED` 与 `DB_HOST_UNREACHABLE`）**
+>
+> 原因是**它们在当前部署下不可能发生**：Day 18 起数据访问从 pg 驱动
+> 改走 CloudBase HTTP API（原因见 [§10](#s10)），
+> **既没有 TCP 连接可拒、也没有 `PGHOST` 要解析**。
+> 用户拍板「删掉，并在文档里注明失效原因」。
+> → 错误码总数从 22 降到 20。
+> ⚠️ **若将来升级到标准版、回到 pg 直连，这两个码要重新加回来。**
+
+> ★ `DB_AUTH_FAILED` 与 `DB_QUERY_FAILED` 的区分是这套分类的重点：
+> 前者是**凭证问题**（Key 没配或填错），后者是**别的**。
+> 本部署下最常见的失败就是前者 —— 配了 `CLOUDBASE_API_KEY` 之后它才消失。
+
+> **新增：本部署下的两个高频失败**（Day 18 实测，都不在上表里单列）
+>
+> | 现象 | 原因 | 怎么办 |
+> |---|---|---|
+> | 返回 `DUPLICATE`（400） | 同一个 `sessionId` 已有记录 | 这是**预期行为**，不是故障。前端可提示「这场已经存过了」 |
+> | 返回 `INVALID_PARAMS` 且提示「不符合入库口径」 | 应用的校验漏了网，被库的 CHECK 挡住（23514） | 看响应里的约束名（`ck_sessions_endtime` / `ck_items_correction` 等），补应用层校验 |
 
 > **为什么错误也用 HTTP 200 + `ok:false` 返回业务错误**：业务失败（AI 超时）不是 HTTP 层错误，
 > 用 200 让前端不必区分「网络失败」与「业务失败」两套处理逻辑。
@@ -687,6 +704,183 @@ bash verify.sh
 
 ---
 
+<a id="s41"></a>
+
+## 四之一、已实现 🟢：`POST /api/sessions/write`
+
+**用途**：点「结束对话」时把一场练习整场存下来。实现契约 §6.1 的 **R3**。
+落三张表：`sessions`（汇总 1 行）+ `turns`（轮次 1:N）+ `items`（条目 1:N）。
+
+> Day 18 上线并部署。落库实测：种子数据 `5/17/7` → 写入后 `7/21/9`，
+> 重复提交返回 `400 DUPLICATE` 且**行数不变**（不留下半场数据）。
+
+### ★★ 为什么路径不是 `/api/sessions`
+
+CloudBase HTTP 网关有两条硬限制（Day 18 实测 + 官方文档）：
+
+1. **同一域名下不能有重复路径**（重复会报 `INVALID_PARAM`）
+2. 路由配置里**没有 `method` 字段** —— **网关无法按 HTTP 方法把同一路径分给两个函数**
+
+而 `/api/sessions` 已被 `read` 占用（Day 17 建的 R1 读列表）。
+→ 写入只能另起一条路径。**用户 Day 18 拍板不改名**，理由：
+
+| 好处 | 说明 |
+|---|---|
+| `read` 一行代码不动 | 不用把读逻辑搬进写函数 |
+| 前端现有调用全不受影响 | `api.js` 调的还是 `/api/sessions`（读）与 `/api/favorites` |
+| 将来网关支持方法分流时 | 改回来只需删一条路由 + 动前端一个字符串 |
+
+**⚠️ 网关路由顺序**：`/api/sessions/write` **必须排在 `/api/sessions` 之前**，
+否则更短的路径会先匹配掉它（与契约 §1.1「`/api` 排在 `/` 之前」是同一类坑）。
+这一条由 `.test-write.js` 的结构性检查钉住。
+
+### 请求
+
+```json
+{
+  "sessionId": "S-20261007-abc",
+  "topicId": "T1",
+  "nickname": "小陈",
+  "startedAt": "2026-10-07T20:11:16+08:00",
+  "endedAt": "2026-10-07T20:14:20+08:00",
+  "isComplete": true,
+  "transcript": [
+    { "turn": 1, "userText": "We are two days behind on the API.", "aiText": "Which part exactly?" },
+    { "turn": 2, "userText": "The backend part.", "aiText": "Finish it by when?" }
+  ],
+  "items": [
+    { "turn": 2, "type": "logic", "reminder": "先说落后又说能做完", "correction": "…" }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `sessionId` | string | **否** | 见下方「三种实施决定」第 1 条。不传则后端生成 |
+| `topicId` | string | **是** | 白名单 `T1`–`T8` / `FREE`。**非白名单值返回 400** |
+| `nickname` | string | 否 | ≤64 字符，超长返回 400 |
+| `startedAt` | string | **是** | ISO 8601，**时区只接受 `+08:00`**（见第 3 条决定） |
+| `endedAt` | string | 条件 | 缺省 = 中途退出（B6）。**与 `isComplete` 必须自洽** |
+| `isComplete` | boolean | 否 | 默认按 `endedAt` 有无推断。`true` 必有 `endedAt`，`false` 必无 |
+| `transcript` | object[] | **是** | `{turn, userText, aiText, timestamp?, askedFollowUp?}`，至少 1 轮、上限 40 |
+| `items` | object[] | 否 | `{turn, type, reminder, correction?}`，上限 20 |
+
+### 响应（成功）
+
+```json
+{
+  "ok": true,
+  "data": {
+    "session": {
+      "sessionId": "S-20261007-abc", "topicId": "T1", "nickname": "小陈",
+      "startedAt": "2026-10-07T20:11:16+08:00", "endedAt": "2026-10-07T20:14:20+08:00",
+      "durationSeconds": 184, "errorCount": 1, "goodSentenceCount": 0, "turnCount": 2,
+      "isComplete": true, "aborted": false
+    },
+    "turnsStored": 2, "itemsStored": 1, "itemsDropped": 0
+  },
+  "error": null
+}
+```
+
+`data.session` 的字段名与 `GET /api/sessions` 的 `sessions[]` **完全一致** ——
+同一个字段名两处必须一样，否则前端要写两套取值代码。
+
+`itemsDropped` 是被 B8 与 FREE 规则丢掉的条目数，**让前端能告诉用户「有 N 条没存进去」**，
+而不是让条目静默消失。
+
+### 响应（失败）
+
+失败一律 `{ok:false, data:null, error:{code,message}}`，`data` 恒为 `null`（§1.3）。
+
+| 情况 | HTTP | `error.code` |
+|---|---|---|
+| 缺 `topicId` / `startedAt` / `transcript` | 400 | `INVALID_PARAMS` |
+| `topicId` 不在白名单 / 类型不是字符串 | 400 | `INVALID_PARAMS` |
+| `nickname` 超长（>64）、`turn` 超上限 | 400 | `INVALID_PARAMS` |
+| 时区不是 `+08:00` | 400 | `INVALID_PARAMS` |
+| `isComplete` 与 `endedAt` 不自洽 | 400 | `INVALID_PARAMS` |
+| `items[].turn` 在 `transcript` 里没有这一轮 | 400 | `INVALID_PARAMS` |
+| **同一个 `sessionId` 重复提交** | **400** | **`DUPLICATE`** |
+| 请求体不是合法 JSON / 超限 | 400 | `INVALID_JSON` / `PAYLOAD_TOO_LARGE` |
+| 写库时被库的 CHECK 挡住（23514） | 200 | `INVALID_PARAMS`（提示里说明违反了哪条口径） |
+| API Key 没配或无权限 | 200 | `DB_AUTH_FAILED` |
+| 路径不对 / 方法不对 | 404 / 405 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` |
+
+> ★ **`DUPLICATE` 用真实的 400 而不是 200** —— 其余业务失败走 `200 + ok:false`（§1.4），
+> 但「同一条记录提交两次」是**请求本身错了**，前端要能据此提示「别重复点」。
+
+### 五条实施决定（都不是 Day 15 原文写着的）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | **`sessionId` 改成可选** | 契约 §1.6 原写「由后端生成，前端不造」。但「重复提交被拒」这个要求**必须前端手里已有这个 id**才谈得上。折中：不传 = 后端生成（守住 §1.6）；传了 = 当**幂等键** |
+| 2 | **`items[].originalText` 不收**，后端按 `turn` 从 `transcript` 取回 | 契约 §9.8 第 2 条：`ck_items_correction` 只挡得住 `correction` 那一列，**挡不住原句被编造**。B8 的保障在这一层。请求方塞假值也会被无视 |
+| 3 | **时区只接受 `+08:00`** | 不引入时区库、不做换算（§9.8 第 5 条）。`Z` 与 UTC+8 差 8 小时，硬当本地时间会错 8 小时且不易察觉 → **明确拒绝并说清为什么** |
+| 4 | **四个计数与时长在后端算，不收前端传的** | `turnCount`/`errorCount`/`goodSentenceCount`/`durationSeconds` 都能从 `transcript` 与 `items` 推出来。让前端再传一份就多一处自相矛盾的地方（前端说 `turnCount=5` 而 `transcript` 只有 4 轮，库里就多一条永远对不上的记录） |
+| 5 | **`items` 不写 `is_favorited`/`note`/`favorited_at`** | 走建表时的 `DEFAULT`。收藏是 PATCH 的活（Day 20+）。顺带让 `ck_items_favtime` 天然成立 |
+
+### ★ 落库方式：三步请求 + 补偿删除（不是事务）
+
+**本环境没有跨请求事务** —— 实测 `BEGIN` 与 `ROLLBACK` 分两次 HTTP 调用，
+`ROLLBACK` 之后那一行还在（每次调用是独立连接）。多语句拼一次调用又被 PostgreSQL 拒
+（`cannot insert multiple commands into a prepared statement`）。
+
+所以改成**每表一次请求，失败时补偿删除**：
+
+```
+1. POST /sessions  单行      → 失败即止，此时库里什么都没有，不需要补偿
+2. POST /turns    整个数组    → 失败 → DELETE /sessions?session_id=eq.X
+3. POST /items    整个数组    → 失败 → 同上（靠 CASCADE 连带删已插的 turns）
+```
+
+它能成立靠两件**都实测过**的事实：
+
+| 依据 | 实测结果 |
+|---|---|
+| **批次内原子性** | 同一批里一行违反 CHECK → **整批 0 行落库** |
+| **`ON DELETE CASCADE`** | Day 16 建表就定义在 `turns` / `items` 上（`fk_turns_session` / `fk_items_session`） |
+
+补偿若也失败 → 抛错，且**下一次重试会被主键 `DUPLICATE` 挡住**，
+所以**不会写出半场数据**。
+
+> ⚠️ 顺序不能改：**父表必须先插**，否则子表会撞外键。
+> 这一条由 `.test-write-e2e.js` 的「三步按 sessions → turns → items」钉住。
+
+### 验证方式（可复现）
+
+```bash
+B=https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
+
+# 1. 正常写入（返回 ok:true，turnsStored/itemsStored 是实际条数）
+curl -s -X POST "$B/api/sessions/write" -H "Content-Type: application/json" \
+  -d '{"sessionId":"S-TEST-01","topicId":"T1","startedAt":"2026-10-07T20:11:16+08:00",
+       "endedAt":"2026-10-07T20:14:20+08:00","isComplete":true,
+       "transcript":[{"turn":1,"userText":"hi","aiText":"hello"}]}'
+
+# 2. 重复提交（库里已有这条 → 400 DUPLICATE，且行数不变）
+# 3. 缺字段（→ 400 INVALID_PARAMS + 中文点名）
+
+# 4. 库里确实多了一行
+tcb db execute -e cxj1528-d4g55ng0o54cbe296 \
+  --sql "SELECT (SELECT count(*) FROM sessions) AS s,(SELECT count(*) FROM turns) AS t,(SELECT count(*) FROM items) AS i"
+
+# 5. 读回（写进去的那行能被 GET 读出来，时间戳带 +08:00）
+curl -s "$B/api/sessions?limit=2"
+
+# 6. 离线单测（100 + 79 项，不连数据库）
+node .test-write.js && node .test-write-e2e.js
+
+# 7. HTTP API 的能力边界探针（含「跨请求事务无效」这条关键结论）
+node .probe-httpapi.js
+```
+
+> 写接口的 `data.session` 形状与 §2.1 的 `GET /api/sessions` 一致，
+> 所以 Day 17 那个 `verify.sh` 的六组检查里，**第 6 组「改一行库数据 → 接口跟着变」
+> 现在终于能真跑通了**（此前因连不上库一直被跳过）。
+
+---
+
 <a id="s5"></a>
 
 ## 五、预留（v1 不启用）：`POST /api/speech-to-text` ⚪
@@ -726,7 +920,8 @@ bash verify.sh
 |---|---|---|---|---|
 | R1 | `GET` | `/api/sessions` | **列表读取**：某主题的练习记录 | `vibecoding.sessions` |
 | R2 | `GET` | `/api/sessions/{id}` | 单场详情（含 `transcript`） | 同上 |
-| R3 | `POST` | `/api/sessions` | 写入一场会话（点「结束对话」时） | 同上 |
+| R3 | `POST` | `/api/sessions/write` | 写入一场会话（点「结束对话」时）| 同上 |
+| — | | | ⚠️ **路径不是 `/api/sessions`**：网关同域名下不能有重复路径、且路由没有 method 字段（Day 18 实测）。`/api/sessions` 归 R1。见 [§4.1](#s41) |
 | R4 | `GET` | `/api/items` | **列表读取**：条目与精彩句子（记录页用，支持按主题/时间筛选） | `vibecoding.issues` + `goodSentences` |
 | R5 | `PATCH` | `/api/items/{id}` | 改收藏标记 / 备注 | `favoriteItems` 的 `isFavorited` / `note` |
 | R6 | `GET` | `/api/practice-count` | 某主题练过几次 | `vibecoding.practiceCount` |
@@ -778,7 +973,7 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 > 转换只发生在云函数出口那一处：读库拿到 `TIMESTAMP` → 直接拼上 `+08:00`。
 
 > **本表是「预留接口设计」，不是已实现清单**（这些接口属§6.1，v1 不实现）。
-> 已实现的 21 个错误码见 §1.4。
+> 已实现的 20 个错误码见 §1.4。
 >
 > 两处与已实现代码的差异，将来实现时要留意：
 >
@@ -1018,7 +1213,7 @@ sessions（一场练习 = 一行）
 ### 9.8 Day 17 写接口时必须遵守的五件事
 
 1. **`/api/chat` 与 `/api/analyze` 都不查库**（它们只调大模型）。
-   库是给**读接口**（§6.1 的 R1–R6）用的—— `R3 POST /api/sessions` 才是写库的那个。
+   库是给**读接口**（§6.1 的 R1–R6）用的—— `R3 POST /api/sessions/write` 才是写库的那个。
 2. **写库时 `items.original_text` 必须从 `turns.user_text` 取**，不许 AI 重新生成（B8）。
    `ck_items_correction` 只能挡住 `correction` 那一列，**挡不住原句被编造**——
    B8 的保障在这一层，不在数据库。
@@ -1039,3 +1234,103 @@ sessions（一场练习 = 一行）
 **字段长什么样看 [§9](#s9)（库结构，PG 类型）；接口长什么样看 §3–§6（camelCase）。**
 **两者不一致时先查 §9.2 的两条决定** —— 库与接口的名字不一致是有意为之（PG 会转小写），
 不是笔误。产品口径仍以 `TECH_DESIGN §5` 为准，并回头改这里。**
+
+---
+
+<a id="s10"></a>
+
+## 十、数据访问方式：CloudBase HTTP API（Day 18 定）
+
+**这一节记录的是一个会长期影响所有读/写接口的决定** ——
+`read` 与 `write` **不直连 PostgreSQL**，走 CloudBase 自己的 HTTP API。
+
+### 为什么不能直连（Day 17 实测 + Day 18 查证官方能力表）
+
+| 结论 | 依据 |
+|---|---|
+| 本环境包版本是**体验版**，云函数**没有 VPC/内网访问权限** | `tcb env list` 显示「体验版」；所有读接口返回 `ECONNREFUSED` |
+| **不是端口配错、也不是密码错** | 配对密码没用；官方能力表里「云函数 连接腾讯云 VPC」在**体验版与个人版都是「-」** |
+| 标准版 ¥199 起才解锁 VPC，**且官方说直连能力尚未提供** | 官方工程师原话「直连能力等待后续功能更新后提供」，**无时间表** |
+| 社区无一例成功先例 | 社区 issue #1237（Day 17 查到） |
+| 换云托管**没用** | 云托管的「连接 VPC」在体验版/个人版同样是「-」 |
+
+→ **直连这条路在当前套餐下是死的**，不是配置问题。
+
+### ★ Day 17 判断错了一处（记录下来免得再犯）
+
+Day 17 在这里写的是：「HTTP API 只支持简单查询，将来写库别扭，**最终还是要回 pg**」。
+
+**这个判断是错的**（Day 18 查证 + 实测推翻）：
+
+| Day 17 的说法 | Day 18 的实测 |
+|---|---|
+| 只支持简单查询 | ✅ 支持 `POST`/`PATCH`/`DELETE`/`upsert` |
+| 写库别扭 | ✅ 批量插入**整体在一个事务里，失败整体回滚** |
+| —— | ✅ 还有 `exec-pgsql` 端点可直接跑任意 SQL |
+
+**代价是 Day 17–18 多花了一天半。** 教训：**判断某条路「走不通」之前，
+先把它的能力边界查清楚并实测，不要凭印象下结论。**
+
+### 现在的数据访问长什么样
+
+两个端点（鉴权用 `CLOUDBASE_API_KEY`，即 API Key / `service_role`）：
+
+| 端点 | 用途 |
+|---|---|
+| `https://{envId}.api.tcloudbasegateway.com/v1/rdb/rest/{table}` | PostgREST 风格，读写表，**支持一次插整个数组** |
+| `https://{envId}.api.tcloudbasegateway.com/v1/rdb/exec-pgsql` | 任意 SQL（DDL/DML），仅管理员凭据 |
+
+代码位置：`cloudfunctions/httpdb.js`（**read 与 write 各有一份副本**，
+因为 CloudBase 打包只上传 `functions[].dir` 里的文件）。
+**两份必须完全一致** —— 由 `.test-write.js` 的一项检查钉住。
+
+### ★ 三条实测出来的限制（写接口必须知道）
+
+| 限制 | 实测结果 | 我们怎么应对 |
+|---|---|---|
+| **跨请求没有事务** | `BEGIN` 与 `ROLLBACK` 分两次调用，ROLLBACK 后那一行还在 | 改成「每表一次请求 + 补偿删除」，见 [§4.1](#s41) |
+| **多语句不能拼一次调用** | PG 拒：`cannot insert multiple commands into a prepared statement` | 每表一次请求 |
+| **批次内是原子的** | 同批一行违反 CHECK → **整批 0 行落库** | 靠这个保证「每一步要么全成要么全不成」 |
+
+能力边界由 `.probe-httpapi.js`（**16 项检查，可随时重跑**）守着。
+
+### 云函数环境变量（配置缺了会返回 `DB_AUTH_FAILED`）
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `CLOUDBASE_API_KEY` | **是** | 控制台 → 环境管理 → API 密钥 → 建一个**服务端 API Key** |
+| `CLOUDBASE_ENV_ID` | 否 | 不配则用代码里的默认值 |
+
+> ⚠️ **API Key 等价于本环境管理员权限**，绝不能进代码仓库或浏览器。
+> 它已在 `.gitignore` 里。
+> ⚠️ **`read` 与 `write` 都要配** —— 缺一个就有一个连不上库。
+> ⚠️ 配置只能在控制台手配（`tcb fn env` 只有 `pull` 没有 `push`），
+> 且部署**只能用 `tcb fn code update`**（`tcb fn deploy` 会清空已配的环境变量）。
+
+### ⚠️ 这条路的成本约束（Day 18 查到，务必记住）
+
+PostgreSQL 按 CPU 使用量计费（342 点/(核·小时)，共享实例按 0.5 核、每 5 分钟一个单位）。
+当前环境是**免费体验版，每月 3,000 资源点**：
+
+| 档位 | 资源点/月 | 满负荷访问 PG 可撑 |
+|---|---|---|
+| 免费体验版（当前） | 3,000 | **约 17.5 小时/月**（每天累计活跃约 35 分钟） |
+| 个人版 ¥19.9 | 40,000 | 约 9.7 天/月 |
+
+**现在 PG 一接上就开始计费。** 撞上限的表现是接口开始返回 `DB_*` 错误。
+免费版**不支持按量付费兜底** —— 超限就是受限。
+
+> → 如果后续要把这个项目做成长期使用，¥19.9 个人版是最低实际门槛。
+> ⚠️ 但注意：个人版**同样买不到 VPC/直连**（能力表仍是「-」），
+> 它买到的只是更多资源点与按量兜底。
+
+### 三条硬约束在 HTTP API 下依然成立（Day 18 已复核）
+
+| 约束 | 怎么保证的 |
+|---|---|
+| B8：原句按 `turn` 取回 | 后端从 `transcript` 取，**请求里根本没有 `originalText` 这个字段** |
+| B7：偏题与精彩句子的 `correction` 必须 `null` | `cleanItems` 里强制置空 + 库里的 `ck_items_correction` |
+| `FREE` 丢弃偏题、`errorCount` 只算逻辑错误 | `cleanItems` 里 `if (isFree && t === 'offtopic') continue` |
+
+**这三条与数据访问方式无关**，所以换 HTTP API 之后不需要重新验证逻辑，只需验证行为一致——
+`.test-write.js` + `.test-write-e2e.js` 共 **179 项**就是干这个的。
