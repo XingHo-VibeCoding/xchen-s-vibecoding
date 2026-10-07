@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>检查台 · 口语对话实战器</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <span class="brandtag">部署自检</span>
+      <h1>检查台</h1>
+      <a class="navlink" href="topics.html">← 回到主题列表</a>
+    </div>
+
+    <!-- 面包屑 · 层级约定见 TECH_DESIGN.md §4.3
+         检查台是跨会话的工具页，与话题链无关（同 records.html 的理由：
+         它不属于任何一场对话），所以话题链到一级就断。 -->
+    <nav class="breadcrumb" aria-label="面包屑导航">
+      <a href="topics.html">主题列表</a>
+      <span class="sep" aria-hidden="true">›</span>
+      <span aria-current="page">检查台</span>
+    </nav>
+
+    <p class="lede">
+      这一页是给「发链接给同伴」之前自检用的：确认云函数活着、库里真有数据、写入链路通。
+      页面本身不产生任何练习记录。
+    </p>
+
+    <!-- ---------- 最后更新（余力加练）----------
+         ★ 这个时间指的是「**最后一次成功读到数据**」的时刻，不是页面打开的时刻。
+           两者在失败时会差很远：打开页面时读到了（时间 A），
+           三十秒后点「重新读取」失败了 —— 那时页面还能显示 A，
+           若把它标成「最后更新时间 = 刚才」，就等于在说「刚更新过」，
+           而实际上那一刻什么都没拿到。所以只在成功时更新它。 -->
+    <p class="mock-bar" id="last-updated" role="status">还没有读取过数据。</p>
+
+    <!-- ---------- 一、健康状态 ----------
+         只打 GET /api（契约 §2 的裸 /api 路径，路由表里最后一条兜底的 health）。
+         为什么用 /api 而不是 /api/health：契约 §2 实测记录过网关会剥掉 /api 前缀，
+         函数同时认 /health、/api/health、/ —— 裸 /api 最省事且一定通。 -->
+    <div class="card">
+      <h2>一、健康状态</h2>
+      <p class="hint">请求 <code>GET /api</code>，这是最轻的一条路径，不查库。返回正常说明网关与云函数都活着。</p>
+      <ul class="stat-list" id="health-list" aria-live="polite"></ul>
+      <p class="mock-bar" id="health-note" role="status"></p>
+    </div>
+
+    <!-- ---------- 二、核心表真实数据 ----------
+         sessions 是本项目的核心表（契约 §9.1）。清单里写的 checkins 表本项目没有，
+         理由见契约 §6.2「本项目不是打卡应用」。 -->
+    <div class="card card-spaced">
+      <h2>二、核心表真实数据（sessions）</h2>
+      <p class="hint">
+        请求 <code>GET /api/sessions?limit=8</code>，下面是库里真实返回的行，按时间倒序。
+        改动数据库后刷新本页，数字与行数应立刻跟着变 —— 这一条是部署是否真正连上库的直接判据。
+      </p>
+      <ul class="stat-list" id="sess-list" aria-live="polite"></ul>
+      <!-- 不用内联 margin-top：main.css:602 的 .card .hint + * 兄弟选择器
+           会给紧跟在 .hint 后面的元素自动加上边距（Day 9 立的规矩）。 -->
+      <div class="item-list" id="sess-rows"></div>
+      <p class="mock-bar" id="sess-note" role="status"></p>
+    </div>
+
+    <!-- ---------- 三、写入测试 ----------
+         调 POST /api/sessions/write（契约 §4之一）。落库的行带 TEST- 前缀，
+         可在控制台 SQL 编辑器按 session_id like 'S-TEST-%' 一次删掉。 -->
+    <div class="card card-spaced">
+      <h2>三、写入测试</h2>
+      <p class="hint">
+        点一下会真的往sessions 表写一行（<code>sessionId</code> 带 <code>S-TEST-</code> 前缀），
+        用来验证「浏览器 → 网关 → 云函数 → 数据库」整条写入链路。
+        连点两次会因为主键重复被挡下（返回 <code>DUPLICATE</code>）—— 那正好说明约束在生效。
+      </p>
+      <p class="actions">
+        <button class="ic-btn" id="btn-write" type="button">写一条测试数据</button>
+        <button class="ic-btn" id="btn-reload" type="button">重新读取</button>
+      </p>
+      <p class="ic-hint" id="write-hint" role="status"></p>
+      <p class="mock-bar" id="write-note"></p>
+    </div>
+
+    <footer class="page-foot">
+      口语对话实战器 · 检查台
+    </footer>
+
+  </div>
+
+  <!-- 加载顺序：api → 页面逻辑。
+       api.js 不依赖任何组件（只依赖原生 fetch），页面逻辑要 window.Api，
+       顺序与 records.html 一致（那里是 storage → interact → item-card → api → 逻辑）。 -->
+  <script src="../js/api.js"></script>
+  <script src="../js/pages/status.js"></script>
+</body>
+</html>

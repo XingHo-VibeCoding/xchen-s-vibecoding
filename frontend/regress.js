@@ -1,4 +1,4 @@
-// 四页 × 五断点回归（Day 12）—— 改 main.css 后的必做项
+// 五页 × 五断点回归（Day 12 建，Day 20 加 status）—— 改 main.css 后的必做项
 // 跑法：cd frontend && python serve.py另开一个终端 → node regress.js
 // 判据：横向溢出 / 触控目标 <44px / 控制台报错，各页各断点都过才算通过
 const http = require('http');
@@ -8,7 +8,10 @@ const crypto = require('crypto');
 
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const PORT = 9334;
-const PAGES = ['topics', 'dialogue', 'result', 'records'];
+/* Day 20：加 'status'。检查台也要进回归 ——
+   它同样引用 main.css，而回归的判据（横向溢出 / 触控目标 / 控制台报错）
+   对它同样成立；新页面不进这个清单就等于没人替它把关。 */
+const PAGES = ['topics', 'dialogue', 'result', 'records', 'status'];
 const WIDTHS = [390, 360, 640, 740, 1440];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

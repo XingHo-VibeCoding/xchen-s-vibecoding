@@ -2,7 +2,15 @@
    -------------------------------------------------------------
    位置：TECH_DESIGN §4.2 规矩 1 定的「唯一出口」——
      换环境只改这**一个文件**里的 BASE，四个页面一个字都不用动。
-     今天只接两个读接口（api-contract §2.1），写入接口 Day 18 起陆续加。
+
+   ★ 接口清单与接进来的时间：
+     GET  /api                health   ✅ Day 20（pingHealth，检查台用）
+     GET  /api/sessions       read     ✅ Day 17
+     GET  /api/favorites      read     ✅ Day 17
+     POST /api/chat           chat     ✅ Day 18
+     POST /api/analyze        analyze  ✅ Day 19
+     POST /api/sessions/write write    ✅ Day 20（writeSession，检查台用）
+     POST /api/speech-to-text           ⬜ 未接（契约 §5，本期不启用）
 
    为什么今天要建它（而不是等接口通了再说）：
      页面要接后端，就必须有一个「统一的地方」知道
@@ -84,15 +92,34 @@
     if (controller) opt.signal = controller.signal;
 
     return fetch(url, opt).then(function (res) {
-      /* 先看HTTP 状态码，再解JSON —— 顺序不能反。
+      /*先解文本再分类，**不要一上来按 res.ok 分流**。
+         原因（Day 20 修，与 postWithTimeout 同一处坑）：
+         契约 §1.2 说业务失败一般是 200 + ok:false，但 §2 的 health 表里
+         404 NOT_FOUND、§4之一 表里 405 METHOD_NOT_ALLOWED 都是**真实 4xx**，
+         而且它们 body 里**带着有意义的 error.code**。
+         先判 res.ok 会把这些码盖成 HTTP_404 —— records.html 的降级提示
+         恰恰是靠 errorCode 说话的（它要区分「路径没接上」与「库读不到」）。
+
+         为什么用 res.text() 再 JSON.parse 而不是直接 res.json()：
          本地起服务时请求 /api/favorites 会拿到 serve.py 的 404 **HTML**，
          直接 res.json() 会抛 SyntaxError，而 SyntaxError 没有 .code，
-         页面就只会显示「后端数据读不到」，把真正的原因（路径没接上）盖掉了。
-         这里先判状态码，好让降级提示能说出到底是哪种失败。 */
+         页面就只会显示「后端数据读不到」，把真正的原因（路径没接上）盖掉了。 */
       return res.text().then(function (txt) {
         var body = null;
         try { body = JSON.parse(txt); } catch (e) { /* 不是 JSON，留在下面按 HTTP 状态处理 */ }
 
+        /* 第一级：body 自带业务错误码 → 用它（契约的分类口径）。
+           判据是 `ok === false` 而非 `!res.ok`，
+           否则 200 + ok:false 那种正常业务失败会被漏掉。 */
+        if (body && body.ok === false && body.error && body.error.code) {
+          var be = new Error(body.error.message || '接口返回失败');
+          be.code = body.error.code;
+          be.gotPath = body.gotPath;
+          be.httpStatus = res.status;
+          throw be;
+        }
+
+        /* 第二级：没有 JSON 或状态码不对 → 这才是传输层/路径问题。 */
         if (!res.ok || !body) {
           var e2 = new Error(
             body ? '' : 'HTTP ' + res.status + '（返回的不是 JSON，多半是路径没接到后端）');
@@ -100,8 +127,8 @@
           throw e2;
         }
 
-        /* 契约 §1.2：只看 ok，不看 HTTP 状态码。
-           业务错误是 200 + ok:false，网络层错误才会走到 catch。 */
+        /* 第三级：外壳形状不对（ok 不为 true 却没有 error），
+           不能当成功 —— 否则页面会拿到 undefined 去渲染。 */
         if (body.ok !== true) {
           var e = body.error || {};
           var err = new Error(e.message || '接口返回失败');
@@ -301,13 +328,37 @@ return {
         var body = null;
         try { body = JSON.parse(txt); } catch (e) {}
 
+        /* ★★ Day 20 修的一处真bug：原来这里先判`!res.ok` 就抛，
+           结果把 body 里真正的 error.code 盖掉了。
+
+           症状（检查台第一次点写入就撞上）：第二个测试行点第二次时，
+           接口按契约 §4之一返回 `HTTP 400 + error.code="DUPLICATE"`，
+           前端却显示 `HTTP_400` —— 页面因此把「主键约束按预期生效」
+           说成了「写入失败」，方向完全反了。
+
+           根因：`res.ok` 为 false 时，body **照样是那份合法的 {ok:false,...}**
+           （契约 §1.3 规定业务失败 data 恒为 null，但 error 一定在）。
+           契约 §4之一 明确写「DUPLICATE 用真实的 400 而不是 200」，
+           所以 4xx 也可能带着有意义的业务错误码—— 不能只看状态码。
+
+           修法：**先看 body 有没有 error.code**，有就用它（这才是契约的分类口径）；
+           没有才退回按 HTTP 状态码分类（那时才是真正的传输层问题）。
+           两级顺序不能反 —— 反了就是今天这个 bug。 */
+        if (body && body.ok === false && body.error && body.error.code) {
+          var be = new Error(body.error.message || '接口返回失败');
+          be.code = body.error.code;
+          be.httpStatus = res.status;
+          throw be;
+        }
+
         if (!res.ok || !body) {
           var e2 = new Error(body ? ''
             : 'HTTP ' + res.status + '（返回的不是 JSON，多半是路径没接到后端）');
           e2.code = body ? 'HTTP_' + res.status : 'HTTP_' + res.status + '_NOT_JSON';
           throw e2;
         }
-        /* 契约 §1.2：只看 ok。业务失败是 200 + ok:false。 */
+        /* 契约 §1.2：业务失败通常是 200 + ok:false，上面已处理过；
+           走到这里若 ok 仍不为 true，说明外壳形状不对，不能当成功。 */
         if (body.ok !== true) {
           var e = body.error || {};
           var err = new Error(e.message || '接口返回失败');
@@ -315,6 +366,78 @@ return {
           throw err;
         }
         return body.data;
+      });
+    }).finally(function () {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
+  /* ---------- POST /api/sessions/write（Day 20 · 检查台写入测试）----------
+     ★ 为什么今天才接：Day 18 建了这个接口但前端没调用方，
+       一直只靠 curl 验证。今天检查台（pages/status.html）要一个
+       「写入链路通不通」的按钮，这是它的第一个前端调用方。
+
+     ★ sessionId 由前端生成（契约 §4之一 决定 1）：
+       「重复提交被拒」这个行为要求**前端手里已经有这个 id**才谈得上 ——
+       后端生成的话，第二次点按钮会拿到两个不同 id，永远撞不上主键。
+       所以这里带一个带 S-TEST- 前缀的固定 id：
+         第一次点 = 写入成功；第二次点 = 400 DUPLICATE，正好验证约束在生效。
+
+     ★ 不叫 saveSession 而叫 writeSession：路径是 /api/sessions/write，
+       云函数名也是 write（cloudbaserc.json 里的第 4 个函数），
+       名字跟着走省得对不上。
+
+     ⚠️ 这一条是四个 POST 里唯一「真的会改数据库」的。
+       别的（chat / analyze）只读不写，失败重试无副作用；
+       这一条失败重试会在库里留两行 —— 所以它的幂等键必须真的起作用。 */
+  function writeSession(payload) {
+    return postWithTimeout('/api/sessions/write', {
+      sessionId: payload.sessionId,
+      topicId: payload.topicId,
+      nickname: payload.nickname || '',
+      startedAt: payload.startedAt,
+      endedAt: payload.endedAt || '',
+      isComplete: payload.isComplete === true,
+      /* transcript 至少 1 轮（契约 §4之一 必填）。空数组会被接口判 INVALID_PARAMS，
+         所以调用方必须给至少一轮 —— 这里不再兜底，塞个假的反而会写进库里。 */
+      transcript: payload.transcript || [],
+      items: payload.items || []
+    }, TIMEOUT_MS).then(function (data) {
+      return {
+        session: data.session,
+        turnsStored: data.turnsStored,
+        itemsStored: data.itemsStored,
+        itemsDropped: data.itemsDropped
+      };
+    });
+  }
+
+  /* ---------- 裸 GET /api（Day 20 · 检查台健康检查）----------
+     health 那条路由在 cloudbaserc.json 里是 path:"/api"（**没有 /health 后缀**），
+     所以这里就是 GET /api，不要自己加后缀。返回 {ok:true, service:"TalkTrainer"}，
+     注意它**不包在 data 里** —— 与其余四个接口的 {ok,data,error} 外壳不同，
+     是契约 §2 记过的历史形状。所以不能走 request()（那个函数会解 body.data），
+     单独发一次 fetch。 */
+  function pingHealth() {
+    var url = BASE + '/api';
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, TIMEOUT_MS) : null;
+    var opt = { method: 'GET', headers: { 'Accept': 'application/json' } };
+    if (controller) opt.signal = controller.signal;
+
+    return fetch(url, opt).then(function (res) {
+      return res.text().then(function (txt) {
+        var body = null;
+        try { body = JSON.parse(txt); } catch (e) {}
+        if (!res.ok || !body || body.ok !== true) {
+          var e = new Error(body && body.error ? (body.error.message || '健康检查失败')
+            : 'HTTP ' + res.status + '（健康接口没返回预期内容）');
+          e.code = body && body.error ? (body.error.code || 'UNKNOWN') : 'HTTP_' + res.status;
+          throw e;
+        }
+        /* 注意这里返回的是 body 本身而不是 body.data：
+           health 的形状是 {ok, service}，没有 data 这一层。 */
+        return { service: body.service || '（未返回服务名）', base: BASE || '（当前域名）' };
       });
     }).finally(function () {
       if (timer) clearTimeout(timer);
@@ -330,6 +453,8 @@ return {
     chat: chat,
     analyze: analyze,
     analyzeOrLocal: analyzeOrLocal,
+    writeSession: writeSession,
+    pingHealth: pingHealth,
     mapItem: mapItem,
     typeLabelOf: typeLabelOf
   };

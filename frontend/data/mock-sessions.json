@@ -1,5 +1,6 @@
 {
-  "_readme": "P1 首页的本地假数据（Day 8 · mock）。第 3 周接上 /api/analyze 与 localStorage 后，这份文件由真实数据替代（见 TECH_DESIGN.md §5.7）。字段口径对齐 PRD.md §8.3：错误次数 = 偏题条数 + 逻辑错误条数。",
+  "_readme": "P1 首页主题卡片的「上次在这里卡过」标记（Day 8 · mock）。Day 20 起**只服务这一处**：概览三项（练过几次 / 累计问题条目 / 已收藏）已改读 GET /api/sessions 与 /api/favorites。文件保留而不删，因为 stuckMap 需要的是分项（某主题错几条、错在偏题还是逻辑错误），而 /api/sessions 只给合计的 errorCount。分项要等 items 表全量查询接口，不在 Day 20 范围内。字段口径对齐 PRD.md §8.3：错误次数 = 偏题条数 + 逻辑错误条数。",
+  "_stuckMapOnly": "renderTopics 只读 practicedTopics；sessionCount 与 favoriteCount 两个字段 Day 20 起已无人读取（概览不再用它们）。",
   "sessionCount": 3,
   "favoriteCount": 2,
   "practicedTopics": [

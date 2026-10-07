@@ -110,17 +110,23 @@
     </div>
 
     <footer class="page-foot">
-      口语对话实战器 · 主题列表页 · 当前数据为本地假数据（mock）
+      口语对话实战器 · 主题列表页 · 卡点概览读自云端数据库
     </footer>
 
   </div>
 
-  <!-- 加载顺序有讲究，三层从下往上依赖，顺序不能换：
-         ① storage.js   —— localStorage 的唯一出口（TECH_DESIGN.md §4.2 规矩 2）
-         ② interact.js  —— 会反馈的按钮组件，topic-card.js 要用它造星标
-         ③ topic-card.js—— 主题卡片组件，topics.js 要用它造卡片
-         ④ topics.js    —— 本页逻辑，最后加载
-       任何一步提前都会拿到 undefined（组件是可复用的，别的页面要加同一行）。 -->
+  <!-- 加载顺序有讲究，五层从下往上依赖，顺序不能换：
+         ① api.js       —— 访问云端接口的唯一出口（Day 17 建，Day 20 接进本页）
+         ② storage.js   —— localStorage 的唯一出口（TECH_DESIGN.md §4.2 规矩 2）
+         ③ interact.js  —— 会反馈的按钮组件，topic-card.js 要用它造星标
+         ④ topic-card.js—— 主题卡片组件，topics.js 要用它造卡片
+         ⑤ topics.js    —— 本页逻辑，最后加载
+       任何一步提前都会拿到 undefined（组件是可复用的，别的页面要加同一行）。
+
+       ★ api.js 排第一位的理由不是它依赖别人，而是**别人依赖它**：
+         topics.js 的概览要从 window.Api 取数，缺了它概览三项就是 0。
+         api.js 自己只依赖原生 fetch，谁都不依赖，所以放最前面最安全。 -->
+  <script src="../js/api.js"></script>
   <script src="../js/storage.js"></script>
   <script src="../js/components/interact.js"></script>
   <script src="../js/components/topic-card.js"></script>

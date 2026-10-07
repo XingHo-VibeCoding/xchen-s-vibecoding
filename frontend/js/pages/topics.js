@@ -21,6 +21,13 @@
    Day 14 修订（用户拍板）：这个入口由「主题列表**末尾**」搬到「主题列表**之上**」，
      成为页面上的**区块 02**（自成一节，不再是 #topics-body 里的一项）。
      渲染落点随之改为 #free-slot，四态处理见 renderLoading/Empty/Error 与 renderTopics。
+   Day 20（第 3 周 · 板块 ②）：**首页概览的数据源从 mock 换成公网接口**。
+    卡点概览三项（练过几次 / 累计问题条目 / 已收藏）改为现场从
+    GET /api/sessions 与 GET /api/favorites 算，不再读 mock-sessions.json 的写死数字。
+    ★ 但**主题卡片上的「上次在这里卡过」标记仍读 mock-sessions.json 的 practicedTopics**：
+      今天只换概览三项（用户拍板的范围），stuckMap 需要的是「每个主题各错几条、
+      错在偏题还是逻辑」的**分项**，而 GET /api/sessions 只给合计的 errorCount，
+      拿不到分项 —— 那是 items 表全量查询的活，今天不扩到那里。
    ------------------------------------------------------------- */
 
 (function () {
@@ -300,7 +307,7 @@
     window.scrollTo(0, y);
   }
 
-  /* ---------- 3. 成功态：区块 3（卡点概览，mock 数据） ---------- */
+  /* ---------- 3. 成功态：区块 3（卡点概览）---------- */
 
   function statRow(label, value, sub) {
     var li = el('li');
@@ -311,34 +318,48 @@
     return li;
   }
 
-  function renderOverview(mock) {
-    var practiced = (mock && mock.practicedTopics) || [];
+  /* ★★ Day 20：参数从 mock 换成 { sessions, favorites, degraded, errorCode }。
+     数字的来源全在下面注释里写明，不留「这个 3 是哪来的」这种疑问：
 
-    // 口径对齐 PRD.md §8.3：错误次数 = 偏题条数 + 逻辑错误条数。
-    // 各项都由 practicedTopics 现场加总，不写死数字——第 3 周换成真实记录后这张表不用改。
-    var sum = function (key) {
-      return practiced.reduce(function (acc, p) { return acc + (p[key] || 0); }, 0);
-    };
-    var sessions = (mock && typeof mock.sessionCount === 'number') ? mock.sessionCount : practiced.length;
-    var issues = sum('issueCount');
-    var offTopic = sum('offTopicCount');
-    var logicError = sum('logicErrorCount');
-    var favorites = (mock && typeof mock.favoriteCount === 'number') ? mock.favoriteCount : 0;
+       练过几次    = sessions.length（GET /api/sessions 的实际返回条数）
+       累计问题条目 = Σ sessions[].errorCount
+       已收藏      = favorites.length（GET /api/favorites 的实际返回条数）
+
+     errorCount 这个字段名不是我起的：契约 §9.3 定的列名，
+     它存的是 PRD.md §8.3 口径下的「偏题条数 + 逻辑错误条数」合计
+     （CHECK 约束建表时就钉死了），所以直接加总，不用在这里再分类。 */
+  function renderOverview(real) {
+    var sessions = (real && real.sessions) || [];
+    var favorites = (real && real.favorites) || [];
+
+    var issues = sessions.reduce(function (acc, s) {
+      return acc + (s.errorCount || 0);
+    }, 0);
 
     var frag = document.createDocumentFragment();
 
     var list = el('ul', 'stat-list');
-    list.appendChild(statRow('练过几次', sessions + ' 次'));
-    list.appendChild(statRow('累计问题条目', issues + ' 条', '偏题 ' + offTopic + ' · 逻辑错误 ' + logicError));
-    list.appendChild(statRow('已收藏', favorites + ' 条'));
+    list.appendChild(statRow('练过几次', sessions.length + ' 次'));
+    list.appendChild(statRow('累计问题条目', issues + ' 条',
+      '口径：偏题条数 + 逻辑错误条数'));
+    list.appendChild(statRow('已收藏', favorites.length + ' 条'));
     frag.appendChild(list);
 
     var link = el('a', 'navlink block', '查看错误记录 →');
     link.href = 'records.html';
     frag.appendChild(link);
 
-    frag.appendChild(el('p', 'hint mock-note',
-      '以上是本地假数据（mock）。第 3 周接上真实记录后，这里显示你自己的卡点。'));
+    /* ★ 降级时必须说出来，不能让人以为「我练过 0 次」。
+       与 api.js 开头约定 ② 一致：接口失败不把页面清空，但**必须显示出来**。
+       errorCode 直接摆出来，用户截图反馈时能一眼定位（TECH_DESIGN §8.2 口径）。 */
+    if (real && real.degraded) {
+      frag.appendChild(el('p', 'hint mock-note',
+        '以上数字来自云端数据库。**本次没读到**（错误码 ' + (real.errorCode || 'UNKNOWN') +
+        '），所以显示的是空值 —— 这不代表你没有练习记录。'));
+    } else {
+      frag.appendChild(el('p', 'hint mock-note',
+        '以上数字来自云端数据库（GET /api/sessions 与 /api/favorites）。'));
+    }
 
     overviewBody.replaceChildren(frag);
   }
@@ -357,12 +378,32 @@
   // 要看「加载中」这一态就停在这里，不再往下走
   if (FORCED === 'loading') return;
 
+  /* ★ api.js 没加载就说清楚，而不是让 window.Api 变成 undefined 后面报
+     「Cannot read properties of undefined」——那句话用户看不懂也不知道怎么办。
+     判空放在最前面：它是「文件加载顺序错了」，与其他错误不是一回事。 */
+  if (!window.Api) {
+    renderError('接口模块没加载（js/api.js），本页拿不到云端数据。请检查 topics.html 的脚本顺序。');
+    return;
+  }
+
+  /* Day 20：三份数据并着取。
+     ① topics.json      —— 主题清单，仍是本地静态文件（它是内容不是记录，本该进库但没做）
+     ② mock-sessions.json —— 只给主题卡片的「卡过」标记用（renderTopics 里的 stuckMap）
+     ③ /api/sessions + /api/favorites —— 概览三项的真实数字
+
+     为什么②③要分开取而不是合成一次：②要的是**分项**（某主题错几条、错在哪类），
+     ③给的是**合计**（errorCount）。合成一份反而不诚实 —— 拿合计冒充分项，
+     卡上的标记就会显示错的数字。分开取，各用各的，注释写清就说得清。 */
   Promise.all([
     fetchJSON('../../data/topics.json'),
-    fetchJSON('../../data/mock-sessions.json')
+    fetchJSON('../../data/mock-sessions.json'),
+    window.Api.getSessionsOrLocal({ limit: 100 }, []),
+    window.Api.getFavoritesOrLocal({ limit: 100 }, [])
   ]).then(function (result) {
     var topics = result[0];
     var mock = result[1];
+    var sess = result[2];
+    var fav = result[3];
 
     if (FORCED === 'error') throw new Error('演示用：强制错误状态');
     if (!Array.isArray(topics) || topics.length === 0 || FORCED === 'empty') {
@@ -375,7 +416,17 @@
     lastMock = mock;
 
     renderTopics(topics, mock);
-    renderOverview(mock);
+
+    /* 概览用真数据。两个接口**各自**判断降级：sessions 挂了但 favorites 好了，
+       错误码该显示哪一个要看得见。这里合并时保留先失败的那个 code，
+       因为 sessions 是三项数字里的两项，它的失败影响更大。 */
+    var degraded = sess.degraded || fav.degraded;
+    renderOverview({
+      sessions: sess.sessions || [],
+      favorites: fav.items || [],
+      degraded: degraded,
+      errorCode: sess.degraded ? sess.errorCode : fav.errorCode
+    });
   }).catch(function (err) {
     renderError(err && err.message ? err.message : '');
   });
