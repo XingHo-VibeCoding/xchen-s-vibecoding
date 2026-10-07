@@ -32,6 +32,16 @@
       "installDependency": true
     },
     {
+      "name": "write",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/write",
+      "runtime": "Nodejs20.19",
+      "description": "写入一场练习: sessions + turns + items 三张表一个事务。Day 18。路径要排在 GET 的前面",
+      "timeout": 20,
+      "memorySize": 256,
+      "installDependency": true
+    },
+    {
       "name": "analyze",
       "type": "HTTP",
       "dir": "./cloudfunctions/analyze",
@@ -52,6 +62,11 @@
   ],
   "gateway": {
     "routes": [
+      {
+        "path": "/api/sessions/write",
+        "target": "function:write",
+        "enablePathTransmission": true
+      },
       {
         "path": "/api/sessions",
         "target": "function:read",

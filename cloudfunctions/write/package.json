@@ -1,0 +1,11 @@
+{
+  "name": "write",
+  "version": "1.0.0",
+  "description": "POST /api/sessions/write —— 写入一场练习（sessions + turns + items，三步 + 补偿删除）。Day 18，契约 §6.1 的 R3。刻意不依赖 pg：体验版无 VPC 权限，走 CloudBase HTTP API",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

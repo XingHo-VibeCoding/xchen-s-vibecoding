@@ -28,29 +28,13 @@
    -------------------------------------------------------------------- */
 
 const http = require('http');
-const { Pool } = require('pg');
-
-/* ---------- 一、数据库连接池 ----------
-   连接信息全部来自环境变量，不写死在代码里（AGENTS.md 第五条 / README 安全约定）。
-   连接池放在模块顶层：云函数会复用同一个运行时实例，
-   每次请求新建连接会很快把数据库连接数打满。 */
-const pool = new Pool({
-  host: process.env.PGHOST,
-  port: Number(process.env.PGPORT || 5432),
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  ssl: process.env.PGSSL === 'false' ? false : { rejectUnauthorized: false },
-  max: Number(process.env.PGPOOL_MAX || 5),
-  idleTimeoutMillis: 30000
-});
-
-/* 让未处理的 promise 拒绝不至于悄悄杀掉函数。
-   没有这两行的话，池里某次查询失败会让云函数静默退出，
-   表现是「接口偶发 502 且日志里什么都没有」——最难查的那一类问题。 */
-pool.on('error', (err) => {
-  console.error('[read] 连接池错误：', err.message);
-});
+/* ★★ Day 18：从 pg 驱动改成 CloudBase HTTP API（cloudfunctions/httpdb.js）
+   原因：本环境是体验版，云函数没有 VPC 权限，pg 直连永远连不上
+   （Day 17 实测；官方能力表「云函数 连接腾讯云 VPC」在体验版/个人版都是「-」）。
+   read 是纯读接口，改动最简单：把两条 SELECT 换成 httpdb.select()。
+   ★ 时间映射（to_char + 拼 +08:00）改成 HTTP 层自己格式化，理由见
+     第三节那段注释。 */
+const db = require('./httpdb');
 
 /* ---------- 二、时间字段的统一出口（契约 §9.8 第 5 条）---------- */
 /* 库里是 TIMESTAMP（不带时区），按 UTC+8 存、单时区不做换算；
@@ -58,11 +42,26 @@ pool.on('error', (err) => {
    偏移量是**写死的常量**，不是 now() 算出来的，也不用时区库。 */
 const TZ_SUFFIX = '+08:00';
 
-/* to_char 已在 SQL 里产出 'YYYY-MM-DDTHH24:MI:SS'，这里只补偏移量。
+/* 时间字段的统一出口（契约 §9.8 第 5 条）——
+   库里是 TIMESTAMP（不带时区），按 UTC+8 存、单时区不做换算；
+   接口按 ISO 8601 带偏移输出。
+
+   ★★ Day 18 实测：PG 经 HTTP API 返回 TIMESTAMP 时**不带偏移量**，
+      原样是 '2026-09-28T20:11:16'（我第一版注释里写「pg 侧带着 +08:00」是错的，
+      线上 curl 打出来才发现少了偏移量）。
+      所以**补偏移量这一步仍然要自己做** —— 它正是契约 §9.8 第 5 条
+      要求「只有一处写死的偏移量」的那一处。
+
+      不引入时区库、不用 now()：偏移量是常量，与运行环境时区无关。
    null（ended_at 为空 = 中途退出 B6）必须原样返回 null，
    **不能变成 "null" 字符串或空串** —— 前端要靠它判断「这场没正常结束」。 */
 function iso(ts) {
-  return ts === null || ts === undefined ? null : ts + TZ_SUFFIX;
+  if (ts === null || ts === undefined) return null;
+  let s = String(ts);
+  if (s.indexOf(' ') >= 0) s = s.replace(' ', 'T');   // 防御：有的环境给空格分隔
+  /* 已经有偏移量（带 + 或 -，或以 Z 结尾）就不重复补 */
+  if (/(?:[+-]\d{2}:?\d{2}|Z)$/.test(s)) return s;
+  return s + TZ_SUFFIX;
 }
 
 /* ---------- 三、统一响应外壳（契约 §1.2 / §1.3）---------- */
@@ -109,92 +108,87 @@ function validTopicId(t) {
   return t;
 }
 
-/* ---------- 五、两条 SQL ----------
-   查询写snake_case，出口用 AS "camelCase" 映射（契约 §9.8 第 4 条）。
-   映射只写在这一处，不散落到各处。 */
+/* ---------- 五、两个查询 ----------
+   ★★ Day 18 改造：原来是把 to_char() 写进 SQL（因为 pg 驱动会把 TIMESTAMP
+     解析成 Date 对象，Date 的格式化方法都隐含时区换算）。
+     现在走 HTTP API，**PostgREST 直接把TIMESTAMP 按ISO 8601 带偏移返回**
+     （实测：'2026-10-07T00:00:00'），所以：
+       · SQL 里的 to_char 不再需要（省掉，也少一层可能出错的地方）
+       · iso() 只需把 ' ' 换成 'T'（PG 返回的TIMESTAMP 带空格，ISO 要T）
+       · **仍然没有引入任何时区库或 now()** —— 偏移量还是 pg 返回里带的那个
+         （实测 HTTP API 返回的就是 +08:00，与库里存的口径一致）
 
-/* R1：会话列表。按契约 §6.1 走 idx_sessions_topic_time：
-   传 topicId 时走 (topic_id, started_at)，不传时走后一段做倒序扫描。
-   started_at 倒序 = 最近的场次在最前面，与记录页的时间倒序口径一致。 */
-const SQL_SESSIONS = `
-  SELECT
-    session_id            AS "sessionId",
-    topic_id              AS "topicId",
-    nickname,
-    to_char(started_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "startedAt",
-    to_char(ended_at,   'YYYY-MM-DD"T"HH24:MI:SS') AS "endedAt",
-    duration_seconds      AS "durationSeconds",
-    error_count           AS "errorCount",
-    good_sentence_count   AS "goodSentenceCount",
-    turn_count            AS "turnCount",
-    is_complete           AS "isComplete"
-  FROM sessions
-  WHERE ($1::text IS NULL OR topic_id = $1)
-  ORDER BY started_at DESC
-  LIMIT $2::int
-`;
+   查询参数写 snake_case（库里的列名），映射在下面的 shape 函数里做，
+   **只写在出口那一处**（契约 §9.8 第 4 条）。 */
+const SELECT_SESSIONS = [
+  'session_id', 'topic_id', 'nickname', 'started_at', 'ended_at',
+  'duration_seconds', 'error_count', 'good_sentence_count', 'turn_count', 'is_complete'
+].join(',');
 
-/* R5 只读侧：收藏列表。走 idx_items_fav (is_favorited, favorited_at)：
-   WHERE 里写 is_favorited = TRUE 命中索引前一段，ORDER BY favorited_at 命中后一段。
-   ★ 故意不写 is_favorited = TRUE 到 SQL 字符串里，而是当参数传：
-     值是参数、形状是固定的，两者分离。 */
-const SQL_FAVORITES = `
-  SELECT
-    item_id       AS "itemId",
-    session_id    AS "sessionId",
-    topic_id      AS "topicId",
-    type,
-    turn,
-    original_text AS "originalText",
-    reminder,
-    correction,
-    is_favorited  AS "isFavorited",
-    note,
-    to_char(favorited_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "favoritedAt",
-    to_char(created_at,   'YYYY-MM-DD"T"HH24:MI:SS') AS "createdAt"
-  FROM items
-  WHERE is_favorited = $1::boolean
-    AND ($2::text IS NULL OR topic_id = $2)
-  ORDER BY favorited_at DESC
-  LIMIT $3::int
-`;
+const SELECT_FAVORITES = [
+  'item_id', 'session_id', 'topic_id', 'type', 'turn', 'original_text',
+  'reminder', 'correction', 'is_favorited', 'note', 'favorited_at', 'created_at'
+].join(',');
 
-/* 把sessions 行加工成接口形状：
-   -时间补 +08:00
-   - 布尔列 PG的 BOOLEAN 出参本来就是 true/false，**不需要转换**（契约 §9.8 第 4 条）
-   - 顺手给 B6 一个显式标记：endedAt 为空 = 中途退出 */
-function shapeSession(row) {
+/* PostgREST 的过滤写法：eq. 等于、like.* 前缀匹配。
+   ★ 值一律经 URLSearchParams 编码（httpdb 内部做的）——
+     这条很重要：Day 18 的探针因为没编码通配符，把整个库删空了。 */
+function sessionsQuery(topicId, limit) {
   return {
-    sessionId: row.sessionId,
-    topicId: row.topicId,
-    nickname: row.nickname === '' ? null : row.nickname,  // 空串 → null，界面自己决定显示「你」
-    startedAt: iso(row.startedAt),
-    endedAt: iso(row.endedAt),
-    durationSeconds: Number(row.durationSeconds),
-    errorCount: Number(row.errorCount),
-    goodSentenceCount: Number(row.goodSentenceCount),
-    turnCount: Number(row.turnCount),
-    isComplete: row.isComplete,
-    aborted: row.endedAt === null            // B6：中途退出的场次也算数据
+    order: 'started_at.desc',
+    limit: limit,
+    /* 不传 topicId 时用 or=(topic_id.is.null) 不成立来等价于「全部」——
+       PostgREST 没有「这个条件忽略」的写法，只能这样绕。
+       实测：不带 topic_id 参数即返回全部，所以这里直接不放。 */
+    ...(topicId ? { topic_id: 'eq.' + topicId } : {})
   };
 }
 
-/* items 行的加工。correction 保持 null（偏题与精彩句子无改法，B7）——
+function favoritesQuery(topicId, limit) {
+  return {
+    is_favorited: 'eq.true',
+    order: 'favorited_at.desc',
+    limit: limit,
+    ...(topicId ? { topic_id: 'eq.' + topicId } : {})
+  };
+}
+
+/* sessions 行 → 接口形状。★ Day 18：HTTP 层返回的是 snake_case 列名，
+   所以这里从row.session_id 取（不再是 row.sessionId）。
+   映射**只写在出口这一处**，不散落到各个地方（契约 §9.8 第 4 条）。 */
+function shapeSession(row) {
+  return {
+    sessionId: row.session_id,
+    topicId: row.topic_id,
+    nickname: row.nickname === '' ? null : row.nickname,  // 空串 → null，界面自己决定显示「你」
+    startedAt: iso(row.started_at),
+    endedAt: iso(row.ended_at),
+    durationSeconds: Number(row.duration_seconds),
+    errorCount: Number(row.error_count),
+    goodSentenceCount: Number(row.good_sentence_count),
+    turnCount: Number(row.turn_count),
+    isComplete: row.is_complete,
+    aborted: row.ended_at === null           // B6：中途退出的场次也算数据
+  };
+}
+
+/* items 行 → 接口形状。同样从 snake_case 取（Day 18 起）。
+   correction 保持 null（偏题与精彩句子无改法，B7）——
    库里的 ck_items_correction 已经保证过这件事，接口只负责不把它变成空串。 */
 function shapeItem(row) {
   return {
-    itemId: row.itemId,
-    sessionId: row.sessionId,
-    topicId: row.topicId,
+    itemId: row.item_id,
+    sessionId: row.session_id,
+    topicId: row.topic_id,
     type: row.type,
     turn: Number(row.turn),
-    originalText: row.originalText,
+    originalText: row.original_text,
     reminder: row.reminder,
     correction: row.correction === null ? null : row.correction,
-    isFavorited: row.isFavorited,
+    isFavorited: row.is_favorited,
     note: row.note,
-    favoritedAt: iso(row.favoritedAt),
-    createdAt: iso(row.createdAt)
+    favoritedAt: iso(row.favorited_at),
+    createdAt: iso(row.created_at)
   };
 }
 
@@ -211,9 +205,8 @@ async function handleSessions(query, res) {
       'topicId 只允许 T1–T8 或 FREE', { gotParams: JSON.stringify(query) });
   }
 
-  // null 传进去表示「不过滤」，PG 里 ($1::text IS NULL OR ...) 短路成恒真
-  const result = await pool.query(SQL_SESSIONS, [topicId === undefined ? null : topicId, limit]);
-  const data = result.rows.map(shapeSession);
+  const rows = await db.select('sessions', sessionsQuery(topicId, limit), SELECT_SESSIONS);
+  const data = rows.map(shapeSession);
   return sendOK(res, { sessions: data, count: data.length });
 }
 
@@ -229,8 +222,8 @@ async function handleFavorites(query, res) {
       'topicId 只允许 T1–T8 或 FREE', { gotParams: JSON.stringify(query) });
   }
 
-  const result = await pool.query(SQL_FAVORITES, [true, topicId === undefined ? null : topicId, limit]);
-  const data = result.rows.map(shapeItem);
+  const rows = await db.select('items', favoritesQuery(topicId, limit), SELECT_FAVORITES);
+  const data = rows.map(shapeItem);
   return sendOK(res, { items: data, count: data.length });
 }
 
@@ -241,32 +234,16 @@ function clientIp(req) {
   return String(fwd).split(',')[0].trim();
 }
 
-/* 错误分类：把「连不上库」和「连上了但认证失败」分成两种 code。
-   ★为什么要分：pg 抛的错五花八门，若一律返回 INTERNAL_ERROR，
-     只能靠翻云端日志判断根因——而实测 `tcb fn log` 对 HTTP 函数
-     经常查不到调用日志（返回 "No invocation logs"），等于没有排错入口。
-     所以把根因分类直接写进响应的 error.code，
-     **不依赖日志就能定位问题**。这是 Day 17 新增的一条排错约定。 */
-function classifyDbError(err) {
-  const m = (err && err.message) ? String(err.message) : String(err);
-  const code = (err && err.code) ? String(err.code) : '';
+/* 错误分类：Day 18 起改用 httpdb.classify ——
+   识别方式从「pg 驱动的 err.code（ECONNREFUSED 等）」换成
+   「响应体里的 PostgreSQL 错误码（23505 / 23514 / …）与 HTTP 状态」，
+   因为现在不再有 pg 驱动。
 
-  if (code === 'ENOTFOUND' || /getaddrinfo|ENOTFOUND/i.test(m)) {
-    return { code: 'DB_HOST_UNREACHABLE', message: '数据库地址解析不了（PGHOST 不对或内网 DNS 不可用）' };
-  }
-  if (code === 'ECONNREFUSED' || /ECONNREFUSED|Connection refused/i.test(m)) {
-    return { code: 'DB_CONNECTION_REFUSED', message: '数据库拒绝连接（端口或内网访问不通）' };
-  }
-  if (code === 'ETIMEDOUT' || /ETIMEDOUT|timeout|Timeout/i.test(m)) {
-    return { code: 'DB_TIMEOUT', message: '连数据库超时（常见于内网未打通）' };
-  }
-  if (/password authentication failed|no pg_hba|SSPI|SASL/i.test(m)) {
-    return { code: 'DB_AUTH_FAILED', message: '数据库拒绝了认证（账号或密码不对）' };
-  }
-  if (/does not exist|relation ".*" does not exist/i.test(m)) {
-    return { code: 'DB_TABLE_MISSING', message: '表不存在（建表脚本没在库里执行）' };
-  }
-  return { code: 'DB_QUERY_FAILED', message: '查询数据库时出错' };
+   ★ 保留原意不变：`tcb fn log` 对 HTTP 函数查不到调用日志
+     （返回 No invocation logs），等于没有排错入口——
+     所以根因必须写进响应的 error.code，不依赖日志就能定位问题。 */
+function classifyDbError(err) {
+  return db.classify(err);
 }
 
 const server = http.createServer((req, res) => {
@@ -339,6 +316,6 @@ server.listen(9000, '0.0.0.0', () => {
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     server.close();
-    pool.end().then(() => process.exit(0));
+    process.exit(0);
   });
 }

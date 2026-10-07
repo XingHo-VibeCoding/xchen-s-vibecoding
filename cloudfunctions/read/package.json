@@ -1,12 +1,10 @@
 {
   "name": "read",
   "version": "1.0.0",
-  "description": "GET /api/sessions 与 GET /api/favorites —— 第一个读接口，读 sessions / items 两张表（Day 17）",
+  "description": "GET /api/sessions 与 GET /api/favorites —— 读接口，读 sessions / items 两张表。Day 18 起走 CloudBase HTTP API，不再依赖 pg（体验版无 VPC 权限）",
   "main": "index.js",
   "private": true,
-  "dependencies": {
-    "pg": "^8.13.1"
-  },
+  "dependencies": {},
   "engines": {
     "node": ">=18"
   }
