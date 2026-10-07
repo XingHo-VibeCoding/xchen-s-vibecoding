@@ -86,6 +86,25 @@ const http = require('http');
      换的只是「怎么把请求送到数据库」。 */
 const db = require('./httpdb');
 
+/* ★★ Day 19（板块 ②）：数据访问下沉到 repositories/。
+   本文件从 698 行降到 600 行左右，搬走的是四样纯数据访问的东西：
+     sessionRow() / turnRows() / itemRows() / newItemId()→ repositories/
+     db.insertMany(表名, 行)  → 各表自己的 insertXxx()
+     db.deleteWhere('sessions', …) → sessionsRepo.deleteBySessionId()
+
+   ★★ 留在本文件的是**编排**（用户 Day 19 拍板）：
+     「sessions → turns → items 三步，失败时 DELETE 父行补偿」
+     这套顺序控制是业务流程不是查库动作。分界线是：
+       数据访问层 = 「对这张表做这一个动作」，不问为什么
+       接口层     = 「按什么顺序做、失败了怎么办、响应长什么样」
+
+   ★ 注意本文件**仍然 require httpdb**，只用它的 db.classify()——
+     错误分类是「响应怎么写」的问题（契约 §1.4），属于接口层。
+     数据一个都不经它手。 */
+const sessionsRepo = require('./repositories/sessionsRepository');
+const turnsRepo = require('./repositories/turnsRepository');
+const itemsRepo = require('./repositories/itemsRepository');
+
 /* ---------- 一、上限保护 ----------
    transcript 来自请求方，理论上能被人为塞很大。
    一次要插 1 + N + M 行，没有上限就等于给了一条放大攻击面。
@@ -197,11 +216,11 @@ function newSessionId() {
     Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
-/* itemId = sessionId + 类型字母 + 序号，最长 32 + 2 + 2 = 36 字，VARCHAR(40) 装得下。 */
-function newItemId(sessionId, type, seq) {
-  const letter = type === 'logic' ? 'L' : (type === 'good' ? 'G' : 'O');
-  return sessionId + '-' + letter + seq;
-}
+/* ★★ itemId 的生成（newItemId）Day 19 已搬到 itemsRepository.js。
+   理由：它是「拼一条 items 行」的一部分，与 buildItemRows 是同一件事的两半，
+   放一起才读得懂「item_id 是怎么来的」。
+   刻意留在本文件的是 newSessionId：它定的是**这一场练习的标识**，
+   防重复靠数据库主键而不是靠 id 里的随机尾巴，所以它是领域规则不是数据访问。 */
 
 /* ---------- 六、参数校验 ----------
    校验产出的每条 message 都用中文，且说清「缺了什么」而不是「格式错误」。
@@ -369,70 +388,24 @@ function readBody(req, limitBytes) {
   });
 }
 
-/* ---------- 九、行数据（交给 HTTP API 批量插入）----------
-   ★ Day 18 改造：原来是三条带 $n 占位符的 INSERT 字符串，现在改成
-     **每表一个数组**，由 httpdb.insertMany() 一次 POST 整个数组。
+/* ---------- 九、落库（Day 19：数据访问已下沉，这里只剩编排）----------
+   ★★ Day 19 改造：本节原来还有 sessionRow() / turnRows() / itemRows()
+     三个行构造函数和四处 db.insertMany / db.deleteWhere 调用。
+     现在它们分别搬进 repositories/ 下的三个文件（一张表一个），
+     本节只负责**顺序与补偿**——用户 Day 19 拍板：编排留在接口层。
 
-     为什么这样改：实测（本环境）**跨请求的事务不存在** ——
-     BEGIN 与 ROLLBACK 分两次 HTTP 调用，ROLLBACK 后那一行还在。
-     多语句拼一次调用又被 PG 拒（cannot insert multiple commands into a prepared statement）。
-     所以原设计的「三表一个事务」在本环境做不到。
+     为什么这样分界：换「写库要补哪一列」→ 只动 repository；
+     换「三表写入的顺序或补偿策略」→ 只动本文件。两者不会互相踩。
 
+   ★★ 落库方式（Day 18 定的，本节一个字没改）——
+     本环境（体验版）**跨请求的事务不存在**，原来的
+     BEGIN → 三条 INSERT → COMMIT 做不到（实测 ROLLBACK 不生效）。
      现在的保证靠两件事（都有实测依据，见 httpdb.js 与 .probe-httpapi.js）：
-       ① 批次内原子性：同批里一行违反 CHECK → 整批 0 行落库
+       ① 批次内原子性：insertTurns / insertItems 一次 POST 整个数组，
+          库把它当一个事务。实测：同批里一行违反 CHECK → 整批 0 行落库。
        ② ON DELETE CASCADE：删父行连带删子行（Day 16 建表就定义了）
 
-   列名一律 snake_case（库里就是这样），映射在响应出口那一处做（契约 §9.8 第 4 条）。 */
-function sessionRow(sessionId, topicId, nickname, startedAt, endedAt, durationSeconds, errorCount, goodSentenceCount, turnCount, isComplete) {
-  return {
-    session_id: sessionId,
-    topic_id: topicId,
-    nickname: nickname,
-    started_at: startedAt,
-    ended_at: endedAt,
-    duration_seconds: durationSeconds,
-    error_count: errorCount,
-    good_sentence_count: goodSentenceCount,
-    turn_count: turnCount,
-    is_complete: isComplete
-  };
-}
-
-function turnRows(sessionId, turns) {
-  return turns.map(function (t) {
-    return {
-      session_id: sessionId,
-      turn: t.turn,
-      user_text: t.userText,
-      ai_text: t.aiText,
-      timestamp: t.timestamp,
-      asked_follow_up: t.askedFollowUp
-    };
-  });
-}
-
-/* ★ 这三列**不出现在这里**，走建表时的 DEFAULT：
-     is_favorited → FALSE、note → ''、favorited_at → NULL。
-   写接口不碰收藏（F4 是 PATCH 的活，Day 20+）。
-   ★ 顺带一个好处：ck_items_favtime（收藏状态与收藏时间必须一致）
-     这条约束因此天然成立，不需要在应用层再对一遍。 */
-function itemRows(sessionId, topicId, items, createdAt) {
-  let seq = 0;
-  return items.map(function (it) {
-    seq += 1;
-    return {
-      item_id: newItemId(sessionId, it.type, seq),
-      session_id: sessionId,
-      topic_id: topicId,
-      type: it.type,
-      turn: it.turn,
-      original_text: it.originalText,
-      reminder: it.reminder,
-      correction: it.correction,
-      created_at: createdAt
-    };
-  });
-}
+     顺序必须**父表先插**，否则 turns/items 会撞外键。 */
 
 /* ---------- 十、主处理 ---------- */
 async function handlePostSession(req, res) {
@@ -568,13 +541,16 @@ async function handlePostSession(req, res) {
        补偿只在第2、3 步做——第 1 步失败时本来就没有任何残留。 */
   let step = '1/3 sessions';
   try {
-    await db.insertMany('sessions', [sessionRow(
-      sessionId, topicId, nickname, started.text, endedText,
-      durationSeconds, errorCount, goodSentenceCount, turns.value.length, isComplete
-    )]);
+    await sessionsRepo.insertSession(sessionsRepo.buildSessionRow({
+      sessionId: sessionId, topicId: topicId, nickname: nickname,
+      startedAt: started.text, endedAt: endedText,
+      durationSeconds: durationSeconds, errorCount: errorCount,
+      goodSentenceCount: goodSentenceCount, turnCount: turns.value.length,
+      isComplete: isComplete
+    }));
 
     step = '2/3 turns';
-    await db.insertMany('turns', turnRows(sessionId, turns.value));
+    await turnsRepo.insertTurns(turnsRepo.buildTurnRows(sessionId, turns.value));
 
     /* 条目的 created_at：这一场结束时才算出来的，所以用 endedAt；
        中途退出的场次没有 endedAt，退回 startedAt。
@@ -582,7 +558,7 @@ async function handlePostSession(req, res) {
        同一份输入两次调用应当落进库里同样的值。 */
     const createdAt = endedText || started.text;
     step = '3/3 items';
-    await db.insertMany('items', itemRows(sessionId, topicId, items, createdAt));
+    await itemsRepo.insertItems(itemsRepo.buildItemRows(sessionId, topicId, items, createdAt));
 
     /* 读回时给的形状与 GET /api/sessions 的 sessions[] 一致 ——
        同一个字段名两处必须一样，否则前端要写两套取值代码。 */
@@ -612,7 +588,7 @@ async function handlePostSession(req, res) {
        ★ 补偿失败也不掩盖原始错误：原始错误才是根因，补偿失败只进日志。 */
     if (step !== '1/3 sessions') {
       try {
-        await db.deleteWhere('sessions', { session_id: 'eq.' + sessionId });
+        await sessionsRepo.deleteBySessionId(sessionId);
         console.log('[write] 已补偿删除 sessionId=' + sessionId + '（' + step + ' 失败）');
       } catch (e2) {
         console.error('[write] ★ 补偿删除也失败了，库里可能留下一行残数据：' +

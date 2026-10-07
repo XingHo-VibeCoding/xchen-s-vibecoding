@@ -88,7 +88,6 @@ evalTable.validTopicId = build(grabFn('validTopicId'));
 evalTable.parseLocalTs = build(grabFn('parseLocalTs'), ['pad2']);
 evalTable.secondsBetween = build(grabFn('secondsBetween'));
 evalTable.newSessionId = build(grabFn('newSessionId'));
-evalTable.newItemId = build(grabFn('newItemId'));
 evalTable.cleanTranscript = build(grabFn('cleanTranscript'));
 evalTable.cleanItems = build(grabFn('cleanItems'));
 
@@ -96,9 +95,27 @@ const validTopicId = evalTable.validTopicId;
 const parseLocalTs = evalTable.parseLocalTs;
 const secondsBetween = evalTable.secondsBetween;
 const newSessionId = evalTable.newSessionId;
-const newItemId = evalTable.newItemId;
 const cleanTranscript = evalTable.cleanTranscript;
 const cleanItems = evalTable.cleanItems;
+
+/* ================================================================
+   ★★ Day 19：newItemId 不再用 eval 抓，改成直接 require
+   ------------------------------------------------------------
+   原因：Day 19 把写库的三个行构造函数搬进了
+   cloudfunctions/write/repositories/（一张表一个文件），
+   newItemId 与 buildItemRows 是同一件事的两半，所以一起搬走了。
+   如果还用 grabFn('newItemId') 从 index.js 里抠，会抛
+   「没找到函数 newItemId」—— **看起来像测试坏了，其实是它没跟上代码的变化**。
+   （Day 18 已经踩过一次同款：pg 换成 httpdb 时测试没跟上。）
+
+   repository 是正常CommonJS 模块、直接 module.exports，
+   所以这里 require 就拿到，**不需要 eval 源码**——这比原来那份做法更干净，
+   也是拆文件带来的额外好处。 */
+const itemsRepo = require(path.join(__dirname, 'cloudfunctions', 'write', 'repositories', 'itemsRepository'));
+const sessionsRepo = require(path.join(__dirname, 'cloudfunctions', 'write', 'repositories', 'sessionsRepository'));
+const turnsRepo = require(path.join(__dirname, 'cloudfunctions', 'write', 'repositories', 'turnsRepository'));
+
+const newItemId = itemsRepo.newItemId;
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -329,7 +346,25 @@ ok('★ write 与 read 里的 httpdb.js 副本完全一致（两份不同步会�
   httpdbWrite === httpdbRead,
   '两份内容不同：write ' + httpdbWrite.length + ' 字符 / read ' + httpdbRead.length + ' 字符');
 const httpdbSrc = httpdbWrite;
-const allSrc = src + '\n' + httpdbSrc;
+
+/* ★★ Day 19：代码已经散到三个文件了，扫描范围必须跟着变。
+   Day 19 把行构造函数搬进 write/repositories/ 之后，扫描口径一度只覆盖
+   index.js + httpdb.js —— 那一刻 repositories/ 是**扫描盲区**：
+   以后在 repository 里写 sendError 或挂 e.code，这张清单就看不见了。
+   症状是「清单里少了一个码」，和 Day 19在契约 §1.4 上踩的是同一个坑
+   （那次是漏了 `e.code=` 那种写法，这次是漏了整个文件）。
+   修法：**扫目录，不扫文件** —— 凡 write 目录下 .js 全扫，
+   以后再加 repository 文件不用回来改这里。 */
+const writeRepoDir = path.join(__dirname, 'cloudfunctions', 'write', 'repositories');
+const repoFiles = fs.readdirSync(writeRepoDir).filter(function (f) { return /\.js$/.test(f); }).sort();
+ok('★ write/repositories 下确实有 3 个 repository 文件（一表一文件）',
+  repoFiles.join(',') === 'itemsRepository.js,sessionsRepository.js,turnsRepository.js',
+  repoFiles.join(','));
+const repoSrc = repoFiles.map(function (f) {
+  return fs.readFileSync(path.join(writeRepoDir, f), 'utf8');
+}).join('\n');
+
+const allSrc = src + '\n' + httpdbSrc + '\n' + repoSrc;
 const codes = (function () {
   const set = {};
   let m;
@@ -377,16 +412,98 @@ ok('★ 排错字段放顶层不进 error（契约 §1.5）',
 ok('★ 端口固定 0.0.0.0:9000（CloudBase 只认这个）',
   /server\.listen\(9000, '0\.0\.0\.0'/.test(src));
 /* ★★ Day 18：事务那套在本环境无效（实测跨请求 ROLLBACK 不生效），
-   已换成「每表一次请求 + 补偿删除」。这几条改为盯住新约定。 */
+   已换成「每表一次请求 + 补偿删除」。这几条改为盯住新约定。
+   ★★ Day 19：db.insertMany / db.deleteWhere 已搬进 repositories/，
+     所以这两条现在**跨文件验**（index.js 验编排顺序，
+     repository 验真正发请求的是哪张表）。
+     只扫 index.js 会误判成「落库那三步不见了」—— 那是搬迁，不是删除。 */
 ok('★ 落库是三步：sessions → turns → items，父表先插（否则撞外键）',
-  /db\.insertMany\('sessions'/.test(src) &&
-  /db\.insertMany\('turns'/.test(src) &&
-  /db\.insertMany\('items'/.test(src));
+  /sessionsRepo\.insertSession\(/.test(src) &&
+  /turnsRepo\.insertTurns\(/.test(src) &&
+  /itemsRepo\.insertItems\(/.test(src));
 ok('★ 每表只发一次请求（不是每行一次）—— 补偿能成立的前提',
-  !/for\s*\(const .* of turns\.value\)[\s\S]{0,120}insertMany/.test(src));
+  !/for\s*\(const .* of turns\.value\)[\s\S]{0,120}insertTurns/.test(src));
 ok('★ 有补偿删除，且删的是父表 sessions（靠 CASCADE 连带删子行）',
   /if \(step !== '1\/3 sessions'\)/.test(src) &&
-  /db\.deleteWhere\('sessions'/.test(src));
+  /sessionsRepo\.deleteBySessionId\(sessionId\)/.test(src));
+/* ★★ Day 19 新增：分层结构本身的结构性约定。
+   这几条不是测行为，是测「拆分了没有」——
+   将来有人图省事把查询搬回 index.js，这三条会红。
+   ⚠ 全部**必须先剥掉注释**再匹配：index.js 文件头有一段专门记录
+   「db.insertMany 搬走了」这件事的说明，注释里就写着这些字面量。
+   第一版忘了剥，测试直接红—— 那是测试自己写错了，不是代码有问题。 */
+const srcNoComment = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+ok('★ index.js 不再直接调 httpdb 的读写方法（只留 classify / describe）',
+  !/db\.insertMany\(/.test(srcNoComment) &&
+  !/db\.deleteWhere\(/.test(srcNoComment) &&
+  !/db\.select\(/.test(srcNoComment));
+ok('★ 三个 repository 都只require httpdb，不反向 require index',
+  repoSrc.indexOf("require('../httpdb')") !== -1 &&
+  repoSrc.indexOf("require('./index')") === -1 &&
+  repoSrc.indexOf("require('../index')") === -1);
+
+/* ================================================================
+   八、Day 19 新增：三个行构造函数的形状
+   ------------------------------------------------------------
+   为什么以前没有、现在要补：这三个函数（buildSessionRow / buildTurnRows /
+   buildItemRows）原来住在 index.js 里，因为云函数入口不导出，
+   单测的 eval 手法够不着它们—— 于是它们**一直没有单测**。
+   Day 19 搬进 repositories/ 之后它们是正常 CommonJS 模块，
+   直接 require 就能拿到。搬文件顺带补上了一直缺的覆盖，
+   这也是「拆文件」除了改结构之外的实际收益之一。 */
+section('行构造（Day 19 新增覆盖）');
+const sr = sessionsRepo.buildSessionRow({
+  sessionId: 'S-x', topicId: 'T1', nickname: 'n', startedAt: '2026-10-07 20:00:00',
+  endedAt: null, durationSeconds: 0, errorCount: 1, goodSentenceCount: 0,
+  turnCount: 2, isComplete: false
+});
+ok('★ buildSessionRow 的 10 个列名与库里一致（snake_case）',
+  Object.keys(sr).sort().join(',') ===
+  'duration_seconds,ended_at,error_count,good_sentence_count,is_complete,nickname,session_id,started_at,topic_id,turn_count',
+  Object.keys(sr).sort().join(','));
+ok('★ buildSessionRow 不带收藏三列（走建表 DEFAULT，ck_items_favtime 因此天然成立）',
+  !('is_favorited' in sr) && !('note' in sr) && !('favorited_at' in sr));
+ok('★ buildSessionRow 原样带 null（中途退出的场次，接口层不转成空串）',
+  sr.ended_at === null);
+ok('★ 数字列不转字符串（PG 整数列，Number 类型原样给）',
+  typeof sr.duration_seconds === 'number' && typeof sr.turn_count === 'number');
+
+const tr = turnsRepo.buildTurnRows('S-x', [
+  { turn: 1, userText: 'a', aiText: 'b', timestamp: 0, askedFollowUp: false },
+  { turn: 2, userText: 'c', aiText: 'd', timestamp: 1500, askedFollowUp: true }
+]);
+ok('★ buildTurnRows 按数组长度出同数行（不丢轮次）', tr.length === 2, tr.length);
+ok('★ buildTurnRows 的 6 个列名与库里一致',
+  Object.keys(tr[0]).sort().join(',') ===
+  'ai_text,asked_follow_up,session_id,timestamp,turn,user_text',
+  Object.keys(tr[0]).sort().join(','));
+ok('★ asked_follow_up 保持布尔（PG BOOLEAN 原样存取，不转 0/1）',
+  tr[0].asked_follow_up === false && tr[1].asked_follow_up === true);
+ok('★ timestamp 是相对毫秒数，原样搬运不做换算',
+  tr[0].timestamp === 0 && tr[1].timestamp === 1500);
+ok('★ buildTurnRows 对空数组返回空数组（不发请求）',
+  Array.isArray(turnsRepo.buildTurnRows('S-x', [])) &&
+  turnsRepo.buildTurnRows('S-x', []).length === 0);
+
+const ir = itemsRepo.buildItemRows('S-x', 'T1', [
+  { type: 'logic', turn: 2, originalText: '用户真说过的话', reminder: 'r', correction: 'c' },
+  { type: 'good', turn: 1, originalText: '另一句', reminder: 'r2', correction: null }
+], '2026-10-07 20:03:00');
+ok('★ buildItemRows 的 9 个列名与库里一致',
+  Object.keys(ir[0]).sort().join(',') ===
+  'correction,created_at,item_id,original_text,reminder,session_id,topic_id,turn,type',
+  Object.keys(ir[0]).sort().join(','));
+ok('★ itemId 按数组序号递增，不是按 turn（条目顺序与轮次顺序无关）',
+  ir[0].item_id === 'S-x-L1' && ir[1].item_id === 'S-x-G2',
+  ir.map(function (x) { return x.item_id; }).join(','));
+ok('★ topic_id 冗余带出（记录页按主题+时间倒序，走 idx_items_topic_time 不必 join）',
+  ir[0].topic_id === 'T1' && ir[1].topic_id === 'T1');
+ok('★ original_text 原样带出，不在这里做任何改写',
+  ir[0].original_text === '用户真说过的话' && ir[1].original_text === '另一句');
+ok('★ created_at 由调用方给（endedAt 或退回 startedAt），不取当前时间',
+  ir[0].created_at === '2026-10-07 20:03:00' && ir[1].created_at === '2026-10-07 20:03:00');
+ok('★ buildItemRows 对空数组返回空数组',
+  itemsRepo.buildItemRows('S-x', 'T1', [], '2026-10-07 20:03:00').length === 0);
 ok('★ 代码里（不含注释）不再有 BEGIN / COMMIT',
   !/\bBEGIN\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
 /* Day 18 起不再拼 SQL 字符串，改成把行数据交给 HTTP API 的批量插入 ——

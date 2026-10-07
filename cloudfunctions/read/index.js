@@ -31,9 +31,23 @@ const http = require('http');
 /* ★★ Day 18：从 pg 驱动改成 CloudBase HTTP API（cloudfunctions/httpdb.js）
    原因：本环境是体验版，云函数没有 VPC 权限，pg 直连永远连不上
    （Day 17 实测；官方能力表「云函数 连接腾讯云 VPC」在体验版/个人版都是「-」）。
-   read 是纯读接口，改动最简单：把两条 SELECT 换成 httpdb.select()。
-   ★ 时间映射（to_char + 拼 +08:00）改成 HTTP 层自己格式化，理由见
-     第三节那段注释。 */
+   ★★ Day 19（板块 ②）：本文件**不再直接 require httpdb**。
+     数据访问全部下沉到 repositories/，这里只做接口层的三件事——
+     接请求、调 repository、返响应。
+     拆之前这个文件里同时住着三层：路由与校验（接口层）、
+     列名与查询条件（数据访问层）、https 调用（传输层）。
+     现在后两层分别是 repositories/*.js 与 httpdb.js，依赖方向单一：
+       index.js → repositories/*.js → httpdb.js
+     ★ 为什么是三个文件而不是一个：见 sessionsRepository.js 文件头。 */
+
+/* ★ 数据访问层：一张表一个文件。
+   注意 require 的路径是'./repositories/xxx'——它们自己再去 require('../httpdb')。
+   也就是**接口层不再碰 httpdb**，唯一还在碰它的地方是下面的 classifyDbError，
+   因为错误分类是「响应怎么写」的问题，属于接口层职责。 */
+const sessionsRepo = require('./repositories/sessionsRepository');
+const itemsRepo = require('./repositories/itemsRepository');
+/* 错误分类仍走 httpdb：它认得 PostgreSQL 的错误码（23505 / 23514 / …）。
+   这一条不是「数据访问漏了出去」—— classify 只读错误信息，不碰数据。 */
 const db = require('./httpdb');
 
 /* ---------- 二、时间字段的统一出口（契约 §9.8 第 5 条）---------- */
@@ -108,53 +122,14 @@ function validTopicId(t) {
   return t;
 }
 
-/* ---------- 五、两个查询 ----------
-   ★★ Day 18 改造：原来是把 to_char() 写进 SQL（因为 pg 驱动会把 TIMESTAMP
-     解析成 Date 对象，Date 的格式化方法都隐含时区换算）。
-     现在走 HTTP API，**PostgREST 直接把TIMESTAMP 按ISO 8601 带偏移返回**
-     （实测：'2026-10-07T00:00:00'），所以：
-       · SQL 里的 to_char 不再需要（省掉，也少一层可能出错的地方）
-       · iso() 只需把 ' ' 换成 'T'（PG 返回的TIMESTAMP 带空格，ISO 要T）
-       · **仍然没有引入任何时区库或 now()** —— 偏移量还是 pg 返回里带的那个
-         （实测 HTTP API 返回的就是 +08:00，与库里存的口径一致）
+/* ---------- 五、出口映射（契约 §9.8 第 4 条）----------
+   ★★ Day 19：这一节**没有跟着搬去repository**，是有意的。
+     契约第4 条写的是「映射只写在出口那一处」——
+     「出口」指接口的响应，所以 camelCase 转换留在接口层。
+     repository 交出的是库里原样的 snake_case 行。
 
-   查询参数写 snake_case（库里的列名），映射在下面的 shape 函数里做，
-   **只写在出口那一处**（契约 §9.8 第 4 条）。 */
-const SELECT_SESSIONS = [
-  'session_id', 'topic_id', 'nickname', 'started_at', 'ended_at',
-  'duration_seconds', 'error_count', 'good_sentence_count', 'turn_count', 'is_complete'
-].join(',');
-
-const SELECT_FAVORITES = [
-  'item_id', 'session_id', 'topic_id', 'type', 'turn', 'original_text',
-  'reminder', 'correction', 'is_favorited', 'note', 'favorited_at', 'created_at'
-].join(',');
-
-/* PostgREST 的过滤写法：eq. 等于、like.* 前缀匹配。
-   ★ 值一律经 URLSearchParams 编码（httpdb 内部做的）——
-     这条很重要：Day 18 的探针因为没编码通配符，把整个库删空了。 */
-function sessionsQuery(topicId, limit) {
-  return {
-    order: 'started_at.desc',
-    limit: limit,
-    /* 不传 topicId 时用 or=(topic_id.is.null) 不成立来等价于「全部」——
-       PostgREST 没有「这个条件忽略」的写法，只能这样绕。
-       实测：不带 topic_id 参数即返回全部，所以这里直接不放。 */
-    ...(topicId ? { topic_id: 'eq.' + topicId } : {})
-  };
-}
-
-function favoritesQuery(topicId, limit) {
-  return {
-    is_favorited: 'eq.true',
-    order: 'favorited_at.desc',
-    limit: limit,
-    ...(topicId ? { topic_id: 'eq.' + topicId } : {})
-  };
-}
-
-/* sessions 行 → 接口形状。★ Day 18：HTTP 层返回的是 snake_case 列名，
-   所以这里从row.session_id 取（不再是 row.sessionId）。
+   sessions 行 → 接口形状。HTTP 层返回的是 snake_case 列名，
+   所以这里从 row.session_id 取（不再是 row.sessionId）。
    映射**只写在出口这一处**，不散落到各个地方（契约 §9.8 第 4 条）。 */
 function shapeSession(row) {
   return {
@@ -193,6 +168,9 @@ function shapeItem(row) {
 }
 
 /* ---------- 六、两个处理函数 ---------- */
+/* ★★ Day 19：这两段现在只剩接口层该做的事——
+   校验参数（limit / topicId）、调repository、把行转成响应形状、返回。
+   「查哪张表、查哪些列」已经不在这个文件里了。 */
 async function handleSessions(query, res) {
   const limit = parseLimit(query.limit);
   if (limit === null) {
@@ -205,7 +183,7 @@ async function handleSessions(query, res) {
       'topicId 只允许 T1–T8 或 FREE', { gotParams: JSON.stringify(query) });
   }
 
-  const rows = await db.select('sessions', sessionsQuery(topicId, limit), SELECT_SESSIONS);
+  const rows = await sessionsRepo.listSessions(topicId, limit);
   const data = rows.map(shapeSession);
   return sendOK(res, { sessions: data, count: data.length });
 }
@@ -222,7 +200,7 @@ async function handleFavorites(query, res) {
       'topicId 只允许 T1–T8 或 FREE', { gotParams: JSON.stringify(query) });
   }
 
-  const rows = await db.select('items', favoritesQuery(topicId, limit), SELECT_FAVORITES);
+  const rows = await itemsRepo.listFavoritedItems(topicId, limit);
   const data = rows.map(shapeItem);
   return sendOK(res, { items: data, count: data.length });
 }

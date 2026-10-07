@@ -169,7 +169,9 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │   │   └── records.html           ← P4 错误记录页
 │   ├── js/
 │   │   ├── speech.js              ← 录音与转写、AI 语音播放（**尚未创建**，Day 16 起）
-│   │   ├── api.js                 ← 统一封装对后端的请求（唯一出口，**尚未创建**，Day 16 起）
+│   │   ├── api.js                 ← 【Day 19 修订：已创建，Day 15】统一封装对后端的请求
+│   │   │                             （唯一出口，§4.2 规矩 1）。原表标「尚未创建」是漏更新——
+│   │   │                             它早已落地，且已接上 chat / analyze / sessions / favorites
 │   │   ├── storage.js             ← 【Day 10 新增】localStorage 读写（唯一出口）
 │   │   ├── components/            ← 【Day 8 新增】跨页面复用的 UI 组件
 │   │   │   ├── topic-card.js      ← 主题卡片（P1 在用；P4 按主题分组时可直接复用）
@@ -205,25 +207,101 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 │
 ├── cloudbaserc.json               ← 【Day 15 新增】CloudBase 部署配置（v2.1 声明式）：
 │                                     envId + functions + hosting + gateway 路由
+│                                     ⚠️ 用 `tcb fn code update` 更新代码时**不会**清环境变量，
+│                                     但 `tcb fn deploy` 会 —— 见 §10 部署注意事项
 │
-├── backend/                       ← 【Day 6 起新增】后端，独立部署
-│   ├── server.js                  ← 唯一入口：托管静态文件 + 提供 API
-│   ├── routes/
-│   │   ├── chat.js                ← 对话轮次接口
-│   │   └── analyze.js             ← 会话结束后的判断接口
-│   ├── prompts/
-│   │   ├── dialogue.js            ← 对话方人设与"不迁就"三条硬规则
-│   │   └── analysis.js            ← 偏题/逻辑两类判断的指令
-│   ├── services/
-│   │   └── llm.js                 ← 调用大模型（密钥只在这里出现）
-│   ├── .env                       ← 环境变量（**绝不提交**）
-│   ├── .env.example               ← 变量名单（**要提交**，给人看要填什么）
-│   └── .gitignore                 ← 确保 .env 不进仓库
+├── cloudfunctions/                ← 【Day 15 新增，Day 17–19 逐步填实】CloudBase 云函数
+│   │                                 ★ 五个函数**各自独立目录、独立部署**：
+│   │                                   `--dir cloudfunctions/<名字>` 只打包那一个目录，
+│   │                                   所以 httpdb.js 与 repositories/ 在read 与 write 里
+│   │                                   **各有一份副本**，不能靠仓库根的公共文件共享
+│   ├── health/                     ← GET /api/health：只验链路通不通，**不连库不调模型**
+│   │   ├── index.js
+│   │   ├── package.json            ← 依赖为空（刻意用 Node 原生 http，见 §3.3「零构建」）
+│   │   └── scf_bootstrap           ← 启动脚本，**必须 LF 换行**（CRLF 会起不来）
+│   ├── read/                       ← 【Day 17】GET /api/sessions · /api/favorites（读库）
+│   │   ├── index.js                ← 接口层：路由 · 参数校验 · shape*() 出口映射
+│   │   ├── httpdb.js               ← 传输层：CloudBase HTTP API 调用 + 错误码翻译
+│   │   ├── repositories/           ← 【Day 19 新增】数据访问层，一表一文件
+│   │   │   ├── sessionsRepository.js   ← listSessions(topicId, limit)
+│   │   │   └── itemsRepository.js      ← listFavoritedItems(topicId, limit)
+│   │   ├── package.json
+│   │   └── scf_bootstrap
+│   ├── write/                      ← 【Day 18】POST /api/sessions/write（写库，三张表）
+│   │   ├── index.js                ← 接口层：校验 · 编排（三步写入 + 失败补偿删除）· 响应
+│   │   ├── httpdb.js               ← 传输层
+│   │   ├── repositories/           ← 【Day 19 新增】
+│   │   │   ├── sessionsRepository.js   ← buildSessionRow / insertSession / deleteBySessionId
+│   │   │   ├── turnsRepository.js      ← buildTurnRows / insertTurns
+│   │   │   └── itemsRepository.js      ← newItemId / buildItemRows / insertItems
+│   │   ├── package.json
+│   │   └── scf_bootstrap
+│   ├── chat/                       ← 【Day 17–18】POST /api/chat：每轮调一次模型（等一句话）
+│   │   ├── index.js                ← **唯一调 LLM 的地方之一**；LLM_* 只从环境变量读
+│   │   ├── package.json
+│   │   └── scf_bootstrap
+│   └── analyze/                    ← 【Day 18–19】POST /api/analyze：整场一次性判断
+│       ├── index.js                ← 与 chat 分开：批量调用、超时更长、失败要重试
+│       ├── package.json
+│       └── scf_bootstrap
 │
-└── docs/
-    ├── dfd-data-flow.md           ← 数据流图的可复制源码（Mermaid 全文）
-    └── api-contract.md            ← 【Day 15 新增】接口契约：第 3 周建表与写接口的唯一依据
+├── db/                            ← 【Day 16 新增】建表与种子数据
+│   ├── schema.sql                  ← 三张表的完整建表语句（含 5 条 CHECK 与索引）
+│   ├── seed.sql                    ← 种子数据（一次执行版）
+│   ├── selftest-read.js            ← 建表后的自检脚本
+│   └── steps/                      ← ★ 分步版（Day 16 实际按这个顺序执行的）
+│       ├── schema-1-清理旧表.sql … schema-6-建表自检.sql
+│       └── seed-1-清空旧数据.sql … seed-5-验证.sql
+│
+├── docs/
+│   ├── api-contract.md             ← 【Day 15 新增】接口契约：建表与写接口的唯一依据
+│   ├── layering-day19.md           ← 【Day 19 新增】后端三层结构与依赖方向（判断新代码放哪层）
+│   ├── dfd-data-flow.md            ← 数据流图的可复制源码（Mermaid 全文）
+│   └── day14-测试记录.md            ← 【Day 14】视觉与交互的测试记录
+│
+├── verify.sh                      ← 【Day 18】动库前的三道保护 + 接口逐个验（改库前必跑）
+│
+├── frontend-guidelines.md         ← 前端协作规范
+│
+├── .test-*.js（6 个）              ← 【Day 17–19】本地单测，都在**仓库根目录**
+│                                     ⚠️ 不放 `frontend/` 下 —— 与既有两个分家，
+│                                     读源码要用 path.join(__dirname,'frontend',…)
+│   ├── .test-analyze.js            ← analyze 的纯函数（18 项）
+│   ├── .test-api-analyze.js← eval 前端 api.js，验 mapItem / 回落（19 项）
+│   ├── .test-pending-transcript.js← 一次性转写通道（33 项）
+│   ├── .test-transcript-turns.js   ← 转写轮次（22 项）
+│   ├── .test-write.js              ← write 的校验与硬约束（118 项）
+│   └── .test-write-e2e.js          ← write 端到端：起真HTTP 服务发真请求（79 项）
+│
+├── .probe-httpapi.js               ← 【Day 18】HTTP API 探针：改正式代码前先验路通不通
+├── .count-db-requests.js           ← 【Day 18】资源点自检：数清哪些请求会碰数据库
+├── .verify-write-sql.js            ← 【Day 18】写接口的 SQL 口径核对
+│
+└── （以下为工具与配置，不属于产品结构）
+    ├── .impeccable.md              ← 设计上下文（技能要求先读它）
+    ├── .gitignore
+    └── .wbapp_*.genie              ← WorkBuddy 本地生成物
 ```
+
+> **说明（Day 19 修订 · 本表按实际文件列表全面重写）**
+>
+> 改之前先跑了一遍 `find`拿实际列表去对（**不凭记忆补** —— 文档约定里记着这个坑：
+> 这张表历史上多次漂移，Day 11 加的 `mock-items.json` / `item-card.js` / `interact.js`
+> 都没同步，Day 14 只补回了前一个）。本次据实重写，主要改了五处：
+>
+> ① **删掉整个 `backend/` 一支**（原表 209–221 行）。它是 Day 6–7 设想的「自建 Node 轻后端」，
+>    Day 15 定稿 CloudBase 后已被 `cloudfunctions/` 取代，目录**至今从未创建**
+>    （实测 `ls backend` → 不存在）。原表用「保留在表里，因为密钥要有个地方放」解释
+>    为什么留着，那条解释在 Day 17之后已经不成立：**密钥配在云函数环境变量里，
+>    不在 `.env` 文件里**（见 §9.1的 Day 17 修订）。保留它会让人以为还有一个后端在跑。
+> ② **`cloudfunctions/` 从 1 个函数补成5 个**，并写明「各自独立部署」这个硬约束
+>    —— 它是 Day 19拆repository 时直接撞到的：文件放仓库根不会被带上去。
+> ③ **补上 `repositories/`**（Day 19 新增，见 `docs/layering-day19.md`）。
+> ④ **补上漏记的 `db/`**（Day 16，13 个 SQL 文件）、「`verify.sh`（Day 18）」、
+>    「6 个单测（放在仓库根）」、「`docs/` 另两个文件」、「`frontend-guidelines.md`」。
+> ⑤ **`.env` / `.env.example` / `backend/.gitignore` 三行一并删掉** ——
+>    仓库里从来就没有过 `.env` 文件（实测 `find -name ".env*"` → 空），
+>    密钥在 CloudBase 控制台配。§9.2 规矩 1 的文字已同步改正。
 
 ### 4.2 结构上的三条规矩
 
@@ -231,7 +309,16 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 |---|---|---|
 | 1 | **`api.js` 是前端访问后端的唯一出口** | 将来换后端地址、加统一错误处理，只改一个文件；也便于排查"到底发出去了没有" |
 | 2 | **`storage.js` 是 localStorage 的唯一出口** | 将来若升级到云端数据库（路线丙），只需改这一个文件，4 个页面不用动 |
-| 3 | **密钥只在 `backend/.env` 出现，前端永不出现** | 这是选路线乙的全部意义所在（[3.3](#t3)） |
+| 3 | **密钥只从云函数的环境变量读，代码里不写死、前端永不出现** | 这是选路线乙的全部意义所在（[3.3](#t3)） |
+
+> **说明（Day 19 修订 · 规矩 3 的措辞）**：原写「密钥只在 `backend/.env` 出现」。
+> 那句话在 Day 6–7 是对的，Day 15 定稿 CloudBase 之后**已经不成立** ——
+> `backend/` 目录从未创建（实测 `ls backend` → 不存在），
+> 密钥配在 CloudBase 控制台的云函数环境变量里，代码里只`process.env.LLM_API_KEY` /
+> `process.env.CLOUDBASE_API_KEY` 这样读，读不到就是空字符串（启动日志只说「已配置/未配置」，
+> 不打印值）。§9.2 规矩 1 与 §9.3 已同步改成本次口径。
+> **规矩的意图没变**：密钥不能出现在前端、不能进 Git、不能进代码。
+
 
 > **说明（Day 5 原文）**：完整目录里 `frontend/`、`backend/`、`docs/` 都是**计划中**的结构，Day 5 不创建（今日不写代码）。
 >
@@ -247,7 +334,13 @@ vibecoding/                        ← 仓库根目录（当前工作区）
 > ④ **`backend/` 这一支已被 `cloudfunctions/` 取代**（Day 15 定稿 CloudBase 后，
 > 后端形态从"Node 服务 + routes/ 目录"变成"云函数"）。原 `backend/` 结构保留在表里，
 > 因为 `§4.2` 规矩 3（密钥只在 `backend/.env` 出现）**依然有效**——密钥仍然要有个地方放，
-> Day 16 写 `/api/chat` 时会决定是落在云函数的环境变量还是仍建 `backend/.env`。
+> Day 16 写 `/api/chat` 时会决定是落在云函数的环境变量或仍建 `backend/.env`。
+>
+> **↑ 这段 Day 15 说明的第四点已被 Day 17–19 推翻，保留原文只为看出决策演变**：
+> ① Day 17 定了「环境变量配在云函数里，不建 `.env`」（§9.1 的 Day 17 修订）；
+> ② `backend/` **最终从未创建**，Day 19 已把那几行从 [4.1](#t4) 表里删掉。
+> 当年「保留是因为密钥要有地方放」的那个前提已经不成立——密钥有地方放，就是控制台。
+> 当前口径以[4.1](#t4) 的 Day 19 修订说明与 [4.2](#t4) 规矩 3 为准。
 >
 > **说明（Day 8 修订）**：本表原未规划 `frontend/js/components/`，Day 8 余力加练新增该目录，用于存放**跨页面复用的 UI 组件**（当前只有 `topic-card.js` 一个）。**加它的理由**：主题卡片的呈现方式集中在一处，P1 与将来的 P4 用同一个组件，避免同一种卡片在两个页面各写一遍 —— 这与 [4.2](#t4) 三条规矩同一思路（唯一出口）。
 >
@@ -876,13 +969,28 @@ flowchart TD
 
 | # | 规矩 | 说明 |
 |---|---|---|
-| 1 | **密钥只出现在 `backend/.env`** | 前端任何文件、GitHub 仓库、聊天记录里都不能出现 |
-| 2 | **`.env` 必须进 `.gitignore`** | `backend/.gitignore` 第一行就是 `.env`；提交前应能看到 `.env` 不在改动清单里 |
+| 1 | **密钥只出现在云函数的环境变量里** | 代码里只 `process.env.LLM_API_KEY` / `process.env.CLOUDBASE_API_KEY` 这样读，**读不到就是空字符串**；前端任何文件、GitHub 仓库、聊天记录里都不能出现 |
+| 2 | **提交前自检清单里不能有密钥** | 仓库里**没有也不需要** `.env` 文件（实测 `find -name ".env*"` → 空）；提交前应能看到 `git status` 里没有任何含密钥的新文件。`.gitignore` 已就位 |
 | 3 | **密钥泄露后的处置** | 立即到模型供应商后台**撤销该 Key 并新建一个**（只删文件是不够的，已泄露的 Key 仍然有效） |
+
+> **Day 19 修订**：第1 条原写「密钥只出现在 `backend/.env`」，第 2 条原写
+> 「`.env` 必须进 `.gitignore`，`backend/.gitignore` 第一行就是 `.env`」。
+> 两条都基于一个**从未存在**的 `backend/` 目录（Day 6–7 的旧方案，Day 15 定稿
+> CloudBase 后已被 `cloudfunctions/` 取代，实测 `ls backend` → 不存在）。
+> 改成现在实际的口径：**环境变量在 CloudBase 控制台配，仓库里没有 `.env`**。
+> 三条规矩的**意图一条没变**（不进代码、不进 Git、泄露即撤销），只是载体换了。
 
 ### 9.3 一条来自实践的提醒
 
-你目前用的是**沙箱执行环境**，`.env` 文件在本机是真实存在的。按 `AGENTS.md` 五.3 的规定，**密钥、`.env`、连接串永远不进代码、不进提交**——这一点在 Day 6 建 `backend/` 时就先把 `.gitignore` 写好，不要等写完代码再补。
+密钥在 CloudBase 控制台配置，代码里读不到就是空字符串——**这本身就是一个安全设计**：
+忘了配不会静默用上别的密钥，而是启动日志里明说「未配置」。
+按 `AGENTS.md` 五.3 的规定，**密钥、连接串永远不进代码、不进提交**——
+在 CloudBase 控制台配好即可，不需要在本机建任何 `.env` 文件。
+
+> **Day 19 修订**：本节原写「你目前用的是沙箱执行环境，`.env` 文件在本机是真实存在的」，
+> 并建议「在 Day 6 建 `backend/` 时就先把 `.gitignore` 写好」。`backend/` 最终没有建，
+> 那条建议因此不适用。`tcb fn code update` **不会**清空控制台里配好的环境变量，
+> 但 `tcb fn deploy` 会 —— 日常更新代码一律用 `code update`（见 §10）。
 
 ---
 
@@ -936,7 +1044,7 @@ flowchart TD
 
 | 场景 | 会不会发生 | 要怎么处理 |
 |---|---|---|
-| **换模型供应商**（如换一家 AI 接口） | 可能 | 只改 `LLM_BASE_URL` / `LLM_MODEL` 两个变量；提示词格式若不同，改 `backend/prompts/` |
+| **换模型供应商**（如换一家 AI 接口） | 可能 | 只改 `LLM_BASE_URL` / `LLM_MODEL` 两个变量；提示词格式若不同，改 `cloudfunctions/chat/index.js` 与 `cloudfunctions/analyze/index.js` 里的提示词段（**Day 19 修订**：原写 `backend/prompts/`，那个目录从未创建；提示词最终内联在两个云函数里，没有独立文件） |
 | **换识别方案**（浏览器原生 → 云端识别） | 可能（由 R1 决定） | 启用 [6.4](#t6) 预留接口；前端只改 `speech.js` 一个文件 |
 | **升级到路线丙（加云端数据库）** | 本期不做，将来可能 | 只需改 `storage.js` 一个文件（结构上已预留，见 [4.2](#t4) 规矩 2） |
 | **调整主题内容**（增删主题、改锚点） | 可能（Q4 说主题随时可增删） | 只改 `frontend/data/topics.json`，不动代码 |

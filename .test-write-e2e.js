@@ -149,13 +149,39 @@ function callsOf(op, table) {
 }
 
 /* ---------- 二、准备临时副本（生产文件一个字不动）---------- */
-/* 做法：把require('pg') 换成假模块。两种更差的做法：
-     · 改index.js 加 if (process.env.FAKE_PG) 分支 → 生产代码里留测试专用分支
-     · 在 index.js 挂 module.exports → 与其余四个云函数结构不一致 */
+/* 做法：把真httpdb 换成假模块。两种更差的做法：
+     · 改index.js 加 if (process.env.FAKE_PG) 分支→ 生产代码里留测试专用分支
+     · 在 index.js 挂 module.exports → 与其余四个云函数结构不一致
+
+   ★★ Day 19 改法（原来是把 index.js 复制到仓库根 + 把require('./httpdb')
+     替换成绝对路径，那套现在不够用了）：
+     index.js 从 Day 19 起多了 require('./repositories/xxxRepository')，
+     而副本放在仓库根 —— './repositories/' 在那里不存在，
+     子进程会直接 MODULE_NOT_FOUND 起不来。
+     逐个把 require 换成绝对路径能救，但那是**四处require 都要记得改**，
+     少改一处就变成「测的是真库、以为测的是假库」，而且症状很难看。
+
+     现在的做法：**把整个函数目录按原样复制到临时目录**，
+     只把假 httpdb 覆盖到同名路径上（index.js 与 repositories/ 一个字不改）。
+     这样 require 路径在副本里仍然成立，模块加载图与线上一致——
+     「测的东西和跑的东西是同一份代码」这条比什么都重要。 */
 const target = path.join(__dirname, 'cloudfunctions', 'write', 'index.js');
+const writeDir = path.join(__dirname, 'cloudfunctions', 'write');
 const original = fs.readFileSync(target, 'utf8');
 if (!/require\('\.\/httpdb'\)/.test(original)) {
-  console.error("没找到 require('../httpdb')，index.js 结构变了？");
+  console.error("没找到 require('./httpdb')，index.js 结构变了？");
+  process.exit(1);
+}
+/* ★ Day 19：结构性前提。index.js 必须 require 三个 repository，
+   否则副本里的 repositories/ 是死代码，测的就不是分层后的代码了。 */
+['sessionsRepository', 'turnsRepository', 'itemsRepository'].forEach(function (n) {
+  if (original.indexOf("./repositories/" + n) < 0) {
+    console.error('index.js 里没有 require ./repositories/' + n + '，Day 19 的分层被撤销了？');
+    process.exit(1);
+  }
+});
+if (!fs.existsSync(path.join(writeDir, 'repositories'))) {
+  console.error('cloudfunctions/write/repositories 不存在，分层结构没了？');
   process.exit(1);
 }
 if (!/server\.listen\(9000, '0\.0\.0\.0'/.test(original)) {
@@ -164,8 +190,40 @@ if (!/server\.listen\(9000, '0\.0\.0\.0'/.test(original)) {
 }
 
 const fakeDbPath = path.join(__dirname, '.fake-httpdb-for-e2e.js');
-const patchedPath = path.join(__dirname, '.write-e2e-copy.js');
 fs.writeFileSync(fakeDbPath, makeFakeHttpDbModule());
+
+/* ★★ Day 19：副本目录（把整个 write 函数目录按原样搬过来）。
+   目录结构与线上一致：
+     .write-e2e-fn/
+       index.js← 只改端口，其余一字不改
+       httpdb.js                ← **假模块**（覆盖真httpdb）
+       repositories/
+         sessionsRepository.js  ← 一字不改
+         turnsRepository.js     ← 一字不改
+         itemsRepository.js     ← 一字不改
+   ★ 为什么假 httpdb 放在副本目录里、而不是让 repository 去 require 绝对路径：
+     require('../httpdb') 在副本里正好解析到它 —— 路径不用改一个字。
+     Day 19 之前的老做法是把 index.js 的 require 换成绝对路径，
+     拆出 repositories/ 之后那样要改四处 require，漏一处就悄悄测错东西。 */
+const FN_COPY_DIR = path.join(__dirname, '.write-e2e-fn');
+const FN_COPY_REPO = path.join(FN_COPY_DIR, 'repositories');
+
+/* 把 write 函数目录复制到 .write-e2e-fn/，只覆盖 httpdb.js 为假模块。 */
+function buildFnCopy(port) {
+  fs.rmSync(FN_COPY_DIR, { recursive: true, force: true });
+  fs.mkdirSync(FN_COPY_REPO, { recursive: true });
+  /* index.js：只改端口。★ 不改任何 require —— 副本目录结构与原目录相同。 */
+  fs.writeFileSync(path.join(FN_COPY_DIR, 'index.js'),
+    original.replace(/server\.listen\(9000, '0\.0\.0\.0'/, "server.listen(" + port + ", '0.0.0.0'"));
+  /* httpdb.js：真身被假模块覆盖。 */
+  fs.copyFileSync(fakeDbPath, path.join(FN_COPY_DIR, 'httpdb.js'));
+  /* repositories/：逐个字照抄。 */
+  fs.readdirSync(path.join(writeDir, 'repositories')).forEach(function (f) {
+    if (!/\.js$/.test(f)) return;
+    fs.copyFileSync(path.join(writeDir, 'repositories', f), path.join(FN_COPY_REPO, f));
+  });
+  return path.join(FN_COPY_DIR, 'index.js');
+}
 
 /* ---------- 三、端口 ----------
    ★ 9000 不能改：index.js 里写死 0.0.0.0:9000 是 CloudBase 的硬约定
@@ -249,9 +307,13 @@ function send(body, opts) {
 }
 
 function cleanup() {
-  [fakeDbPath, patchedPath, recorderPath, failDirectivePath].forEach(function (f) {
+  [fakeDbPath, recorderPath, failDirectivePath].forEach(function (f) {
     try { fs.unlinkSync(f); } catch (e) {}
   });
+  /* ★★ Day 19：副本现在是**一个目录**（原来是一个文件 patchedPath），
+     所以清理要用 rmSync 递归删；漏掉的话 .write-e2e-fn/ 会留在仓库里，
+     下次跑时 buildFnCopy 虽然会先 rmSync 重建，但 git status 会脏。 */
+  try { fs.rmSync(FN_COPY_DIR, { recursive: true, force: true }); } catch (e) {}
   if (child) { try { child.kill(); } catch (e) {} }
 }
 
@@ -529,9 +591,15 @@ async function runAll() {
   ok('★ 代码里（不含注释）不再有 pool.end（HTTP API 没有连接池）',
     !/pool\./.test(codeOnly), '代码里还有 pool 引用');
   ok('★ 有补偿删除，且第 1 步失败时不补偿',
-    /if \(step !== '1\/3 sessions'\)/.test(codeSrc) && /deleteWhere/.test(codeSrc));
+    /if \(step !== '1\/3 sessions'\)/.test(codeSrc) &&
+    /deleteBySessionId/.test(codeSrc));
+  /* ★★ Day 19：补偿删除的实现搬进了 repositories/sessionsRepository.js，
+     所以「删的是哪张表」这条判据必须**跨文件**验。
+     只扫 index.js 会误判成「补偿删除不见了」—— 那是搬迁，不是删除。 */
+  const sessionRepoSrc = fs.readFileSync(
+    path.join(writeDir, 'repositories', 'sessionsRepository.js'), 'utf8');
   ok('★ 补偿删的是父表 sessions（靠 CASCADE 连带删 turns/items）',
-    /deleteWhere\('sessions'/.test(codeSrc));
+    /db\.deleteWhere\('sessions'/.test(sessionRepoSrc));
   ok('★ 补偿失败不掩盖原始错误（原始错误才是根因）',
     /catch \(e2\)/.test(codeSrc));
 
@@ -541,10 +609,13 @@ async function runAll() {
        用它测「没配 Key」只会测出一个假通过。 */
   section('★ 没配 API Key 时错误码仍然清楚（用真 httpdb 测）');
   const port3 = 9001;
-  /* ★★ 副本必须放在 cloudfunctions/write/ 目录里 ——
-     换名后的副本不再有原目录的上下文，require('../httpdb') 会在仓库根找不到模块
+  /* ★★ 副本必须放在 cloudfunctions/write/ 目录里——
+     换名后的副本不再有原目录的上下文，require('./httpdb') 会在仓库根找不到模块
      （第一版放在根目录，进程直接 MODULE_NOT_FOUND 起不来）。
-     **替换掉文件名的同时，必须一起考虑它的相对路径。** */
+     **替换掉文件名的同时，必须一起考虑它的相对路径。**
+     ★★ Day 19 追加一条：这个目录现在还必须能解析 './repositories/xxxRepository'——
+       它在同一个目录里，所以这一条自动成立（副本与原目录同级）。
+       若哪天改成把副本放到别的目录，这条会立刻炸，那正是它该炸的时候。 */
   const patched3Path = path.join(__dirname, 'cloudfunctions', 'write', '.e2e-nokey-copy.js');
   /* 这一份**不替换** httpdb —— 用真的那个，只把端口换掉。
      子进程没有 CLOUDBASE_API_KEY，真 httpdb 就会走「未配置」那条路。 */
@@ -607,17 +678,12 @@ async function runAll() {
 
   console.log('（本地端口 ' + port + (port === REAL_PORT ? '，与线上一致' : '，9000 被占用，换了备用端口') + '）');
 
-  /* 前两个副本放在仓库根：它们把 require('../httpdb') 换成了**绝对路径**的假模块，
-     所以不受目录变化影响。上面那个「不替换 httpdb」的副本不同，它必须放回
-     cloudfunctions/write/ 里。 */
-  /* 前两个副本放在仓库根：它们把 require('../httpdb') 换成了**绝对路径**的假模块，
-     所以不受目录变化影响。上面那个「不替换 httpdb」的副本不同，它必须放回
-     cloudfunctions/write/ 里。 */
-  fs.writeFileSync(patchedPath, original
-    .replace(/require\('\.\/httpdb'\)/, 'require(' + JSON.stringify(fakeDbPath) + ')')
-    .replace(/server\.listen\(9000, '0\.0\.0\.0'/, "server.listen(" + port + ", '0.0.0.0'"));
+  /* ★★ Day 19：不再把 index.js 复制到仓库根 + 替换 require 路径。
+     改成把**整个函数目录**复制到 .write-e2e-fn/，只覆盖 httpdb.js 为假模块。
+     理由见 buildFnCopy 上面的注释：require 路径一个字都不用改。 */
+  const fnEntry = buildFnCopy(port);
 
-  child = spawn(process.execPath, [patchedPath], {
+  child = spawn(process.execPath, [fnEntry], {
     env: Object.assign({}, process.env, {
       PGHOST: 'fake', PGDATABASE: 'fake', PGUSER: 'fake', PGPASSWORD: 'fake', PGPORT: '5432'
     }),
