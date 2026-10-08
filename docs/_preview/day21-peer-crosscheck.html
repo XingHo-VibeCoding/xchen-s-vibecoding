@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>同伴交叉验证三行结论 · Day 21</title><style>
+:root{--bg:#FDFBF6;--ink:#2A2320;--muted:#6B5D55;--line:#E8DFD3;
+--orange:#D97706;--orange-deep:#9A4708;--teal:#0F7A6B;--coral:#E8624A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;padding:40px 32px}
+.page{max-width:1000px;margin:0 auto;background:#fff;border:1px solid var(--line);
+border-radius:14px;padding:40px 44px;box-shadow:0 2px 18px rgba(42,35,32,.06)}
+h1{font-size:30px;margin:0 0 6px;padding-bottom:14px;border-bottom:3px solid var(--orange);color:var(--orange-deep)}
+h2{font-size:23px;margin:38px 0 14px;padding-left:11px;border-left:5px solid var(--teal);color:#0B5F54}
+h3{font-size:19px;margin:26px 0 10px;color:var(--orange-deep)}
+h4{font-size:17px;margin:20px 0 8px;color:var(--teal)}
+p{margin:12px 0}
+hr{border:0;border-top:1px dashed var(--line);margin:30px 0}
+a{color:var(--teal)}
+strong{color:var(--orange-deep)}
+code{background:#F5EFE6;border:1px solid var(--line);border-radius:4px;
+padding:1px 6px;font:13.5px/1.6 Consolas,Monaco,monospace;color:#8A3B06}
+pre.code{background:#2A2320;color:#F7F1E7;border-radius:9px;padding:15px 18px;
+overflow-x:auto;margin:14px 0;line-height:1.6}
+pre.code code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+pre.code.lang-json{border-left:4px solid var(--teal)}
+pre.code.lang-bash{border-left:4px solid var(--orange)}
+blockquote{margin:16px 0;padding:12px 18px;background:#F5EFE6;
+border-left:4px solid var(--orange);border-radius:0 8px 8px 0;color:#5A4C44}
+blockquote p{margin:6px 0}
+table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14.5px;
+border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th{background:#F5EFE6;color:var(--orange-deep);text-align:left;font-weight:600}
+th,td{border:1px solid var(--line);padding:9px 12px;vertical-align:top}
+tbody tr:nth-child(even){background:#FDFBF6}
+ul,ol{margin:12px 0;padding-left:26px}
+li{margin:6px 0}
+li.sub{margin-left:22px;color:var(--muted);list-style:circle}
+.banner{background:#0F7A6B;color:#fff;border-radius:9px;padding:11px 18px;
+margin:0 0 26px;font-size:14.5px}
+</style></head><body><div class="page"><div class="banner">口语对话实战器 · 第 3 周收尾验收 · 2026-10-08</div><h1>同伴交叉验证 · 三行结论（Day 21）</h1>
+<blockquote><p>发给同伴的页面：<code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/status.html</code><br>口径：本周五个验收项里，「公网可访问」和「真实读写」这两项<strong>必须由真人眼睛看过才算数</strong>。<br>原因：CloudBase 会拦带 <code>Sec-Fetch-Mode: navigate</code> 的请求，返回标题「风险提醒」的404页，<br><strong>而 HTTP 状态码仍然是 200</strong> —— 命令行看状态码会被骗，所以需要人手动打开确认。</p></blockquote>
+<hr>
+<h2>给同伴的三个地址</h2>
+<table><thead><tr><th>用途</th><th>地址</th></tr></thead><tbody><tr><td>主题列表（首页）</td><td><code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/topics.html</code></td></tr><tr><td>检查台</td><td><code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/status.html</code></td></tr><tr><td>练习记录页</td><td><code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/records.html</code></td></tr></tbody></table>
+<p><strong>打开后第一件事</strong>：看标题栏或页面顶部。<br>如果看到的是「风险提醒」「页面不存在」这类拦截页，<strong>直接告诉我就算没打开</strong>，<br>不要当成正常页面继续往下试。</p>
+<hr>
+<h2>请回的三行（照抄这个格式，不要写成一段话）</h2>
+<pre class="code"><code>能否打开：______｜依据：______（打开的哪个地址 + 看到了什么）
+能否真实读写：______ ｜依据：______（在哪做了什么改动 + 刷新后看到什么）
+有无报错：______ ｜依据：______（控制台或页面报了哪条原文，或「无」）</code></pre>
+<hr>
+<h2>每一行的判定口径</h2>
+<table><thead><tr><th>结论</th><th>算通过的样子</th><th>不算通过</th></tr></thead><tbody><tr><td><strong>能否打开</strong></td><td>三个地址都出内容，标题是「主题列表 / 检查台 / 练习记录」</td><td>只说「能打开」，说不出看到了什么</td></tr><tr><td><strong>能否真实读写</strong></td><td>做了某个改动 → 刷新 → 改动还在；或看完一条练习记录后，页面上能看到它</td><td>只看了静态内容，全程没做任何改动</td></tr><tr><td><strong>有无报错</strong></td><td>按 F12 打开控制台，Console 里 0 条红色报错</td><td>有报错但「应该是正常的吧」——有就写出来</td></tr></tbody></table>
+<hr>
+<h2>「真实读写」具体怎么做（任选一处）</h2>
+<p><strong>做法 A · 检查台改数据（最直接）</strong></p>
+<ol><li>打开检查台，找到任意一条练习记录</li><li>记下它的错误次数（error count）</li><li>在控制台（或者你自己有权限的数据库控制台）把这一项改掉</li><li><strong>刷新页面</strong>，看这个数字有没有跟着变</li></ol>
+<p><strong>做法 B · 存一场新的</strong></p>
+<ol><li>首页选一个主题进对话</li><li>用文本框发两三句英语</li><li>点「结束对话」</li><li>去「练习记录」页看这一场在不在列表里</li></ol>
+<blockquote><p>做法A 需要能改数据库；若你没有权限，<strong>直接说「只做了打开，没能改数据」</strong>，<br>这不算失分——如实说比硬凑好。</p></blockquote>
+<hr>
+<h2>回填状态</h2>
+<p>☐ 待同伴填写</p>
+<p>同伴回三行后，由Day 21 填回 <code>docs/week3-acceptance.md</code> 第 6 项，<br>并把本页状态改为「已回收」。<strong>结论由同伴本人写，我不代填、不推测。</strong></p></div></body></html>

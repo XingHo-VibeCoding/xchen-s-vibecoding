@@ -1,0 +1,157 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 3 周周验收表· Day 21</title><style>
+:root{--bg:#FDFBF6;--ink:#2A2320;--muted:#6B5D55;--line:#E8DFD3;
+--orange:#D97706;--orange-deep:#9A4708;--teal:#0F7A6B;--coral:#E8624A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;padding:40px 32px}
+.page{max-width:1000px;margin:0 auto;background:#fff;border:1px solid var(--line);
+border-radius:14px;padding:40px 44px;box-shadow:0 2px 18px rgba(42,35,32,.06)}
+h1{font-size:30px;margin:0 0 6px;padding-bottom:14px;border-bottom:3px solid var(--orange);color:var(--orange-deep)}
+h2{font-size:23px;margin:38px 0 14px;padding-left:11px;border-left:5px solid var(--teal);color:#0B5F54}
+h3{font-size:19px;margin:26px 0 10px;color:var(--orange-deep)}
+h4{font-size:17px;margin:20px 0 8px;color:var(--teal)}
+p{margin:12px 0}
+hr{border:0;border-top:1px dashed var(--line);margin:30px 0}
+a{color:var(--teal)}
+strong{color:var(--orange-deep)}
+code{background:#F5EFE6;border:1px solid var(--line);border-radius:4px;
+padding:1px 6px;font:13.5px/1.6 Consolas,Monaco,monospace;color:#8A3B06}
+pre.code{background:#2A2320;color:#F7F1E7;border-radius:9px;padding:15px 18px;
+overflow-x:auto;margin:14px 0;line-height:1.6}
+pre.code code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+pre.code.lang-json{border-left:4px solid var(--teal)}
+pre.code.lang-bash{border-left:4px solid var(--orange)}
+blockquote{margin:16px 0;padding:12px 18px;background:#F5EFE6;
+border-left:4px solid var(--orange);border-radius:0 8px 8px 0;color:#5A4C44}
+blockquote p{margin:6px 0}
+table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14.5px;
+border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th{background:#F5EFE6;color:var(--orange-deep);text-align:left;font-weight:600}
+th,td{border:1px solid var(--line);padding:9px 12px;vertical-align:top}
+tbody tr:nth-child(even){background:#FDFBF6}
+ul,ol{margin:12px 0;padding-left:26px}
+li{margin:6px 0}
+li.sub{margin-left:22px;color:var(--muted);list-style:circle}
+.banner{background:#0F7A6B;color:#fff;border-radius:9px;padding:11px 18px;
+margin:0 0 26px;font-size:14.5px}
+</style></head><body><div class="page"><div class="banner">口语对话实战器 · 第 3 周收尾验收 · 2026-10-08</div><h1>第 3 周（Day 15–21）周验收表</h1>
+<blockquote><p>编制：Day 21｜编制日期：2026-10-08<br>判定口径：<strong>PASS</strong> = 有可复现命令且实跑通过；<strong>FAIL</strong> = 跑了但结果不符；<br><strong>未执行</strong> = 本周没做或没验，如实标出、不用别的说法遮盖。<br>复现命令里的 <code>B</code> 统一指：<code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com</code><br>（定义见 <code>frontend/js/api.js:53</code>，是前端访问后端的唯一出口）</p></blockquote>
+<hr>
+<h2>一、总览</h2>
+<table><thead><tr><th>#</th><th>验收项</th><th>对应本周产出</th><th>判定</th></tr></thead><tbody><tr><td>1</td><td>schema / seed 脚本</td><td><code>db/schema.sql</code>、<code>db/seed.sql</code>、<code>db/steps/</code></td><td><strong>PASS</strong></td></tr><tr><td>2</td><td>GET / POST 公网接口</td><td><code>cloudfunctions/{health,read,write}</code></td><td><strong>PASS</strong></td></tr><tr><td>3</td><td>分层重构</td><td><code>repositories/</code> 五个文件</td><td><strong>PASS</strong></td></tr><tr><td>4</td><td>公网检查台 URL</td><td><code>frontend/pages/status.html</code></td><td><strong>PASS</strong>（用户 Day 21 已人眼确认为控制台内容）</td></tr><tr><td>5</td><td>api-contract.md 完整性</td><td><code>docs/api-contract.md</code>（1336 行）</td><td><strong>PASS</strong>（附一处需订正的数字，见 §5备注）</td></tr><tr><td>6</td><td>同伴交叉验证</td><td>三行结论</td><td><strong>部分执行</strong>（打开 ✅ / 真实读写 ⚠️ / 报错 ✅，见 §4.1）</td></tr></tbody></table>
+<hr>
+<h2>二、逐项证据</h2>
+<h3>项1｜schema / seed 脚本 —— PASS</h3>
+<p><strong>验证方法</strong>：数文件、定位建表与索引行号、用读接口反查库里真实行数。</p>
+<pre class="code lang-bash"><code>cd /c/Users/26629/WorkBuddy/VibeCoding
+grep -nE "CREATE TABLE|CREATE INDEX" db/schema.sql
+ls -1 db/steps/
+curl -s "$B/api/sessions?limit=100" | grep -o '"count":[0-9]*'</code></pre>
+<p><strong>实跑输出</strong>：</p>
+<pre class="code"><code>52:CREATE TABLE sessions (
+95:CREATE INDEX idx_sessions_topic_time ON sessions (topic_id, started_at);
+106:CREATE TABLE turns (
+140:CREATE TABLE items (
+192:CREATE INDEX idx_items_session ON items (session_id);
+196:CREATE INDEX idx_items_topic_time ON items (topic_id, created_at);
+197:CREATE INDEX idx_items_time ON items (created_at);
+200:CREATE INDEX idx_items_fav ON items (is_favorited, favorited_at);</code></pre>
+<ul><li>三张表 <code>sessions</code> / <code>turns</code> / <code>items</code> 全在（<code>db/schema.sql</code> 第 52 / 106 / 140 行），五条索引（第 95 / 192 / 196 / 197 / 200 行）。</li><li><code>db/schema.sql</code> 共 276 行、<code>db/seed.sql</code> 312 行、<code>db/steps/</code> 11 个分批脚本（<code>schema-1</code>～<code>schema-6</code>、<code>seed-1</code>～<code>seed-5</code>），可整块粘进控制台 SQL 编辑器。</li><li>落库验证：<code>GET /api/sessions?limit=100</code> 返回 <code>"count":6</code> = 种子 5 场（<code>S-MOCK-01</code>～<code>05</code>）+ Day 21 验收写入 1 场（见项 2）。</li><li>种子行 <code>S-MOCK-01</code> 的字段与 <code>db/seed.sql</code> 一致（<code>errorCount:2</code> / <code>goodSentenceCount:1</code> / <code>turnCount:4</code>）。</li></ul>
+<blockquote><p>⚠️ <code>db/selftest-read.js</code> 现在报错：<code>TypeError: Cannot read properties of null (reading 'slice')</code>（第 53 行）。<br><strong>根因</strong>：它的假数据还是 camelCase（<code>sessionId</code>/<code>startedAt</code>），Day 18 起 <code>shapeSession</code> 已改成读<br>snake_case（<code>cloudfunctions/read/index.js:134-149</code> 的 <code>row.session_id</code>），取不到值 → <code>iso(undefined)</code><br>返回 null → <code>.slice()</code> 炸。<strong>属Day 18 遗留问题，不是本项产出</strong>，按今日清单「不顺手修复与验收无关的问题」<br>记入第4 周待办。</p></blockquote>
+<hr>
+<h3>项 2 ｜ GET / POST 公网接口 —— PASS</h3>
+<p><strong>验证方法</strong>：对公网基址跑三个 GET + 一个 POST，再重新 GET 确认写入持久化，最后重复 POST 确认约束生效。</p>
+<pre class="code lang-bash"><code>B="https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com"
+curl -s "$B/api/health";curl -s "$B/api/sessions?topicId=T1&amp;limit=20"
+curl -s "$B/api/favorites?limit=3"
+curl -s -X POST "$B/api/sessions/write" -H "Content-Type: application/json" --data-binary @body.json</code></pre>
+<p><strong>实跑输出（2026-10-08）</strong>：</p>
+<table><thead><tr><th>调用</th><th>HTTP</th><th>关键返回</th></tr></thead><tbody><tr><td><code>GET /api/health</code></td><td>200</td><td><code>{"ok":true,"service":"TalkTrainer"}</code></td></tr><tr><td><code>GET /api/sessions?limit=3</code></td><td>200</td><td>3 条真实库行：<code>S-MOCK-01</code>/<code>02</code>/<code>03</code>，字段为 camelCase</td></tr><tr><td><code>GET /api/favorites?limit=3</code></td><td>200</td><td>3 条已收藏条目，含 <code>correction</code> / <code>note</code> / <code>favoritedAt</code></td></tr><tr><td><code>POST /api/sessions/write</code></td><td>200</td><td><code>turnsStored:2, itemsStored:1, itemsDropped:0</code>，<code>durationSeconds:200</code>、<code>errorCount:1</code></td></tr><tr><td>写入后重跑 <code>GET /api/sessions?topicId=T1</code></td><td>200</td><td><strong>读得到 <code>S-DAY21-VERIFY</code></strong> 与 <code>nickname:"Day21验收"</code> →持久化成立</td></tr><tr><td>重复提交同一 <code>sessionId</code></td><td><strong>400</strong></td><td><code>{"ok":false,"error":{"code":"DUPLICATE","message":"这场对话已经存过了（同一个 sessionId 只能存一次）"}}</code></td></tr></tbody></table>
+<p><strong>写入内容</strong>（验收记录，可删）：<br><code>sessionId=S-DAY21-VERIFY</code>、<code>topicId=T1</code>、<code>startedAt=2026-10-08T09:00:00+08:00</code>、2 轮转写、1 条 logic 条目。</p>
+<p><strong>结论</strong>：读得到、写得进、刷新后还在、重复提交被拦住 —— 四项都成立。</p>
+<hr>
+<h3>项 3 ｜ 分层重构 —— PASS</h3>
+<p><strong>验证方法</strong>：证明「接口层里没有 SQL」+「接口层确实调repository」两件事都成立。</p>
+<pre class="code lang-bash"><code>for f in cloudfunctions/read/index.js cloudfunctions/write/index.js; do
+  echo -n "$f SQL行数="; grep -cE "SELECT |INSERT INTO" "$f"; done
+grep -nE "require\('\./repositories" cloudfunctions/read/index.js cloudfunctions/write/index.js
+wc -l cloudfunctions/*/repositories/*.js</code></pre>
+<p><strong>实跑输出</strong>：</p>
+<pre class="code"><code>cloudfunctions/read/index.js    SQL行数=0
+cloudfunctions/write/index.js   SQL行数=0
+
+read/index.js:47   const sessionsRepo = require('./repositories/sessionsRepository');
+read/index.js:48   const itemsRepo    = require('./repositories/itemsRepository');
+write/index.js:104 const sessionsRepo = require('./repositories/sessionsRepository');
+write/index.js:105 const turnsRepo    = require('./repositories/turnsRepository');
+write/index.js:106 const itemsRepo    = require('./repositories/itemsRepository');</code></pre>
+<ul><li>SQL 只存在于两处：<code>read/repositories/sessionsRepository.js</code>、<code>read/repositories/itemsRepository.js</code>（各 1 条 SELECT）；<code>write</code> 侧三个 repository 只做行对象构造（<code>turnsRepository.js</code> 的 <code>buildTurnRows</code>），写入统一走 <code>httpdb.js</code>。</li><li>repository 层共 5 个文件、310 行：<code>read</code> 2 个（51+75行）、<code>write</code> 3 个（68+66+50 行）。</li><li>拆分设计说明在 <code>docs/layering-day19.md</code>（185 行），含「换一个需求时这段代码会不会跟着变」这条判定标准。</li></ul>
+<p><strong>回归未受影响</strong>（分层属后端，但仍跑了前端回归）：</p>
+<pre class="code lang-bash"><code>cd frontend &amp;&amp; python serve.py   # 另开终端
+node regress.js</code></pre>
+<p>→ <code>===== 结果：25 通过 / 0 失败 =====</code>、控制台 0 条报错（四页+ 检查台 × 五断点 = 25 项）。</p>
+<hr>
+<h3>项 4 ｜ 公网检查台 URL —— PASS</h3>
+<p><strong>验证方法</strong>：<code>curl</code> 取页面并<strong>比对 title 与正文关键词</strong>（不能只看状态码，见下方「为什么必须人眼确认」）；再由用户在真实浏览器里确认一次。</p>
+<pre class="code lang-bash"><code>curl -s "$B/pages/status.html" | grep -oE "&lt;title&gt;[^&lt;]*&lt;/title&gt;"
+curl -s "$B/pages/topics.html" | grep -oE "&lt;title&gt;[^&lt;]*&lt;/title&gt;"
+curl -s "$B/pages/status.html" | grep -c "检查台"</code></pre>
+<p><strong>实跑输出</strong>：</p>
+<pre class="code"><code>&lt;title&gt;检查台 · 口语对话实战器&lt;/&lt;title&gt;      # status.html
+&lt;title&gt;主题列表 · 口语对话实战器&lt;/title&gt;        # topics.html
+正文命中「检查台」5 处</code></pre>
+<p><strong>URL</strong>：<code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/status.html</code></p>
+<blockquote><p>★ <strong>为什么命令行绿灯不能单独判 PASS</strong>：CloudBase 会拦带 <code>Sec-Fetch-Mode: navigate</code> 的请求，<br>返回标题为「风险提醒」的 404 页，<strong>而 HTTP 状态码仍是 200</strong>。所以只看状态码会把拦截页<br>当成正常页。curl 不带这个头，因此命令行这次拿到的是真页面（title 已比对）。<br>✅ <strong>用户 Day 21 已在真实浏览器打开确认：是控制台内容</strong>（非拦截页）→ 本项判 PASS。</p></blockquote>
+<hr>
+<h3>项 5 ｜ api-contract.md 完整性 —— PASS</h3>
+<p><strong>验证方法</strong>：数章节、列出全部接口、把契约错误码清单与代码实际错误码<strong>双向交叉比对</strong>。</p>
+<pre class="code lang-bash"><code>grep -nE "^## " docs/api-contract.md          # 章节与接口
+awk 'NR&gt;=108 &amp;&amp; NR&lt;=195' docs/api-contract.md | grep -oE "^\| *\`[A-Z_]{3,}\`" | grep -oE "\`[A-Z_]{3,}\`" | tr -d '`' | sort -u &gt; /tmp/codes_contract.txt
+grep -rohE "'(LLM_[A-Z_]+|DB_[A-Z_]+|DUPLICATE|INVALID_JSON|INVALID_PARAMS|INTERNAL_ERROR|METHOD_NOT_ALLOWED|NOT_FOUND|PAYLOAD_TOO_LARGE)'" cloudfunctions/ | tr -d "'" | sort -u &gt; /tmp/codes_code.txt
+comm -23 /tmp/codes_contract.txt /tmp/codes_code.txt   # 契约有、代码无
+comm -13 /tmp/codes_contract.txt /tmp/codes_code.txt   # 代码有、契约无</code></pre>
+<p><strong>实跑输出</strong>：</p>
+<ul><li>文档 1336 行，10 个二级章节，接口逐个标了实现状态：</li></ul>
+<p>  <code>GET /api/health</code> ✅（第 223 行）／<code>GET /api/sessions</code>+<code>/api/favorites</code> 🟡（第 267 行）／<br>  <code>POST /api/chat</code> 🟢（第 438 行）／<code>POST /api/analyze</code> 🟢（第 556 行）／<br>  <code>POST /api/sessions/write</code> 🟢（第 709 行）／<code>POST /api/speech-to-text</code> ⚪（第 886 行，本期不启用）。</p>
+<ul><li>响应外壳只有一套（<code>{ok, data, error:{code,message}}</code>），<code>§1.3</code> 明确 <code>data</code> 恒为 <code>null</code> 于失败时。</li><li><strong>错误码双向比对：契约 20 个 vs 代码 20 个，逐个一致</strong>（<code>comm</code> 两侧均无输出）。</li><li class="sub">扫码要抓两种写法：<code>sendError(res, …, 'CODE', …)</code> 与 <code>e.code = 'CODE'</code>。</li></ul>
+<p>    只grep 前者会漏掉 <code>LLM_TIMEOUT</code> / <code>PAYLOAD_TOO_LARGE</code>。</p>
+<ul><li class="sub"><code>DB_*</code> 4 个码不在 <code>index.js</code> 而在 <code>read/httpdb.js:84,88,128,131,135,139,142</code> ——</li></ul>
+<p>    属正常，它们由数据访问层抛出、接口层原样转出。</p>
+<blockquote><p>⚠️ <strong>需订正的一处数字</strong>：<code>§1.4</code> 正文写「下面三张表合计 <strong>20 个码</strong>」，<br>与表内实际列出的 20 行一致 ✅；但同段上文「此前只列了 6 个，实际实现了 21 个」<br>说的是<strong>Day 19 当时的数</strong>，Day 18 调整后是 20 个。两句放在一起容易读成矛盾。<br><strong>这不是缺漏，是叙述顺序造成的歧义</strong> —— 按今日清单不在验收日改文档，记入第 4 周文案订正。</p></blockquote>
+<hr>
+<h2>三、本周未完成项（如实列出，不算失败）</h2>
+<table><thead><tr><th>项</th><th>状态</th><th>原因</th></tr></thead><tbody><tr><td><code>POST /api/favorites</code>（收藏写入）与 <code>PATCH 收藏与备注</code></td><td><strong>未实现</strong></td><td>契约里仍是预留；<code>frontend/js/storage.js</code> 的 <code>itemIdOf()</code>存在撞键问题，要先解</td></tr><tr><td><code>frontend/js/speech.js</code>（语音转写）</td><td>未实现</td><td><code>POST /api/speech-to-text</code> 契约标⚪ 本期不启用；本期用文本框代替</td></tr><tr><td>首页主题卡「上次在这里卡过」标记</td><td><strong>仍是 mock</strong></td><td><code>GET /api/sessions</code> 只给合计 <code>errorCount</code>，标记要的是分项（偏题 vs 逻辑错误），需给 items 表加全量查询接口 —— 清单外，未做</td></tr><tr><td>P2 空态 / P3 加载态</td><td>未做</td><td>排在第 4 周</td></tr><tr><td><strong>AI 连问不停（同伴实报）</strong></td><td><strong>疑似 bug，未修</strong></td><td>同伴反馈「这个 AI 问个不停，都不等我回答一直问」。疑在 <code>dialogue.html:464-474</code> 的 <code>armSilence()</code> 循环未停住。<strong>第 4 周第① 优先项，且是演示风险点</strong></td></tr><tr><td><code>Sec-Fetch-Mode</code> 拦截机制来源</td><td>未查清</td><td>Day 20 遗留。不影响本环境交付，换域名可能复发，值得查一次官方文档</td></tr><tr><td><code>db/selftest-read.js</code></td><td><strong>报错</strong></td><td>Day 18 遗留：假数据还是 camelCase，<code>shapeSession</code>（<code>read/index.js:134-149</code>）已改读 snake_case → 取不到值 → <code>iso(undefined)</code> 返回 null → 第 53 行 <code>.slice()</code> 炸</td></tr></tbody></table>
+<hr>
+<h2>四、同伴交叉验证（三行结论模板）</h2>
+<blockquote><p>本节<strong>必须由同伴本人填写</strong>。我不代填、不推测。<br>同伴只需打开下面两个地址、做三件事，然后把三行结论发回。</p></blockquote>
+<p><strong>给同伴的地址</strong>：</p>
+<ul><li>首页：<code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/topics.html</code></li><li>检查台：<code>https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com/pages/status.html</code></li></ul>
+<p><strong>请同伴回的三行</strong>（照抄这个格式回，不要写成一段话）：</p>
+<pre class="code"><code>能否打开：______ ｜依据：______（打开的哪个地址 + 看到了什么）
+能否真实读写：______ ｜依据：______（在哪做了什么改动 + 刷新后看到什么）
+有无报错：______ ｜依据：______（控制台或页面报了哪条原文，或「无」）</code></pre>
+<p><strong>判定口径</strong>（同伴自己判，不用来问我）：</p>
+<table><thead><tr><th>结论</th><th>算通过的样子</th><th>不算通过</th></tr></thead><tbody><tr><td>能否打开</td><td>两个地址都出内容，不是「风险提醒」页</td><td>只说「能打开」，说不出看到什么</td></tr><tr><td>能否真实读写</td><td>在检查台改一条数据 → 刷新 → 改动还在；或点「结束对话」存一场 → 记录页能读到</td><td>只看了静态内容，没做任何改动</td></tr><tr><td>有无报错</td><td>F12 控制台 0 条报错</td><td>有报错但「应该是正常的」</td></tr></tbody></table>
+<hr>
+<h3>4.1 同伴回的三行结论（已回收）</h3>
+<p><strong>回收时间</strong>：2026-10-08｜<strong>判定</strong>：<strong>部分执行</strong>（用户 Day 21 选定口径 A）</p>
+<table><thead><tr><th>结论</th><th>判定</th><th>同伴原话</th><th>核实后是否采信</th></tr></thead><tbody><tr><td>能否打开</td><td>✅ <strong>PASS</strong></td><td>「能打开，看到了检查台页面，应该能读吧」「第三个也能打卡能读」</td><td>✅ 采信。与开发者 curl 取到的 title「检查台 · 口语对话实战器」一致，非「风险提醒」拦截页</td></tr><tr><td>能否真实读写</td><td>⚠️ <strong>部分执行</strong></td><td>「写不了，他说不算报错」「第三个也能打卡能读，能写」</td><td>⚠️ 部分采信，<strong>见下方两点</strong></td></tr><tr><td>有无报错</td><td>✅ <strong>PASS</strong></td><td>「他说不算报错」</td><td>✅ 采信（无F12 红色报错）</td></tr></tbody></table>
+<h4>⚠️ 「能真实读写」为什么不是 PASS —— 两个要说清的地方</h4>
+<p><strong>① 同伴写的「能写」是写 localStorage，不是写数据库。</strong><br>记录页的收藏/取消收藏（<code>frontend/pages/records.html:252</code> 调 <code>window.Storage.toggleFavorite</code>）<br>存的是浏览器本地的 <code>favoriteItems</code> 键（<code>frontend/js/storage.js</code>），<br><strong>换一台电脑打开就没有了</strong>。这跟验收项 2 要求的「写进 PG、刷新后还在」不是一回事。</p>
+<p><strong>② 同伴没有做「改数据库 → 刷新 → 改动还在」这个动作。</strong><br>他没权限改数据库，所以核心动作没做 —— 不是他不愿意，是没条件。<br>按 AGENTS.md「缺项如实标记，不要模糊处理」，本项<strong>不判 PASS</strong>。</p>
+<h4>✅ 但写数据库的能力，开发者侧已独立验过（不依赖同伴）</h4>
+<p>见§二项 2：公网 POST 写入 <code>S-DAY21-VERIFY</code> → HTTP 200 → 重新 GET 读回→ 重复提交 400 <code>DUPLICATE</code>。<br><strong>同伴没验成的这一环，开发者用curl 验成了</strong> —— 两者不冲突，如实并列。</p>
+<h4>⚠️ 同伴额外报了一个真问题（已记入第 4 周待查）</h4>
+<blockquote><p><strong>「这个 AI 问个不停，都不等我回答一直问」</strong></p></blockquote>
+<p>这不是同伴不会用，<strong>是疑似真bug</strong>。按 PRD §6.6，AI 说一句就该停下等用户；<br>代码里 <code>armSilence()</code>（<code>frontend/pages/dialogue.html:464-474</code>）设计的是<br>「沉默满5 秒（FREE）/ 8 秒（8 主题）才催一句」，且<strong>必须在 <code>state === 'recording'</code> 时才起表</strong>。<br>但同伴的体感是「一直问」，说明这个循环在实跑中没停住。</p>
+<p><strong>今天不修</strong>（今日清单：不修与验收无关的问题），记为第 4 周第①优先项。<br>⚠️ <strong>演示风险</strong>：第②段「核心流程」要现场跑对话，这个现象若复现会影响演示效果，<br>演示时注意观察或先备一句「这是已知问题」。</p>
+<p><strong>回填状态</strong>：✅ 已回收 → 上表第 6 项已从「未执行」改为 <strong>部分执行</strong>。</p>
+<h3>4.2 明天补做（可选，不做也不阻塞交付）</h3>
+<p>若要让第 6 项拿满三分，需要<strong>有数据库权限的人</strong>补做一次：<br>检查台改一条记录的 errorCount → 刷新 → 数字跟着变 →回三行。<br>（开发者已用 curl 代验，见上文；这一步是为了让「同伴三行」也拿满。）</p>
+<hr>
+<h2>五、演示提纲（3–5 分钟）</h2>
+<blockquote><p>完整版见 <code>docs/day21-demo-outline.md</code>（同日另一份文件）。此处只留四段骨架，<br>供截图用（截图要含「用户问题 → 核心流程 → 提示词改写 → 验证方式」四段结构）。</p></blockquote>
+<table><thead><tr><th>段</th><th>时长</th><th>讲什么</th><th>屏幕上给什么证据</th></tr></thead><tbody><tr><td>① 用户问题</td><td>30s</td><td>有英语基础但一开口就卡住的人，缺练习伙伴；市面上app 要么不给反馈，要么只判「对/错」</td><td>PRD 目标用户段 + 8 个主题卡</td></tr><tr><td>② 核心流程</td><td>2min</td><td>选主题 → AI 先开口 → 文本框对话 → 结束对话 → <strong>真实落库</strong> → 记录页读到</td><td>POST 200返回体 + 刷新后 GET 到 <code>S-DAY21-VERIFY</code></td></tr><tr><td>③ 提示词改写</td><td>1.5min</td><td>analyze 提示词从「泛判对错」改成「按 F2 边界：偏题只提醒、逻辑错误才纠正」；附 FREE 对照</td><td><code>analyze/index.js:244</code> <code>systemPromptFor()</code> + T1/FREE 两次真实返回</td></tr><tr><td>④ 验证方式</td><td>1min</td><td>210 项单测、25 项回归、公网 curl 四件套</td><td><code>regress.js</code> 25/0 + <code>.test-write.js</code> 118/0</td></tr><tr><td>⑤ 未完成项</td><td>20s</td><td>语音转写、收藏写接口、「卡过」标记仍 mock</td><td>—</td></tr></tbody></table>
+<p><strong>四段结构齐了</strong>（截图要求：用户问题 → 核心流程 → 提示词改写 → 验证方式），<br>第⑤ 段是追加的诚实说明。</p>
+<p><strong>已完整走通一遍</strong>，9 个入口全部实测存在：</p>
+<table><thead><tr><th>提纲里写的入口</th><th>实测</th></tr></thead><tbody><tr><td><code>pages/topics.html</code> 公网可达</td><td>✅ HTTP 200，title「主题列表 · 口语对话实战器」</td></tr><tr><td><code>POST /api/sessions/write</code> 真实写入</td><td>✅ 200，<code>turnsStored:2, itemsStored:1</code></td></tr><tr><td>写入后刷新读回</td><td>✅ <code>GET /api/sessions?topicId=T1</code> 读到 <code>S-DAY21-VERIFY</code></td></tr><tr><td>重复提交被拦</td><td>✅ 400 <code>DUPLICATE</code></td></tr><tr><td><code>POST /api/analyze</code> T1 模式</td><td>✅ 200：logic <strong>给了</strong> correction、offtopic <code>correction:null</code></td></tr><tr><td><code>POST /api/analyze</code> FREE 模式</td><td>✅ 200：<code>issues:[]</code></td></tr><tr><td><code>analyze/index.js</code> 提示词段</td><td>✅ <code>systemPromptFor()</code> 在第 244 行</td></tr><tr><td><code>regress.js</code></td><td>✅ 25 通过 / 0 失败</td></tr><tr><td><code>.test-write.js</code></td><td>✅ 118 项通过</td></tr></tbody></table></div></body></html>
