@@ -190,6 +190,35 @@ async function deleteWhere(table, query) {
   throw buildError(r, table);
 }
 
+/* ---------- 改（Day 22 新增）----------
+   ★ 为什么要新加一个方法，而不是拿 execSql 写一条 UPDATE：
+     exec-pgsql 需要管理员凭据，而且它一次只能一条语句；
+     REST 风格这条是普通的数据操作，与同文件里的 select / insertMany / deleteWhere
+     同一类东西 —— 放在一起，接口层不必知道「改」和「增删」走的不是一套机制。
+
+   ★★ 最关键的一条语义差异：**命中 0 行也回 200**。
+     PostgREST 不区分「改到了」与「没匹配到」，两者都是 200 + 空体。
+     所以**任何依赖「确实改到了」的判断，都必须先 select 查存在性** ——
+     拿这个方法的返回值去判断存在性是错的（接口层 handlePatchItem 就是先查后改）。
+
+   patchObj 用库里原样的 snake_case 列名（与 insertMany 一致：
+   映射成 camelCase 是调用方的责任，见 select 上方那段注释）。 */
+async function patchWhere(table, query, patchObj) {
+  const keys = Object.keys(patchObj || {});
+  /* 空补丁直接返回，不发请求：PostgREST 收到空 body 会报 400，
+     而「没有字段要改」是我们自己的校验层该先拦住的事，不该走到这里。 */
+  if (!keys.length) return { affected: 0 };
+  const qs = new URLSearchParams();
+  Object.keys(query || {}).forEach(function (k) { qs.set(k, String(query[k])); });
+  const r = await httpJson('PATCH', REST_BASE + '/' + table + '?' + qs.toString(), patchObj,
+    { 'Prefer': 'return=minimal' });
+  /* 实测：命中时 200 / 204；命中 0 行同样 200（见上方那段说明） */
+  if (r.status === 200 || r.status === 204) {
+    return { affected: r.headers['content-range'] || '' };
+  }
+  throw buildError(r, table);
+}
+
 /* 执行任意 SQL（只用于 read/write 之外的运维与排错场景，日常写入不碰它）。 */
 async function execSql(sql, parameters) {
   const r = await httpJson('POST', EXEC_URL, {
@@ -226,6 +255,7 @@ module.exports = {
   select: select,
   insertMany: insertMany,
   deleteWhere: deleteWhere,
+  patchWhere: patchWhere,
   execSql: execSql,
   classify: classify,
   DbError: DbError,

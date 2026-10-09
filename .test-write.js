@@ -519,8 +519,17 @@ ok('★ 请求方不能塞 originalText（该字段在 cleanItems 里不被读�
   !/it\.originalText|\.originalText\s*&&\s*it/.test(grabFn('cleanItems')));
 ok('★ 时间出口是写死的 +08:00 常量，没引入时区库',
   /const TZ_SUFFIX = '\+08:00';/.test(src) && !/moment|dayjs|date-fns|luxon/.test(src));
+/* ★ Day 22 改写了这条检查的判据。
+   原来它匹配的是**写法**——写死一句 `norm === '/api/sessions/write' || norm === '/sessions/write'`。
+   Day 22 路由层从两条 if 链换成了一张ROUTES 表之后，那句字面量消失了，
+   但行为一点没变（表里两个 key 都在），于是这条检查报了失败。
+
+   这是一个值得记住的教训：**断言写法而不是行为，重构就会被测试判成故障。**
+   判据改成「ROUTES 表里同时有带前缀与不带前缀的两个写法」，
+   换实现方式它照样成立，换掉双写法它照样能报出来。 */
 ok('★ 路径容错：同时认带/不带 /api 前缀（Day 17 踩过网关剥前缀）',
-  /norm === '\/api\/sessions\/write' \|\| norm === '\/sessions\/write'/.test(src));
+  /'\/api\/sessions\/write'/.test(src) && /'\/sessions\/write'/.test(src),
+  'ROUTES 表里找不到 /api/sessions/write 或 /sessions/write 这两个 key');
 ok('★ 密钥/连接串不写死在代码里', !/postgres:\/\/|PGPASSWORD\s*=\s*['"]/.test(src));
 ok('★ 有排错日志（清单的余力加练），且不打印请求体',
   /console\.log\('\[write\] ' \+ req\.method/.test(src) && !/console\.log\(.*body\)/.test(src));

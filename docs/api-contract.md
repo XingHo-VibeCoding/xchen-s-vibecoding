@@ -25,8 +25,8 @@
 | 建立 | Day 15（第 3 周，板块 ④） |
 | 上游依据 | `TECH_DESIGN.md` §5（数据对象）/ §6（API 列表）/ §8（错误处理） |
 | 公网基址 | `https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com` |
-| 状态 | 🟢 **5 个已实现**（health / sessions·favorites / **chat** / **analyze** / **write**）· 🟡 1 个占位待实现（speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7）· 🟢 **读写接口均已连通真实数据库**（Day 18 改走 HTTP API） |
-| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1）；`/api/analyze` 的三条硬约束**只在云函数强制**（Day 19 用户采纳，见 §4）；**写接口路径为 `/api/sessions/write`**，不改名（Day 18 用户采纳，见 [§4.1](#s41)）；**数据访问走 CloudBase HTTP API**、不直连（Day 18，见 [§10](#s10)） |
+| 状态 | 🟢 **5 个已实现**（health / sessions·favorites / **chat** / **analyze** / **write**）· 🟢 **`write` 现同时提供 PATCH / DELETE**（Day 22）· 🟡 1 个占位待实现（speech-to-text）· ⚪ 4 个预留（不启用）· 🟢 **数据表已在库中执行**（Day 16 建表、Day 17 上午复核 5/17/7）· 🟢 **读写接口均已连通真实数据库**（Day 18 改走 HTTP API）· 🟢 **增删改查四类操作已闭环**（Day 22 实测）· 🟢 **删除为软删**（`is_deleted` 标记 + 查询跳过，行可找回，无恢复接口，Day 22 余力加练） |
+| 已拍板事项 | 接口层与展示层字段名**并存不合并**（见 §7，Day 15 用户采纳）；`turns` **独立成表**（见 §9.2，Day 16 用户采纳，覆盖 `TECH_DESIGN §5.4` 原写的「内嵌不单独立表」）；**读接口走 `GET /api/sessions` + `GET /api/favorites`**，不造 `/api/hot`（Day 17 用户采纳，见 §2.1）；`/api/analyze` 的三条硬约束**只在云函数强制**（Day 19 用户采纳，见 §4）；**写接口路径为 `/api/sessions/write`**，不改名（Day 18 用户采纳，见 [§4.1](#s41)）；**PATCH / DELETE 复用同一条 `/api/sessions/write`**（Day 22 用户采纳，网关建不出 `WEB_SCF` 路由，见 [§4.2](#s42)）；**改删只做 `items` 一张表**（Day 22 用户采纳，清单原写的 `checkins` 在本项目不存在）；**前端二次确认用 `window.confirm`**（Day 22 用户采纳，不动 `main.css`）；**软删除排在闭环验证之后**（Day 22 用户采纳）；**软删除只做标记 + 查询跳过，不做恢复接口**（Day 22 用户采纳，找回靠 SQL 手工改）；**改成软删后契约与前端文案同步说明**（Day 22 用户采纳 —— 库里行还在，文案说「找不回来」就是在说假话）；**数据访问走 CloudBase HTTP API**、不直连（Day 18，见 [§10](#s10)） |
 
 ---
 
@@ -91,6 +91,8 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 **本清单是 Day 19 按线上代码逐个核出来的**（此前只列了 6 个，实际实现了 21 个），
 **Day 18 随数据访问层改走 HTTP API 调整为 20 个**（删 2 个失效的、加 1 个 `DUPLICATE`）。
+**Day 22 的 PATCH / DELETE 没有新增错误码**（总数仍是 20 个）——
+只把两个既有码的**触发场景**扩宽了，见下面两张表里标 Day 22 的两行。
 分类按前缀走，一眼能看出根因在哪一层。
 
 > **★ 为什么后端错误码不用 E 编号**：`TECH_DESIGN §8.2` 的 E1–E12 是**用户可见的前端错误**清单
@@ -110,9 +112,9 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 
 | `error.code` | 对应 | 场景 | HTTP | 出现在 |
 |---|---|---|---|---|
-| `INVALID_PARAMS` | — | 必填参数缺失、类型不对，或被库的 CHECK 挡住 | 400 | chat / analyze / read / write |
-| `NOT_FOUND` | — | 路径不存在 | 404 | 全部四个 |
-| `METHOD_NOT_ALLOWED` | — | 方法不对（本接口只接受 GET） | 405 | 全部四个 |
+| `INVALID_PARAMS` | — | 必填参数缺失、类型不对，或被库的 CHECK 挡住。**★ Day 22 扩宽**：改条目时也用它报「没有要改的内容」/「note 超长」/「isFavorited 不是布尔」 | 400 | chat / analyze / read / write |
+| `NOT_FOUND` | — | 路径不存在；**★ Day 22 扩宽**：也用于「路径对但 `itemId` 查不到」——改与删都必须先查存在性，不存在的 id 回这个码而不是假报成功（[§4.2](#s42)） | 404 | 全部四个 |
+| `METHOD_NOT_ALLOWED` | — | 方法不对。**★ Day 22 扩宽**：`write` 一条路径挂三个方法，文案会列出允许哪几个（`这条路径接受 POST / PATCH / DELETE（收到了 PUT）`） | 405 | 全部四个 |
 | `DUPLICATE` | — | 同一个 `sessionId` 已有记录（PG 23505 主键冲突） | **400** | write |
 | `INTERNAL_ERROR` | — | 服务器内部错误（兜底，**只在非预期异常时**） | 500 | chat / analyze |
 
@@ -161,7 +163,7 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 | `DB_AUTH_FAILED` | 401 / 403 / `PERMISSION_DENIED` | **`CLOUDBASE_API_KEY` 没配、填错或无权限**（本部署最可能的一类） |
 | `DB_TABLE_MISSING` | 42P01 / `relation does not exist` | 建表脚本没在库里执行 |
 | `DB_TIMEOUT` | 40001 / `ETIMEDOUT` / 死锁 | 数据库忙，稍后重试 |
-| `DB_QUERY_FAILED` | 其余所有（含网络层失败） | 兜底，看 `detail` 与日志 |
+| `DB_QUERY_FAILED` | 其余所有（含网络层失败） | 兜底，看 `detail` 与日志。**★ Day 22 新增一个场景**：删完再复查发现那一行还在 → 回这个码 + 中文「删除没有生效，刷新后这条记录仍然在」（200 而非 404，因为请求本身是对的） |
 
 > ★★ **Day 18 删除两个码（原表里的 `DB_CONNECTION_REFUSED` 与 `DB_HOST_UNREACHABLE`）**
 >
@@ -881,6 +883,248 @@ node .probe-httpapi.js
 
 ---
 
+<a id="s42"></a>
+
+## 四之二、已实现 🟢（Day 22）：`PATCH` 与 `DELETE /api/sessions/write`
+
+**用途**：改一条 `items` 的**备注**与**收藏标记**，以及**软删**一条 `items`。
+实现契约 §6.1 **R5** 的写侧，并补上 §6.1 未登记的**删除**能力。
+
+> Day 22 上线并部署。闭环实测：改前 `note=空 / is_favorited=false / favorited_at=NULL`
+> → PATCH 后 `note=有值 / is_favorited=true / favorited_at=2026-10-09 13:27:21`
+> → DELETE 后该条从 `GET /api/favorites` 的 4 条里消失（变 3 条），
+> 库里 `items` 由 3 条变 2 条，而同场次的 `sessions`(1)与 `turns`(3) **没被连带删**。
+>
+> **⚠️ 上面这段是真删时期的实测记录，保留作对照。**
+> 同日「余力加练」把 `DELETE` 改成**软删**（打 `is_deleted` 标记不真删），
+> 现在 `items` 的行数**不会**因删除而变少。软删口径见下面
+> [「★★★ DELETE 是软删」](#s42-soft)。
+
+### ★★ 为什么三个接口共用一条路径
+
+**不是设计偏好，是被网关逼出来的唯一解。** 三条实测约束叠在一起：
+
+| # | 约束 | 出处 |
+|---|---|---|
+| 1 | 路由配置里**没有 `method` 字段** → 网关无法按 HTTP 方法分流 | Day 18 |
+| 2 | **同一域名下不能有重复路径**（重复报 `INVALID_PARAM`）→ `PATCH /api/items/{id}` 与 `DELETE /api/items/{id}` 字面完全相同，**无法同时存在** | Day 18 |
+| 3 | 控制台「新增触发路径」**只能建 `SCF` 类型路由**（下拉只有「云函数」与「静态网站托管」），而 `write` 是 `WEB_SCF` → 提交即「创建失败」。CLI 的 `routes add/edit/delete` 也全被拒（`add` 报 system internal domain 不支持手工创建，`edit`/`delete` 报路由不存在——因为压根没进路由表） | Day 22 |
+
+本来想给两个接口各建一条带动作后缀的路径（`/api/items/update`、`/api/items/delete`）
+绕开约束 2，实测**建不出来**（撞约束 3）→ 只能复用已存在的 `/api/sessions/write`。
+
+**好消息**：网关**会把 `PATCH` 与 `DELETE` 原样转发**（方法不改写）。
+探针实测：拿 `PATCH /api/sessions/write` 打这条路由，拿到的是函数自己写的 405 与 `gotPath`
+—— 请求进了函数且 `req.method` 就是 `PATCH`。
+★ 所以这两个接口用的是**标准 HTTP 方法**，不需要退化成「POST + body 里带 `_method`」那种绕法。
+
+**⚠️ 代价**：路径叫 `write` 却也管改删，语义别扭。
+将来若控制台支持建 `WEB_SCF` 路由，改回 RESTful 的 `/api/items/{id}`
+只需改 `write/index.js` 的 `ROUTES` 表 + 前端一个字符串，业务代码不用动。
+
+### 方法一览
+
+| 方法 | 路径 | 干什么 | `itemId` 走哪 |
+|---|---|---|---|
+| `POST` | `/api/sessions/write` | 写入一场练习（Day 18，不变） | body |
+| `PATCH` | `/api/sessions/write` | 改一条条目 | body |
+| `DELETE` | `/api/sessions/write?itemId=x` | 删一条条目 | **query** |
+
+> `DELETE` 的 `itemId` 走 **query** 而不是 body：DELETE 带 body 在各代理层行为不一致，
+> 走 query 是唯一到处都能通的写法。
+
+方法不对时回 `405 METHOD_NOT_ALLOWED`，且**列出这条路径允许哪几个方法**：
+
+```json
+{"ok":false,"data":null,"error":{"code":"METHOD_NOT_ALLOWED",
+ "message":"这条路径接受 POST / PATCH / DELETE（收到了 PUT）"},"gotPath":"/api/sessions/write"}
+```
+
+### `PATCH` 请求与响应
+
+```json
+// 请求（note 与 isFavorited 至少给一个）
+{"itemId": "S-20261007-abc-L2", "note": "这句改法我记住了", "isFavorited": true}
+```
+
+```json
+// 成功
+{"ok":true,"data":{
+  "item": { "itemId":"...","type":"logic","turn":3,
+            "originalText":"We are also missing the data pipeline.",
+            "isFavorited":true,
+            "note":"这句改法我记住了",
+            "favoritedAt":"2026-10-09T13:27:21+08:00" },
+  "before": {"note":"", "isFavorited":false},
+  "changed": ["note","is_favorited","favorited_at"]},
+ "error":null}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `item` | **回读库里的真值**，不是把 `patch` 原样回显（并发下别人可能也改过同一条） |
+| `before` | 改前的 `note` / `isFavorited`，供对比（截图与排错不用再查一次库） |
+| `changed` | 本次实际落库的列名 |
+
+### ★★ 为什么只开放 `note` 与 `isFavorited`（白名单，不是黑名单）
+
+其余字段分两类，都不该由用户改：
+
+| 字段 | 为什么不给改 |
+|---|---|
+| `originalText` / `correction` | 绑着 **B8**「不编造原句」与 **B7**「偏题不给改法」。用户改这两列就等于亲手绕过本项目最不能出的那条错 |
+| `type` / `turn` / `reminder` / `sessionId` / `topicId` / `createdAt` | AI 那一轮判断的产物与归属信息，改了就与 `turns` 表对不上，结果页会指向不存在或错配的轮次 |
+
+**取白名单而不是黑名单**：白名单漏一个字段是**安全的一侧**（新字段默认不可改），
+黑名单漏一个则是**危险的一侧**（新字段默认可改）。
+
+只传 `originalText` 而不传可改字段时的实际返回（实测）：
+
+```json
+{"ok":false,"data":null,"error":{"code":"INVALID_PARAMS",
+ "message":"没有要改的内容（可改的是 note 备注与 isFavorited 收藏标记，至少给一个）"}}
+```
+
+### ★★ 收藏标记必须连带改收藏时间（`ck_items_favtime`）
+
+库里有约束「收藏了必须有收藏时间、没收藏必须没有收藏时间」。
+只改 `is_favorited` 不改 `favorited_at` 会被数据库拒（`23514`），
+而那条报错是**英文的 CHECK 约束名** —— 用户看不懂。
+
+→ 连带逻辑写在接口层（`patch.favorited_at = isFavorited ? nowLocalText() : null`），
+数据库只当最后一道防线。`nowLocalText()` 取当前 **UTC+8** 墙钟（与契约 §9.8 第 5 条同口径）。
+
+### ★★ 为什么先查存在性再改（`patchWhere` 命中 0 行也回 200）
+
+PostgREST **不区分「改到了」与「没匹配到」**，两者都是 `200` + 空体。
+拿 `patchWhere` 的返回值判断存在性是**错的** → 必须**先 `select` 查存在性**：
+
+```json
+{"ok":false,"data":null,"error":{"code":"NOT_FOUND",
+ "message":"找不到这一条（itemId=X）。它可能已经被删掉了，或者编号不是本系统生成的 —— 请刷新列表后重试。"},
+ "gotItemId":"X"}
+```
+
+用真实 `404` 而不是 `200`：这是「你指的那条不存在」，前端可以据此提示
+「可能已经被删掉了」，而不必与「库读不到」混为一谈（两者都降级时提示完全不一样）。
+
+### `DELETE` 请求与响应
+
+```json
+// 成功（deleted 回显被删掉的那条的摘要，方便用户确认删对了没有）
+{"ok":true,"data":{
+  "itemId":"S-D22-SD-L2",
+  "softDeleted": true,
+  "deleted":{"itemId":"S-D22-SD-L2","type":"logic","turn":2,
+             "originalText":"Because the testing team need more time.",
+             "wasFavorited":true,"note":"软删前先收藏它"}},
+ "error":null}
+```
+
+`softDeleted: true` 是**给调用方的一句人话**：明确告诉前端「行还在库里，只是对你隐藏了」，
+前端才能把「已删掉，它不会再出现在记录里」这句话说准（说「它已经彻底没了」就是在骗用户）。
+
+### ★★★ DELETE 是软删（Day 22 余力加练，同日改）
+
+**口径：删除 = 给 `items` 打 `is_deleted = true` 标记，查询时跳过。行永远留在库里。**
+
+| | 值 |
+|---|---|
+| 新增列 | `items.is_deleted BOOLEAN NOT NULL DEFAULT FALSE` |
+| 删除时实际写的列 | `is_deleted=true`、**`is_favorited=false`**、**`favorited_at=NULL`** |
+| 为什么连带清收藏 | 收藏与删除是**两个正交维度**。留着 `is_favorited=true` 会让这条已删的记录继续占着收藏位的统计；而 `favorited_at` **必须**清 —— 库约束 `ck_items_favtime` 要求「没收藏 ⟹ 收藏时间为空」，不清会撞 `23514` |
+| 查询怎么跳过 | `findItemById` 与 read侧 `buildFavoritesQuery` **恒定带 `is_deleted=eq.false`** |
+| 找回来怎么做 | 本期**不做恢复接口**（用户 Day 22拍板：只做标记 + 查询跳过）。用 SQL 手工改回即可：`UPDATE items SET is_deleted=FALSE WHERE item_id='x'` |
+
+**★ 过滤必须带在 SQL 的 `WHERE` 里，不能在接口层事后过滤。**
+接口层过滤（查回来再 `.filter()`）会让分页 `limit` **静默失效** ——
+库里 100 条里99 条已软删时，SQL 按 `limit=20` 取回 20 条、接口层再滤掉 19 条，
+页面只显示 1 条，而 `count` 还写着 20。这个错不会报错，只会让页面「莫名其妙变空」。
+
+**★ 软删之后 `404` 的含义被扩宽了**：现在「找不到」= 「不存在 **或** 已软删」。
+这正是想要的语义 —— 软删过的条目再删一次，仍回 `404` +「它可能已经被删过了」，
+而不是悄悄再打一次标记（那会让「重复点击」看起来像成功了）。
+
+实测（Day 22 同日）：
+
+| 步骤 | 结果 |
+|---|---|
+| 收藏列表（删前） | 3 条，含 `S-D22-SD-L2` |
+| `DELETE` 后查库 | **行还在**，`is_deleted=true`，`is_favorited=false`、`favorited_at=NULL` |
+| `DELETE` 后 `GET /api/items/favorites` | **2 条**，不含 `S-D22-SD-L2` |
+| 再 `DELETE` 一次 | `404 NOT_FOUND`「它可能已经被删过了」 |
+| `PATCH` 一条已软删的 | `404 NOT_FOUND`（改不动隐藏的行） |
+| `UPDATE ... SET is_deleted=FALSE` 后 | `PATCH` 立刻恢复正常（**可找回**，实测通过） |
+
+### ★★★ 删除为什么比新增更容易出事 —— 三道确认
+
+| | 新增（POST） | 删除（DELETE） |
+|---|---|---|
+| 写错的后果 | 库里多一行，**用户看得见**，也能顺手删掉 | 那一行对用户消失（软删后**仍可找回**，但用户不知道） |
+| 补救 | 容易 | 软删后可用 SQL 找回（本期无界面入口） |
+
+所以删除这条路径上多三道确认：
+
+| # | 确认 | 落在哪 | 实测行为 |
+|---|---|---|---|
+| ① | **前端二次确认** | `records.html` 用 `window.confirm`，弹窗里带**原句 + 轮次 + 类型**，用户亲眼看过再点 | 用户点「取消」则**一个请求都不发** |
+| ② | **后端先查存在性**，不存在的 id 回 `404` + 中文说明，**不回「删除成功」** | `handleDeleteItem` 第一步（`findItemById` 自带软删过滤） | 同一条 id 连删两次：第一次 `200`，第二次 `404 NOT_FOUND` |
+| ③ | **标记之后再查一次**（最容易被省掉、也最该保留） | 用 `patchWhere`（命中 0 行也回 `200`），所以「删成功」≠「删到了东西」 | 标记后 `is_deleted !== true` → 回 `200 DB_QUERY_FAILED`「删除没有生效」 |
+
+★ ③ 那次复查**必须用 `findItemByIdIncludingDeleted`**（绕过软删过滤的那个）。
+用 `findItemById` 查的话，它天然就查不到刚软删的那条 → 永远判失败 →
+**等于用结论证明结论**。这是 Day 22 写repository 时特意拆成两个方法的原因。
+
+### 验证方式（可复现）
+
+```bash
+B=https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
+
+# 0. 造一条带 items 的数据（items 是 analyze 的产物，POST 时可选传入）
+curl -s -X POST "$B/api/sessions/write" -H "Content-Type: application/json" \
+  --data-binary @.fixture-d22.json
+
+# 1. 改前：查库基线（note / is_favorited / favorited_at 三列）
+tcb db execute -e cxj1528-d4g55ng0o54cbe296 \
+  --sql "SELECT item_id,is_favorited,note,favorited_at FROM items WHERE session_id='S-D22-CLOSELOOP'"
+
+# 2. PATCH（改备注 + 收藏）
+curl -s -X PATCH "$B/api/sessions/write" -H "Content-Type: application/json" \
+  -d '{"itemId":"S-D22-CLOSELOOP-L2","note":"……","isFavorited":true}'
+
+# 3. 改后：同一条 SQL 再跑一次 → 只有 L2 变了，另外两条没动
+#    注意 favorited_at 被连带写上，且是 UTC+8
+
+# 4. 取消收藏 → favorited_at 必须被清成 NULL（否则撞 ck_items_favtime）
+curl -s -X PATCH "$B/api/sessions/write" -H "Content-Type: application/json" \
+  -d '{"itemId":"S-D22-CLOSELOOP-L2","isFavorited":false}'
+
+# 5. 删前 GET 基线：L2 应在收藏列表里（实测 4 条）
+curl -s "$B/api/items/favorites?limit=10"
+
+# 6. DELETE（软删）
+curl -s -X DELETE "$B/api/sessions/write?itemId=S-D22-CLOSELOOP-L2"
+
+# 7. 三道确认一起验：
+#    · GET 收藏列表 → L2 不在里面（读接口跳过软删行）
+#    · SELECT items → **行还在**，is_deleted=true、is_favorited=false、favorited_at=NULL
+#    · sessions/turns 计数不变（删除范围精确，没连带）
+tcb db execute -e cxj1528-d4g55ng0o54cbe296 \
+  --sql "SELECT item_id,is_deleted,is_favorited,favorited_at FROM items WHERE session_id='S-D22-CLOSELOOP'"
+
+# 8. 重复删→ 404（软删过的再删一次仍是「找不到」）
+curl -s -X DELETE "$B/api/sessions/write?itemId=S-D22-CLOSELOOP-L2"
+
+# 9. 找回（本期只能靠 SQL，没有恢复接口）
+tcb db execute -e cxj1528-d4g55ng0o54cbe296 \
+  --sql "UPDATE items SET is_deleted=FALSE WHERE item_id='S-D22-CLOSELOOP-L2'"
+
+# 10. 离线单测（78 项，不连数据库）
+node .test-modify.js
+```
+
+---
+
 <a id="s5"></a>
 
 ## 五、预留（v1 不启用）：`POST /api/speech-to-text` ⚪
@@ -924,7 +1168,17 @@ node .probe-httpapi.js
 | — | | | ⚠️ **路径不是 `/api/sessions`**：网关同域名下不能有重复路径、且路由没有 method 字段（Day 18 实测）。`/api/sessions` 归 R1。见 [§4.1](#s41) |
 | R4 | `GET` | `/api/items` | **列表读取**：条目与精彩句子（记录页用，支持按主题/时间筛选） | `vibecoding.issues` + `goodSentences` |
 | R5 | `PATCH` | `/api/items/{id}` | 改收藏标记 / 备注 | `favoriteItems` 的 `isFavorited` / `note` |
+| — | `PATCH` | **`/api/sessions/write`** | **R5 的实际实现路径**：改 `note` / `isFavorited` | 同上（🟢 Day 22 已实现，见 [§4.2](#s42)） |
 | R6 | `GET` | `/api/practice-count` | 某主题练过几次 | `vibecoding.practiceCount` |
+| — | `DELETE` | **`/api/sessions/write`** | **软删一条 `items`（§6.1 原未登记，Day 22 补）**—— 打 `is_deleted` 标记，不真删，行可找回 | 🟢 Day 22 已实现，见 [§4.2](#s42) |
+
+> ★★ **R5 的路径与实际实现不一致，这是被网关逼出来的，不是笔误**：
+> 契约原写 `/api/items/{id}`（RESTful 形状），实际落在 `/api/sessions/write` 上，
+> 与 `POST` 共用一条路径。原因（网关三条硬约束 + 控制台建不出 `WEB_SCF` 路由）
+> 见 [§4.2「为什么三个接口共用一条路径」](#s42)。三条路由共用是**已拍板**（Day 22 用户采纳）。
+> ⚠️ 上表里 `/api/items/update` 与 `/api/items/delete` **从未在网关上线过**
+> （控制台建失败），`cloudbaserc.json` 里也不留 —— 配置里有、网关上没有，
+> 是最隐蔽的一类错，单测已反向钉住。
 
 **列表读取接口的形状（以 R4 为例，R1 同理）**：
 

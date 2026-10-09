@@ -482,8 +482,21 @@ async function runAll() {
   r = await send(goodBody(), { method: 'GET' });
   ok('GET → 405 METHOD_NOT_ALLOWED',
     r.status === 405 && r.body.error.code === 'METHOD_NOT_ALLOWED', r.status + ' ' + raw(r));
-  ok('405 的提示指明读取要走 GET /api/sessions（另一个云函数的事）',
-    /GET \/api\/sessions/.test(r.body.error.message), r.body.error.message);
+  /*★ Day 22：这条判据原来断的是「message 里有 GET /api/sessions」——
+     那句话原来住在 405 的文案里（那时这条路径只挂 POST，所以能写
+     「本接口只接受 POST，读取要走 GET /api/sessions」）。
+     今天三个方法共用这条路径，405 改成**列出允许哪几个方法**
+     （契约 §1.5「回显我实际收到了什么」的同一条思路），
+     于是这句「读取要走…」挪到了 404 的文案里。
+
+     ★ 教训（和 .test-modify.js 那两条同源）：**断言行为，不要断言旧文案**。
+       判据改成「把这条路径支持的方法都列出来了」——
+       它对文案措辞免疫，而且换个方法没被列出来时会真的失败。 */
+  ok('405 的提示列出了这条路径支持的全部方法',
+    /POST/.test(r.body.error.message) &&
+    /PATCH/.test(r.body.error.message) &&
+    /DELETE/.test(r.body.error.message),
+    r.body.error.message);
   ok('★ 4xx 响应带 gotPath（契约 §1.5 排错字段）', r.body.gotPath === '/api/sessions/write', raw(r));
 
   r = await send('{"topicId":"T1",');
@@ -548,8 +561,13 @@ async function runAll() {
   /* ===== 排错日志（余力加练）===== */
   section('排错日志');
   const logText = childLog.join('');
+  /* ★ Day 22：判据原来钉的是「route: POST /api/sessions/write」这一句措辞，
+     今天启动日志改成「三条路由共用一条路径」+ 分行列出三个方法，措辞就不匹配了
+     ——但代码完全正常。**断言意图（三个方法都报了）不断言措辞。 */
   ok('启动时打印了路由与三条硬约束',
-    /route: POST \/api\/sessions\/write/.test(logText) && /B8/.test(logText) && /DUPLICATE/.test(logText));
+    /POST/.test(logText) && /PATCH/.test(logText) && /DELETE/.test(logText) &&
+    /B8/.test(logText) && /DUPLICATE/.test(logText),
+    logText.split('\n').filter(function (l) { return /route|\/api\//.test(l); }).slice(0, 5).join(' | '));
   ok('★ 每个请求打一行，含方法、路径、状态码、耗时',
     /\[write\] POST \/api\/sessions\/write from .* → 200 \d+ms/.test(logText),
     logText.split('\n').filter(function (l) { return /\[write\] POST/.test(l); }).slice(-1)[0]);

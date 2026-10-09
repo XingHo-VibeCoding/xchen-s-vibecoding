@@ -101,12 +101,16 @@
     //     写法与 P1 的 topics.js:31 完全一致 —— 见下方「Day 13」注释
     //   ⑥ Day 19：删掉本地假条目兜底 —— 后端读不到就显示错误态，
     //     不用假数据把页面填满（理由见 render() 上方那段注释）
+    //   ⑦ Day 22：每条记录带「删除」按钮，点一下先弹 window.confirm 二次确认，
+    //     确认后才发 DELETE /api/sessions/write（见 handleDelete 上方那段注释）
     //
     // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
-    //   收藏状态只有一份，存在 localStorage（Storage 的 favoriteItems 键）。
-    //   本页渲染时**从这一份状态现场算出两个列表**，而不是各存一份 ——
-    //   在结果页收藏的条目，打开本页时自然就在收藏区里，不需要任何同步机制。
-    //   这也是为什么取消收藏后能立刻从收藏区消失：重算一遍即可。
+    //   收藏状态现在**有两份**：后端库的 items.is_favorited（读页面的数据源）
+    //   与本机 localStorage（Storage 的 favoriteItems 键，仍在用）。
+    //   两份的关系：★ Day 22 起，**后端那份是真相**，localStorage 只是在
+    //   收藏按钮按下去、请求还没回来的那一瞬用来显示「已按下的样子」。
+    //   本页渲染时先按后端数据画（getFavorites 只回 is_favorited=TRUE 的），
+    //   再用 localStorage 做同页两个按钮之间的即时同步。
     //
     // 本页与结果页的区别：
     //   结果页 = 本次会话（从待分析转写现算，见 result.html）
@@ -267,6 +271,135 @@
         }, FAV_DELAY_MS);
       }
 
+      /* ---------- Day 22：删除一条（+ 二次确认）----------
+         -------------------------------------------------------------
+         ★★ 今天的正题：删除为什么比新增更容易出事？
+           新增写错一条 → 库里多一行，GET 列表里多一条，用户看得见、也能顺手删掉。
+           删除写错一次 → 真删的话，那一行**当场消失**，没有撤销、没有历史、没有痕迹。
+           所以这条路径上做了三道确认（后端那两道见云函数 handleDeleteItem）：
+
+           ① **前端二次确认**（就是这一段）：点「删除」先弹 window.confirm，
+              把要删的那句原话摆进提示语里。用户连点两下的习惯很常见 ——
+              弹窗挡住的不是「故意删」，是「手快」。
+           ② **后端先查存在性**，不存在的 id 回 404 + 中文说明，不回「删除成功」
+           ③ **标记之后再查一次**（后端做的，最容易被省掉也最该保留）
+
+         ★ 为什么用**原生 window.confirm**（用户 Day 22 拍板）：
+           一是不动 main.css（新增一个自造的确认弹窗要写样式 + 过视觉规范），
+           二是浏览器原生弹窗自带「焦点陷阱 + Esc 取消 + 回车确定」——
+              自造的弹窗这三条都要自己实现，漏一条就是无障碍缺陷。
+           代价：样式不可控、按钮文案不能改（只能用「确定/取消」）。
+           在这个项目里这笔交易划算 —— 删除是用户看不见后果的操作
+           （对页面来说它消失了，但用户不知道背后发生了什么），
+           「让人在一眼能看完的地方明确按一下」比「好看」重要。
+
+         ★★ 文案里**必须带上要删的原句**，不能只写「确定删除吗？」：
+           列表是混排的（历次会话的条目按时间倒序堆在一起），
+           用户看按钮旁边那张卡片才知道是哪一条，而 confirm 一弹出来
+           视线就被移走了。写上原句，确认这件事才真的做得到。
+
+         ★★★ 余力加练之后（Day 22 同日做的软删除）：这里三处文案都改过了。
+           原来写「删了就找不回来了」「那一行已经没有了」——
+           软删之后**行还在库里**，只打了 is_deleted 标记，
+           对外口径必须跟着改，否则就是**在说一件假事**（用户 Day 22 拍板
+           「契约与文案同步说明」）：
+             · confirm     「删了就找不回来了」→「不会再出现在记录里」
+             · 成功说明「那一行已经没有了，找不回来」→「不会再出现在记录里」
+             · 页面底部「删掉的条目找不回来」→「不会再出现在记录里」
+           ★ 页面仍然不该说「可以恢复」之类的话 ——
+             恢复接口本期没做（只留了库里的口子），说了就是骗用户点一个不存在的功能。 */
+      function handleDelete(item, btn) {
+        if (!window.Api || typeof window.Api.deleteItem !== 'function') {
+          mockBar.textContent = '删除失败：页面脚本没加载成功（window.Api 缺失）。';
+          mockBar.classList.add('mock-bar-warn');
+          return;
+        }
+        var quote = (item.quote || '').trim();
+        var brief = quote.length > 60 ? quote.slice(0, 60) + '…' : quote;
+        var confirmed = window.confirm(
+          '删掉这一条吗？删了它就不会再出现在记录里了。\n\n' +
+          '「' + brief + '」\n第 ' + (item.turn || '?') + ' 轮 · ' + (item.typeLabel || ''));
+        if (!confirmed) return;      // 用户点了「取消」：连请求都不该发
+
+        /* 请求期间把按钮 disabled 掉防连点。
+           ★ 为什么不靠 interact.js 那套busy 锁：那个组件是为开关型动作写的，
+             删除是一次性的，删完这条数据就没了，「再取一次真值」无从取起。
+             这里直接用原生 disabled —— 一行就够，不需要一套状态机。 */
+        if (btn) btn.disabled = true;
+
+        window.Api.deleteItem(item.itemId).then(function () {
+          /* 成功：本地缓存里去掉这一条，再重画两块列表。
+             为什么改缓存而不是重新取数：刚才那份 rows 就是后端刚给的真值，
+             只少了一条，重取一次是白花一次网络往返 + 一帧加载态。 */
+          dropFromCache(item.itemId);
+          /* ★ 收藏状态也要一起清掉 —— 否则这一条会继续占着收藏区的位置，
+             而 GET /api/favorites 下次取数时它已经不在库里了，
+             结果是收藏区里挂着一张空卡片（byId 查不到 → 会被 .filter 掉，
+             眼下看不出坏，但状态是脏的：用户再收藏别的就会看到它莫名出现又消失）。 */
+          if (window.Storage && window.Storage.isFavorite && window.Storage.isFavorite(item.itemId)) {
+            window.Storage.toggleFavorite(item.itemId, {
+              type: item.type, topicId: item.topicId || ''
+            });
+          }
+          document.dispatchEvent(new CustomEvent('ic-sync'));
+          if (CACHE.rows) {
+            if (CACHE.rows.length === 0) renderEmpty(); else paint(CACHE.rows);
+          }
+          /* 只说做了什么，不解释后端返回了哪些字段 ——
+             那份 data 是给排错用的，页面文案用不着（也不该依赖它的形状）。 */
+          mockBar.textContent = '已删掉 1 条记录，它不会再出现在记录里。';
+          mockBar.classList.remove('mock-bar-warn');
+        }).catch(function (err) {
+          /* ★★ 这里必须分两种失败说两句话（无头实测发现的原来那版是错的）。
+             原来一律写「这条记录还在页面上，可以再试一次」——
+             但后端回 404 NOT_FOUND 时，它的意思恰恰是「**库里已经没有这一条了**」
+             （多半是另一个页面先删了，或刷新前就被删过）。
+             那时这条卡片是**幽灵**：再点一百次还是同样的 404，
+             「可以再试一次」是在骗用户做一件注定失败的事。
+
+             所以按错误码分开处理：
+               404 NOT_FOUND → 它已经不在库里了 → **把这条从列表里拿掉**（页面跟库里对齐）
+               其他          → 网络/读库/权限之类 → 按钮恢复，文案说可以重试
+             ★ 判据用 err.code（api.js 已按契约把 body.error.code 挂上来），
+               不去匹配 message 里的中文 —— 文案会改，码不会。 */
+          if (btn) btn.disabled = false;
+
+          if (err && err.code === 'NOT_FOUND') {
+            dropFromCache(item.itemId);
+            if (window.Storage && window.Storage.isFavorite &&
+                window.Storage.isFavorite(item.itemId)) {
+              window.Storage.toggleFavorite(item.itemId, {
+                type: item.type, topicId: item.topicId || ''
+              });
+            }
+            document.dispatchEvent(new CustomEvent('ic-sync'));
+            if (CACHE.rows) {
+              if (CACHE.rows.length === 0) renderEmpty(); else paint(CACHE.rows);
+            }
+            mockBar.textContent =
+              '这一条已经在库里没有了（可能刚才在别的页面删掉了），所以把它从列表里去掉了。';
+            mockBar.classList.remove('mock-bar-warn');
+            return;
+          }
+
+          mockBar.textContent = '没能删掉：' +
+            (err && err.message ? err.message : '（未知原因）') +
+            '　—— 这条记录还在，可以再试一次。';
+          mockBar.classList.add('mock-bar-warn');
+        });
+      }
+
+      /* 从缓存里去掉一条并重画两块列表。
+         为什么单独抽一个函数：成功删除与「404 → 其实早没了」两条路径
+         要做**完全相同**的四件事（改缓存 / 清收藏 / 通知同页 / 重画），
+         写成两遍的话将来改一处漏一处，就会出现「删完卡片还在」的怪现象。 */
+      function dropFromCache(itemId) {
+        if (!CACHE.rows) return;
+        CACHE.rows = CACHE.rows.filter(function (r) {
+          return r.item.itemId !== itemId;
+        });
+      }
+
       // 会话时间显示成「9 月 28 日 20:15」这种，不显示秒
       function fmtTime(iso) {
         var d = new Date(iso);
@@ -281,7 +414,16 @@
          这条是哪次说的（PRD §7.3 P4 明确要求「所属主题与时间」）。 */
       function recordRow(row) {
         var box = document.createElement('div');
-        box.appendChild(window.Components.item({ item: row.item, onToggle: handleFavorite }));
+        /* ★ onDelete 只在记录页传（结果页不传，所以那边不会出现删除按钮 ——
+           理由见 item-card.js 里那段注释）。
+           同一个 itemId 在本页会出现两次（收藏区 + 全部条目），
+           两张卡片各自带自己的按钮，删掉任一张后 CACHE.rows 重画，
+           两块都会一起少掉这一条 —— 不需要额外的同步代码。 */
+        box.appendChild(window.Components.item({
+          item: row.item,
+          onToggle: handleFavorite,
+          onDelete: handleDelete
+        }));
         var meta = document.createElement('div');
         meta.className = 'item-src';
         meta.textContent = row.topicName + '（' + row.topicId + '） · ' + fmtTime(row.at);
@@ -391,10 +533,11 @@
 
             /* 底部说明条：说清收藏状态存在哪。
                页面上的数据来自后端数据库，这是真的；
-               但收藏状态此刻仍在本机浏览器里（写库接口尚未做）。 */
+               ★ Day 22：写接口通了，收藏与删除都落在库里了，
+                 这句话原来写的「写库接口尚未接入」已经过时。 */
             mockBar.textContent =
               '以上 ' + rows.length + ' 条来自后端数据库。' +
-              '收藏状态仍存在本机浏览器里（写库接口尚未接入）。';
+              '收藏与删除都会写回数据库；删掉的条目不会再出现在记录里。';
             mockBar.classList.remove('mock-bar-warn');
           })
           .catch(function (err) {

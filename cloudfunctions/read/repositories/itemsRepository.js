@@ -25,11 +25,26 @@ const SELECT_FAVORITES = [
 /* ---------- 二、查询条件 ----------
    ★ 与 sessions 的差别只有一处：这里**恒定**带is_favorited=eq.true。
      sessions 那边的 topicId 是「有就过滤、没有就全部」，
-     而「只读收藏」是这个接口的定义本身，不能被关掉 ——
-     所以它写死在 buildQuery 内部，不作为参数暴露给接口层。 */
+     而「只读收藏」是这个接口的定义本身，不能被关掉——
+     所以它写死在 buildQuery 内部，不作为参数暴露给接口层。
+
+   ★★ Day 22 软删除：这里**恒定**带 is_deleted=eq.false。
+     这与 is_favorited 是同一个层级的硬条件——「只读收藏」的定义里
+     也包含「已软删的条目不算收藏」（它在软删那一刻收藏标记就被清掉了，
+     但双保险有意义：万一将来恢复时忘了清 is_favorited，
+     这里这一条也能挡住它回到收藏列表里）。
+
+     ★★ 为什么不能靠 write 侧软删时顺手清 is_favorited 就够了（那样更省）：
+       因为「已软删」与「已收藏」是**两个正交的维度**，
+       只用一个去挡，等于把「软删」这个状态绑死在「取消收藏」上。
+       将来若加「恢复」接口，很容易忘了反向也要清 is_deleted
+       ——而漏掉查询条件的话，就是一张已软删的卡片出现在收藏区里。
+       ★ 两条过滤都写在这里：**每条可见性规则只在一个地方实现**，
+         与本文件「所有路径都收敛到这里」的同一个理由。 */
 function buildFavoritesQuery(topicId, limit) {
   return {
     is_favorited: 'eq.true',
+    is_deleted: 'eq.false',
     order: 'favorited_at.desc',
     limit: limit,
     ...(topicId ? { topic_id: 'eq.' + topicId } : {})

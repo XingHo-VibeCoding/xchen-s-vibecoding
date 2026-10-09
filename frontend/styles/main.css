@@ -2818,6 +2818,45 @@ footer.page-foot {
 
 .item-foot {
   margin-top: var(--space-3);
+  /* Day 22：条目底部现在有两个按钮（收藏 + 删除）。
+     为什么用 flex 而不是靠 br 换行：.ic-btn 有 `min-width: 7.5em`，
+     块级排版下两个按钮各占一整行，卡片会凭空长高一截 ——
+     而它们在概念上是并列的两个动作（对这一条做这个 / 做那个），
+     并排更符合这个关系，也省纵向空间。
+     gap 用 space-2：两个 .ic-btn 之间有 1px 边框，
+     贴太近会让两条边框看起来像一条双线。 */
+  display: flex;
+  flex-wrap: wrap;              /* 窄屏时换行，不硬挤 */
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- 删除按钮（Day 22）----------
+   ★ 为什么单独一条而不是直接用 .ic-btn：删除是**不可逆**动作，
+     它得跟同一张卡上可撤销的「收藏」在视觉上分得开。
+     同一张卡上两个长得一样的按钮摆在一起，用户容易把「删除」当第二个收藏点下去。
+
+   用珊瑚色的哪一档：文字用 --accent-deep（小字专用，≥4.5:1），
+   边框与 hover 底色才用鲜色 --accent —— 遵守项目那两条硬规矩
+   （① 鲜色只做装饰 ② 小字一律用 -deep 档），见 .tag-offtopic 的同类做法。 */
+.item-del {
+  color: var(--accent-deep);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.item-del:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: var(--accent);
+}
+
+/* 处理中（点击后请求在飞）：与 .ic-btn 的 busy 态一致地压暗一档。
+   ★ 为什么不靠 opacity：淡到 0.6 后文字对比度会掉到 4.5:1 以下，
+     而这条禁令是项目级的（见 .impeccable.md 视觉规范第三条）。 */
+.item-del:disabled {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: var(--surface);
+  cursor: not-allowed;
 }
 
 /* 记录页每条下方的归属信息（所属主题 · 时间）。

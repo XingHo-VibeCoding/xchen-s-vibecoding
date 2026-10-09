@@ -10,7 +10,19 @@
      POST /api/chat           chat     ✅ Day 18
      POST /api/analyze        analyze  ✅ Day 19
      POST /api/sessions/write write    ✅ Day 20（writeSession，检查台用）
+     PATCH  /api/sessions/write write  ✅ Day 22（patchItem，改备注与收藏）
+     DELETE /api/sessions/write write  ✅ Day 22（deleteItem，删一条；**二次确认在页面层**）
      POST /api/speech-to-text           ⬜ 未接（契约 §5，本期不启用）
+
+   ★★ 为什么 PATCH / DELETE 与 POST 共用同一条路径（Day 22）：
+     不是笔误，也不是图省事 —— 是网关逼出来的唯一解。
+     网关路由**没有 method 字段**（不能按方法分流）、**同域名不能有重复路径**
+     （所以 RESTful 的 `/api/items/{id}` 两条接口无法共存），
+     而控制台「新增触发路径」**只能建 SCF 类型路由**、建不出 HTTP 型函数的路由，
+     三个约束叠在一起 → 只能复用已存在的 `/api/sessions/write`。
+     ★ 好消息：网关会把 PATCH / DELETE **原样转发**（方法不改写），
+       所以这两个接口用的是标准 HTTP 方法，不必退化成「POST + _method」的绕法。
+     完整推导与实测证据见 `docs/api-contract.md` §4.2。
 
    为什么今天要建它（而不是等接口通了再说）：
      页面要接后端，就必须有一个「统一的地方」知道
@@ -72,18 +84,29 @@
   /* ---------- 底层：带超时的 fetch ---------- */
   /* fetch 本身没有超时能力，不加控制台会一直转圈。
      AbortController 是标准做法，没有它就没有「等不下去就放弃」这条退路。 */
-  function request(path, params) {
+  /* ---------- URL 拼装（一处，两个请求函数共用）---------- */
+  /* 为什么要抽出来：Day 22 加 DELETE 时，itemId 要走 query，
+     若在 sendWithTimeout 里再写一遍拼 qs 的循环，就是两份几乎一样的代码 ——
+     而「空值要跳过」这条规则（undefined / null / '' 都不拼）一旦两边不一致，
+     就会出现「GET 能筛出来、DELETE 筛不掉」这种极难查的不一致。
+     ★ 这条规则来自实测：筛选用 eq. 前缀的值，空值必须整个键不出现，
+       拼成 ?note= 会让 PostgREST 判成「note 等于空串」而不是「不筛 note」。 */
+  function buildUrl(path, params) {
     var url = BASE + path;
-    if (params) {
-      var qs = [];
-      for (var k in params) {
-        if (Object.prototype.hasOwnProperty.call(params, k) &&
-            params[k] !== undefined && params[k] !== null && params[k] !== '') {
-          qs.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
-        }
+    if (!params) return url;
+    var qs = [];
+    for (var k in params) {
+      if (Object.prototype.hasOwnProperty.call(params, k) &&
+          params[k] !== undefined && params[k] !== null && params[k] !== '') {
+        qs.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
       }
-      if (qs.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs.join('&');
     }
+    if (qs.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs.join('&');
+    return url;
+  }
+
+  function request(path, params) {
+    var url = buildUrl(path, params);
 
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timer = controller ? setTimeout(function () { controller.abort(); }, TIMEOUT_MS) : null;
@@ -310,17 +333,36 @@ return {
   /* ---------- POST 版请求（带独立超时）----------
      为什么不用上面的 request()：它是 GET，没有 body、也没有 body 解析。
      与其给 request() 加一堆 if (method === 'POST') 分支，不如把两件事分开写 ——
-     分支越少，读代码时越不容易猜错。 */
+     分支越少，读代码时越不容易猜错。
+
+     ★★ Day 22：泛化成 sendWithTimeout，postWithTimeout 变成它的薄封装。
+       起因是要接 PATCH 与 DELETE（同一路径，三个方法共用，见 api-contract §4.2）。
+       ★ **为什么不复制一份 patchWithTimeout / deleteWithTimeout**：
+         下面那段错误分类（先看 body.error.code，再退回 HTTP 状态码）
+         是本项目**最容易出 bug 的地方** —— Day 20 就在这里真错过一次
+         （先判 res.ok 把 DUPLICATE 盖成 HTTP_400，方向完全反了）。
+         复制三份等于埋三份雷，改一处漏两处必然出现「有的接口对、有的不对」。
+         所以只留一个 sendWithTimeout，方法由参数传。 */
   function postWithTimeout(path, bodyObj, timeoutMs) {
-    var url = BASE + path;
+    return sendWithTimeout('POST', path, bodyObj, timeoutMs);
+  }
+
+  /* ★ 方法与 body 都在这里定，不再按方法分叉出多个函数。
+     bodyObj 为空时不发 body（DELETE 只有 query，没有 body）。
+     queryObj 用于 DELETE：itemId 走 query 而不是 body。 */
+  function sendWithTimeout(method, path, bodyObj, timeoutMs, queryObj) {
+    var url = buildUrl(path, queryObj);
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
 
     var opt = {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(bodyObj)
+      method: method,
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
     };
+    /* ★ body 为空就不加这个键。DELETE 带上 `body: null` 会被部分代理层拒，
+       而且 fetch 对「有 body 但没有 Content-Length」的 DELETE 处理各家不同 ——
+       与其赌，不如一开始就不发。 */
+    if (bodyObj !== null && bodyObj !== undefined) opt.body = JSON.stringify(bodyObj);
     if (controller) opt.signal = controller.signal;
 
     return fetch(url, opt).then(function (res) {
@@ -340,6 +382,9 @@ return {
            （契约 §1.3 规定业务失败 data 恒为 null，但 error 一定在）。
            契约 §4之一 明确写「DUPLICATE 用真实的 400 而不是 200」，
            所以 4xx 也可能带着有意义的业务错误码—— 不能只看状态码。
+           ★ Day 22 这条对 DELETE 更要紧：不存在的 id 回的是**真实 404**，
+             若这里按状态码分类，前端拿到的会是 `HTTP_404`，
+             页面就没法说「它可能已经被删掉了」这句人话。
 
            修法：**先看 body 有没有 error.code**，有就用它（这才是契约的分类口径）；
            没有才退回按 HTTP 状态码分类（那时才是真正的传输层问题）。
@@ -348,6 +393,7 @@ return {
           var be = new Error(body.error.message || '接口返回失败');
           be.code = body.error.code;
           be.httpStatus = res.status;
+          be.gotItemId = body.gotItemId;
           throw be;
         }
 
@@ -412,6 +458,62 @@ return {
     });
   }
 
+  /* ---------- PATCH /api/sessions/write（Day 22）----------
+     改一条 item 的**备注**与**收藏标记**（api-contract §4.2）。
+
+     ★ 路径与 POST 同一个（`/api/sessions/write`），不是笔误：
+       网关路由没有 method 字段、且同域名不能有重复路径，
+       控制台也建不出 HTTP 型函数的新路由 —— 只能共用。见契约 §4.2。
+
+     ★★ **只开放 note 与 isFavorited 两个键**，其余一律不发 ——
+       即便调用方多传了 originalText / type / turn，接口层也会拒，
+       但**这一层先不传**更干净：白名单要在最靠近数据的地方也成立一次。
+       （改这两个字段绑着 B8「不编造原句」与 B7「偏题不给改法」。）
+
+     ⚠️ undefined 会被 JSON.stringify 整条丢掉，所以「只改备注」时
+       isFavorited 自然不会出现在报文里 —— 这正是我们要的（不传＝不改）。
+       但要注意反例：**传 null 是不一样的**，null 会被序列化成 "isFavorited":null，
+       接口判它是「没给这个字段」而忽略；想取消收藏必须传 false，不是 null。 */
+  function patchItem(itemId, fields) {
+    var f = fields || {};
+    var body = { itemId: itemId };
+    if (f.note !== undefined && f.note !== null) body.note = f.note;
+    if (f.isFavorited !== undefined && f.isFavorited !== null) {
+      body.isFavorited = f.isFavorited === true;   // 严格布尔，容错交给接口层的报错
+    }
+    return sendWithTimeout('PATCH', '/api/sessions/write', body, TIMEOUT_MS)
+      .then(function (data) {
+        /* ★ 回读的是**库里的真值**（接口层 PATCH 之后自己查了一次），
+           不是把刚发的 body 原样回显。所以这里必须再过一遍 mapItem ——
+           否则返回的是接口层字段名（originalText / isFavorited），
+           页面拿到的对象形状与 getFavorites 出来的那些不一致，
+           同一个页面上两处渲染会各写一套取值代码。 */
+        return {
+          item: data.item ? mapItem(data.item) : null,
+          before: data.before || null,
+          changed: data.changed || []
+        };
+      });
+  }
+
+  /* ---------- DELETE /api/sessions/write（Day 22）----------
+     删一条 item（api-contract §4.2）。
+
+     ★★ itemId 走 **query** 而不是 body，这是接口层定的口径
+       （DELETE 带 body 在各代理层行为不一致，走 query 是唯一到处都通的写法）。
+
+     ★★ **二次确认不在这一层** —— 它在 records.html（window.confirm）。
+       为什么分工这样：确认是**人的判断**，要靠屏幕上的原话才能做，
+       塞进api.js 就变成「一个看不见的函数替用户决定删不删」。
+       这一层只负责忠实发请求、把错误码如实抛出去。
+
+     ⚠️ 返回值形状与前几个不同：没有 item，只有 deleted 摘要
+       （删掉的东西已经不存在了，没法再「回读」它）。 */
+  function deleteItem(itemId) {
+    return sendWithTimeout('DELETE', '/api/sessions/write',
+      null, TIMEOUT_MS, { itemId: itemId });
+  }
+
   /* ---------- 裸 GET /api（Day 20 · 检查台健康检查）----------
      health 那条路由在 cloudbaserc.json 里是 path:"/api"（**没有 /health 后缀**），
      所以这里就是 GET /api，不要自己加后缀。返回 {ok:true, service:"TalkTrainer"}，
@@ -454,6 +556,8 @@ return {
     analyze: analyze,
     analyzeOrLocal: analyzeOrLocal,
     writeSession: writeSession,
+    patchItem: patchItem,
+    deleteItem: deleteItem,
     pingHealth: pingHealth,
     mapItem: mapItem,
     typeLabelOf: typeLabelOf

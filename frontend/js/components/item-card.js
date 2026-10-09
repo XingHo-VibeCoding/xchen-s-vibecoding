@@ -18,6 +18,15 @@
        onToggle: function (next, api) { ... }   // 同 interact.js 的契约
      }));
 
+   ★★ Day 22 新增一个**可选**回调 onDelete：
+     onToggle 不传 → 只有收藏按钮（结果页走这条，PRD §7.3 的 P3）
+     onToggle + onDelete 都传 → 卡片底部多一个「删除」按钮（记录页走这条，P4）
+     为什么做成可选而不是页面上直接写死：结果页删掉条目代价太大
+     （用户刚练完、结果看不到了），记录页才是「管理历史条目」的地方。
+     onDelete(item, btn) —— item 是同 onToggle 第三个参数那一个（同一份对象，
+     不重新映射，避免两处拿到不同形状）；btn 是按钮元素，调用方可在
+     请求期间把它 disabled 掉防连点。
+
    契约（item 用到的字段，口径见 PRD.md §6.2 的表）
      itemId      "T1-S1-E1"   条目编号，收藏状态的键
      type        'offtopic' | 'logic' | 'good'
@@ -111,6 +120,33 @@
         else api.resolve();
       }
     }));
+
+    /* ---------- 删除按钮（Day 22）----------
+       ★ **刻意不复用 interact.js**：那个组件的状态机是为「开关型」动作写的
+         （未收藏 → 处理中 → 已收藏，可反复来回），它 api.resolve() 之后
+         会去数据源取真值校正 pressed。
+         删除是**一次性**动作 —— 删完那条数据不存在了，「再取一次真值」根本无从取起，
+         而且语义上不该有「已删除」这个持久状态（页面会直接把那条重画掉）。
+         硬套进来的后果是：按了之后按钮停在某个态，而数据已经没了 ——
+         界面在说一件不存在的事。
+         所以这里用一个普通 button，样式层复用 .ic-btn（与收藏按钮同一套外观，
+         触控目标 44×44px 也自动满足），只是不走那套状态机。
+
+       ★ **只在传了 onDelete 时才渲染**（可选能力，不是必有的）：
+         结果页不该有删除 —— 那里的条目是「刚刚练出来的这一场」，
+         删掉的代价（用户已经练完、结果看不到了）远大于记录页。
+         记录页才是「管理历史条目」的地方，PRD §7.3 P4 就是这个定位。 */
+    if (typeof o.onDelete === 'function') {
+      var del = el('button', 'ic-btn item-del');
+      del.type = 'button';
+      del.textContent = o.deleteLabel || '删除';
+      /* 用 aria-label 而不是靠文字：条目卡片里有原句（可能很长），
+         屏幕阅读器读按钮时只需要知道「删哪一条」，那句话由 confirm 弹窗承担。 */
+      del.setAttribute('aria-label', '删除这条记录');
+      del.addEventListener('click', function () { o.onDelete(item, del); });
+      foot.appendChild(del);
+    }
+
     box.appendChild(foot);
 
     return box;

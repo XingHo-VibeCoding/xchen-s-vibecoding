@@ -61,8 +61,101 @@ async function insertItems(rows) {
   return db.insertMany('items', rows);
 }
 
+/* ---------- 四、按 id 查一条（Day 22）----------
+   ★ 为什么必须先查再改/再删，不能靠 patch 与 delete 的返回值：
+     PostgREST 命中 0 行也回 200（见 httpdb.js 的 patchWhere 注释），
+     所以「改到了没有」这件事只能靠**先查存在性**来判断。
+     换个角度看这也是产品要求：契约要求「不存在的 id 返回中文错误说明」，
+     而 200 + 空体没法区分「不存在」与「存在但没变化」。
+
+   ★ 查哪几列：PATCH 需要读出改之前的值（截图要对比 before/after，
+     而且 isFavorited 连带 favorited_at 时要先看收藏时间在不在），
+     所以取全部展示字段而不是只取主键。
+   ★ 返回单条对象而不是数组：主键唯一，最多一条；找不到返回 null，
+     由接口层决定报什么错——**repository 不产错误文案**（同文件头的分界）。
+
+   ★★ Day 22 软删除：查的时候**恒定带 is_deleted=eq.false**。
+     为什么必须在这里带而不是接口层事后过滤：
+       ① 接口层过滤 = 把该查的 N 条都拉回来再扔掉，
+          分页 limit 就废了（库里 100 条里 99 条已删，页面只显示 1 条）
+       ② 带在where 里，PostgREST 就会按 is_deleted 过滤后**再算 limit**
+     ★ 这一条同时也是「改」与「删」的前置门：软删掉的那条，
+       findItemById 返回 null → 接口层自然回 404「找不到这一条」，
+       不需要额外的 if 判断。 */
+async function findItemById(itemId) {
+  const rows = await db.select('items', {
+    item_id: 'eq.' + itemId,
+    is_deleted: 'eq.false'
+  },
+  'item_id,session_id,topic_id,type,turn,original_text,reminder,correction,is_favorited,note,favorited_at,created_at');
+  return (rows && rows.length) ? rows[0] : null;
+}
+
+/* ---------- 五、改单条（Day 22）----------
+   patch 用库里原样的 snake_case 列名（映射是接口层的事，见 httpdb.js 的 select 注释）。
+
+   ★★ 调用方必须自己保证 is_favorited 与 favorited_at 一致：
+     库里有 ck_items_favtime（收藏了必须有收藏时间、没收藏必须没有），
+     不一致时数据库会拒。repository 刻意**不**替调用方补 favorited_at ——
+     「收藏了就把时间戳补上」是产品规则不是数据访问规则，
+     判断放在接口层（与 cleanItems 里 B7/B8 交给接口层处理是同一条理由）。 */
+async function updateItemById(itemId, patch) {
+  return db.patchWhere('items', { item_id: 'eq.' + itemId }, patch);
+}
+
+/* ---------- 四之二、查一条**连已软删的**（Day 22 软删除）----------
+   ★ 为什么单独开一个方法，不给 findItemById 加个 includeDeleted 参数：
+     「看得见的」与「找得到的」是两种用途。
+     前者是给页面/接口用的（不该看见已删的），后者是给「找回」用的
+     （正是要找那条已删的）。合成一个带开关的方法的话，
+     每个调用点都要想一遍「我这次要不要 includeDeleted」——
+     想错一次就是把已删的当可见的了。分开写，误用就写不出来。
+
+   ⚠️ **只有「找回」场景能调它**。它绕过了 is_deleted 过滤，
+     在别的场景用它就等于把软删除当摆设。 */
+async function findItemByIdIncludingDeleted(itemId) {
+  const rows = await db.select('items', { item_id: 'eq.' + itemId },
+    'item_id,session_id,topic_id,type,turn,original_text,reminder,correction,is_favorited,note,favorited_at,created_at,is_deleted');
+  return (rows && rows.length) ? rows[0] : null;
+}
+
+/* ---------- 六、删单条（Day 22）----------
+   ★★ Day 22 余力加练改成**软删除**：不真删行，只把 is_deleted 置 true。
+
+   为什么改：清单原话是「删错了还能找回」。真删掉的那一刻，
+     那一行**当场消失** —— 没有撤销、没有历史、没有痕迹，
+     「还能找回」这句话就是空的。加一个标记位之后，
+     行还在库里，随时能 `UPDATE items SET is_deleted = FALSE` 改回来。
+
+   ★ 为什么打标记时要顺手清 is_favorited（顺手清掉收藏）：
+     已删掉的那条不该继续占着收藏列表的名额，而收藏列表是
+     「is_favorited=eq.true」的查询 —— 只打 is_deleted 不清收藏的话，
+     read 侧要同时加两个条件才干净（is_favorited + is_deleted），
+     漏一个就会在收藏区里挂一张空卡片。
+     两边都清掉的方案更简单：**软删 = 从所有可见查询里消失**，
+     规则只有一条，不靠「记得同时改两个字段」。
+
+   ★ 依赖先前的 findItemById 判断存在性——理由与 patchWhere 相同。
+   ★ 删的是 items 行**不会**连带删 turns（外键方向是 turns→sessions），
+     所以删一条条目不影响那一场练习的其它轮次；
+     删 sessions 那一行才会连带删掉整场（ON DELETE CASCADE）。 */
+async function softDeleteItemById(itemId) {
+  return db.patchWhere('items', { item_id: 'eq.' + itemId }, {
+    is_deleted: true,
+    /* 连带清收藏：理由见上方注释。收藏时间一并清掉 ——
+       ck_items_favtime 只管「收藏了必须有收藏时间、没收藏必须没有」，
+       留着 favorited_at 而is_favorited=false 会被数据库拒（23514）。 */
+    is_favorited: false,
+    favorited_at: null
+  });
+}
+
 module.exports = {
   newItemId: newItemId,
   buildItemRows: buildItemRows,
-  insertItems: insertItems
+  insertItems: insertItems,
+  findItemById: findItemById,
+  findItemByIdIncludingDeleted: findItemByIdIncludingDeleted,
+  updateItemById: updateItemById,
+  softDeleteItemById: softDeleteItemById
 };

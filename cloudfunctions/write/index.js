@@ -1,14 +1,41 @@
-/* POST /api/sessions/write —— 写入一场练习（Day 18 · 板块 ①）
+/* POST   /api/sessions/write —— 写入一场练习（Day 18 · 板块 ①）
+   PATCH  /api/sessions/write —— 改一条条目（Day 22）
+   DELETE /api/sessions/write?itemId=x —— 删一条条目（Day 22）
+   -------------------------------------------------------------
+   ★★★ Day 22：三个接口共用一条路径 `/api/sessions/write`。
+     这不是设计偏好，是被网关逼出来的唯一解，理由与实测过程：
+
+     1) 网关路由**没有 method 字段** → 不能按 HTTP 方法分流。
+     2) 同一域名下**不能有重复路径**（重复报 INVALID_PARAM）
+        → `PATCH /api/items/{id}` 与 `DELETE /api/items/{id}`
+          两条路径字面完全相同，在本网关上**根本无法同时存在**。
+     3) 本来给它们各建一条带动作后缀的路径（/api/items/update、
+        /api/items/delete）绕开 2)，实测**建不出来**：
+        控制台「新增触发路径」只能建 `SCF` 类型路由
+        （下拉只有「云函数」与「静态网站托管」），而 write 是 `WEB_SCF`，
+        提交即「创建失败」；CLI 的 routes add/edit/delete 三条路全被拒
+        （add 报 system internal domain 不支持手工创建，
+         edit/delete 报路由不存在 —— 因为压根没进路由表）。
+        ★ 结论：HTTP 型函数的路径只能靠控制台建，而控制台建不了。
+
+     4) 好消息：网关**会把 PATCH 与 DELETE 原样转发**（方法不改写）。
+        探针实测：拿 PATCH 打已有路由，拿到的是本函数自己写的 405
+        与 gotPath —— 请求进了函数、req.method 就是 PATCH。
+        ★ 所以这两个接口用标准 HTTP 方法，不需要退化成
+          「POST + body 里带 _method」的绕法。
+
+     ⚠️ 代价：路径叫 write 却也管改删，语义别扭。将来若控制台支持建
+       WEB_SCF 路由，改回 RESTful 的 /api/items/{id} 只需改路由表
+       （见文件末尾 ROUTES）+ 前端一个字符串，本文件的业务代码不用动。
+
    -------------------------------------------------------------
    位置：后端第 5 个云函数，也是**第一个往数据库里写**的接口。
    它实现契约 §6.1 登记的 R3：点「结束对话」时把一场练习整场存下来。
    落三张表：sessions（汇总，1 行）+ turns（轮次，1:N）+ items（条目，1:N）。
 
    ★★ 路径为什么带 /write 后缀（不是契约 §6.1 原写的 /api/sessions）：
-     CloudBase HTTP 网关**同一域名下不能有重复路径**（重复报 INVALID_PARAM），
-     且路由配置里**没有 method 字段** —— 网关无法按 HTTP 方法把同一路径
-     分给两个函数。而 `/api/sessions` 已被 read 占了（Day 17 建的 GET 列表）。
-     所以写入另起一条路径，见文件头下方那段注释。
+     `/api/sessions` 已被 read 占了（Day 17 建的 GET 列表），
+     两条路径不能重复，所以写入另起一条。详见文件末尾 ROUTES 上方那段注释。
 
    ★ 为什么写库这个要单独一个函数，而不是并进 read：
      · 超时预算不同。读库毫秒级（read 给 20 秒），写库要插三张表 + 事务，
@@ -116,6 +143,10 @@ const MAX_USER_TEXT = 4000;
 const MAX_AI_TEXT = 4000;
 const MAX_NICKNAME = 64;      // 库里 VARCHAR(64)
 const MAX_REMINDER = 500;     // 库里 VARCHAR(500)
+/* Day 22：itemId 的长度上限与 note 的上限都取自建表脚本
+   （items.item_id VARCHAR(40)、items.note VARCHAR(120)）。 */
+const MAX_ITEM_ID = 40;
+const MAX_NOTE = 120;
 
 /* ---------- 三、统一响应外壳（契约 §1.2 / §1.3）----------
    与 analyze/index.js 逐字同形。前端 api.js 只认 body.error.code。 */
@@ -196,6 +227,22 @@ function parseLocalTs(raw, fieldName) {
 }
 
 function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+/* 当前的 UTC+8 墙钟时间，格式与 parseLocalTs 的产出完全一致（'YYYY-MM-DD HH:mm:ss'）。
+   ★ 为什么这么算，而不是 new Date().toLocaleString()：
+     那走的是**运行环境的本地时区**（云函数容器通常是 UTC），
+     会比库里其它时间戳差 8 小时 —— 而库里所有时间都按 UTC+8 存（契约 §9.8 第 5 条）。
+     这里的做法是把 UTC 时间戳整体加 8 小时再读它的 UTC 字段，
+     读到的就是 UTC+8 的钟点，与容器时区无关。
+   ★ 为什么不用运行时依赖拼时间：写接口那条注释已说明（同一份输入两次调用
+     应当落进库里同样的值）。但**收藏时间戳是个例外**——
+     它记的是「用户什么时候点的收藏」，本来就该是操作发生的时刻，
+     所以取当前时间是正确的，与写接口的确定性要求不冲突。 */
+function nowLocalText() {
+  const d = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) +
+    ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds());
+}
 
 /* 两个墙钟时间相减得秒数。
    ★ Date.UTC 在这里只是把「年月日时分秒」这组数字塞进一个能算差值的容器，
@@ -608,6 +655,296 @@ async function handlePostSession(req, res) {
   }
 }
 
+/* ---------- 出口映射（契约 §9.8 第 4 条）----------
+   ★★ Day 22：这里要说明为什么**又一份** shapeItem，而不复用 read 那边那份。
+     读接口的 shapeItem 在 cloudfunctions/read/index.js 里，与本文件不同目录、
+     不同云函数，且两个目录之间没有共享模块的机制（复制部署，各自独立）。
+     契约那条「映射只写在出口那一处」指的是**一个接口的出口只有一处**，
+     不是整个仓库只能有一行映射代码。
+     ★ 代价是两份实现可能改岔，所以单测里有一条检查（.test-modify.js）：
+       两份 shapeItem 对同一行数据必须给出同样的对象 —— 不一致就在测试里报出来。
+
+   ★ 为什么这份要处理 favorited_at 的 null：
+     未收藏的条目在库里是 NULL，接口要原样给 null 而不是空串，
+     前端靠它区分「没收藏过」与「收藏了但没记时间」。 */
+function isoOut(ts) {
+  if (ts === null || ts === undefined) return null;
+  let s = String(ts);
+  if (s.indexOf(' ') >= 0) s = s.replace(' ', 'T');   // 防御：有的环境给空格分隔
+  if (/(?:[+-]\d{2}:?\d{2}|Z)$/.test(s)) return s;
+  return s + TZ_SUFFIX;
+}
+
+function shapeItem(row) {
+  return {
+    itemId: row.item_id,
+    sessionId: row.session_id,
+    topicId: row.topic_id,
+    type: row.type,
+    turn: Number(row.turn),
+    originalText: row.original_text,
+    reminder: row.reminder,
+    /* correction 保持 null（偏题与精彩句子无改法，B7）——
+       不变成空串，那是前端 mapItem 的展示层该做的翻译。 */
+    correction: row.correction === null || row.correction === undefined ? null : row.correction,
+    isFavorited: row.is_favorited,
+    note: row.note,
+    favoritedAt: isoOut(row.favorited_at),
+    createdAt: isoOut(row.created_at)
+  };
+}
+
+/* ---------- 十之二、Day 22：改一条条目（PATCH /api/sessions/write）----------
+   -------------------------------------------------------------
+   它实现契约 §6.1 R5 的写侧：把一条 item 的**备注**与**收藏标记**改掉。
+
+   ★★ 为什么只开放这两个字段，其余一律拒绝：
+     其余字段分两类，都不该由用户改：
+       · original_text / correction —— 绑着 B8「不编造原句」与 B7「偏题不给改法」。
+         用户改这两列就等于亲手绕过本项目最不能出的那条错。
+       · type / turn / reminder / session_id / topic_id / created_at ——
+         它们是 AI 那一轮判断的产物与归属信息，改了就与 turns 表对不上，
+         结果页会指向一条不存在或错配的轮次。
+     所以这里采取「白名单 + 明确报错」而不是「黑名单拦危险字段」：
+     白名单漏一个字段是安全的一侧（新字段默认不可改），
+     黑名单漏一个则是危险的一侧（新字段默认可改）。
+
+   ★★ 收藏标记必须连带改收藏时间（ck_items_favtime）：
+     库里有约束「收藏了必须有收藏时间、没收藏必须没有收藏时间」。
+     只改 is_favorited 不改 favorited_at 会被数据库拒（23514），
+     而那条报错是英文的 CHECK 约束名 —— 用户看不懂。
+     所以连带逻辑写在这里，数据库只当最后一道防线。
+
+   ★★ 为什么先查存在性再改：
+     PostgREST 命中 0 行也回 200（httpdb.js 的 patchWhere 注释），
+     拿返回值判断「改到了没有」是错的。而契约要求「不存在的 id 返回中文错误说明」，
+     200 + 空体没法区分「不存在」与「存在但没变化」。 */
+async function handlePatchItem(req, res) {
+  let body;
+  try {
+    body = await readBody(req, MAX_BODY);
+  } catch (err) {
+    return sendError(res, 400, err.code || 'INVALID_JSON', err.message);
+  }
+
+  /* --- 1. itemId：必填，格式与长度都按建表脚本（VARCHAR(40)）--- */
+  if (body.itemId === undefined || body.itemId === null || body.itemId === '') {
+    return sendError(res, 400, 'INVALID_PARAMS', '缺少 itemId（要改哪一条，得先说清楚它的编号）');
+  }
+  if (typeof body.itemId !== 'string') {
+    return sendError(res, 400, 'INVALID_PARAMS', 'itemId 必须是字符串');
+  }
+  if (body.itemId.length > MAX_ITEM_ID) {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      'itemId 超长（' + body.itemId.length + ' 字，上限 ' + MAX_ITEM_ID + '）');
+  }
+
+  /* --- 2. 至少要给一个要改的字段 ---
+     全空的 PATCH 是无意义请求：要么是调用方漏了，要么是前端 bug。
+     明确报出来比回一个「改成功了但什么都没变」诚实。 */
+  const hasNote = body.note !== undefined && body.note !== null;
+  const hasFav = body.isFavorited !== undefined && body.isFavorited !== null;
+  if (!hasNote && !hasFav) {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      '没有要改的内容（可改的是 note 备注与 isFavorited 收藏标记，至少给一个）');
+  }
+
+  /* --- 3. 逐个校验 --- */
+  const patch = {};
+
+  if (hasNote) {
+    if (typeof body.note !== 'string') {
+      return sendError(res, 400, 'INVALID_PARAMS', 'note 必须是字符串（留空串即可清空备注）');
+    }
+    if (body.note.length > MAX_NOTE) {
+      return sendError(res, 400, 'INVALID_PARAMS',
+        'note 超长（' + body.note.length + ' 字，上限 ' + MAX_NOTE + '）');
+    }
+    patch.note = body.note;
+  }
+
+  let nextFav = null;
+  if (hasFav) {
+    /* 严格布尔，不接受 'true' / 1 这类。
+       为什么不容错：isFavorited 与 favorited_at 是一条约束的两半，
+       一旦把 'false' 当成 true（JS 里非空字符串都是真值），就会写出
+       「没收藏却带收藏时间」的脏数据，还是英文报错。 */
+    if (typeof body.isFavorited !== 'boolean') {
+      return sendError(res, 400, 'INVALID_PARAMS',
+        'isFavorited 必须是 true 或 false（收到 ' + JSON.stringify(body.isFavorited) + '）');
+    }
+    nextFav = body.isFavorited;
+    patch.is_favorited = nextFav;
+    /* ★ 连带的那一半（ck_items_favtime）。收藏 → 记下此刻；
+       取消收藏 → 时间必须清空，否则数据库拒。 */
+    patch.favorited_at = nextFav ? nowLocalText() : null;
+  }
+
+  /* --- 4. 查存在性（理由见上方注释：命中 0 行也回 200，判不出来）--- */
+  const itemId = body.itemId;
+  let before;
+  try {
+    before = await itemsRepo.findItemById(itemId);
+  } catch (err) {
+    const kind = db.classify(err);
+    return sendError(res, 200, kind.code, kind.message);
+  }
+  if (!before) {
+    /* 404 + 中文说明。用真实 404 而不是 200：这是「你指的那条不存在」，
+       属于请求本身错了，前端可以据此提示「可能已经被删掉了」
+       而不必与「库读不到」混为一谈（两者都降级时提示完全不一样）。 */
+    return sendError(res, 404, 'NOT_FOUND',
+      '找不到这一条（itemId=' + itemId + '）。它可能已经被删掉了，' +
+      '或者编号不是本系统生成的 —— 请刷新列表后重试。',
+      { gotItemId: itemId });
+  }
+
+  /* --- 5. 落改 --- */
+  let updated;
+  try {
+    updated = await itemsRepo.updateItemById(itemId, patch);
+    /* 回读一次，用**库里的真值**作为响应，而不是把 patch 原样回显。
+       为什么：并发场景下别人可能也改过同一条，回显 patch 等于
+       告诉用户「你现在看到的是我以为的样子」而不是真实状态。 */
+    const after = await itemsRepo.findItemById(itemId);
+    return sendOK(res, {
+      item: shapeItem(after || before),
+      /* 改前改后都给：契约 §1.5 那条「回显我实际收到了什么」的同一条思路，
+         放在这里是给截图与排错用 —— 不用再查一次库就能对比出来。 */
+      before: { note: before.note, isFavorited: before.is_favorited },
+      changed: Object.keys(patch)
+    });
+  } catch (err) {
+    console.error('[write] 改条目失败 itemId=' + itemId + '：' +
+      (err && err.stack ? err.stack : err));
+    const kind = db.classify(err);
+    return sendError(res, 200, kind.code, kind.message);
+  }
+}
+
+/* ---------- 十之三、Day 22：删一条条目（DELETE /api/sessions/write）----------
+   ★★ 删除为什么比新增更容易出事（今天要掌握的那件事）：
+     新增写错了一条 → 库里多一行，GET 列表里多一条，用户看得见、也能顺手删掉。
+     删除写错了一次 → 那一行**当场消失**，没有撤销、没有历史、没有痕迹。
+     所以删除这条路径上多两道确认：
+       ① 前端必须二次确认（records.html 用 window.confirm，用户亲眼看过再点）
+       ② 后端必须先查存在性再删 —— 不存在的 id 要给中文说明，
+          而不是回一个「成功」让人以为真删掉了什么
+     这两条都不是功能，是把不可逆操作挡在能被看见的地方。
+
+   ★ 为什么删的是 items 行而不是 sessions 行：
+     sessions 的外键是 ON DELETE CASCADE，删一场会把整场的 turns 与 items 一起带走，
+     那是「删一场练习」的语义，属于另一个接口的范围。
+     今天只删单条条目 —— 它是用户在结果页/记录页看到并能单独判断「这条我不要了」的东西。
+
+   ★★★★ Day 22 余力加练：这里改成**软删除**（不真删行，只把 is_deleted 置 true）。
+     为什么这道加练正好落在这层：把 is_deleted 写成查询条件里的一处，
+     这里就从 DELETE 换成 UPDATE，**接口形状与前端二次确认都不用变**。
+
+     软删除带来的两处连锁改动（都不是可选的，漏了就是 bug）：
+       ① 「标记之后再查一次」这一步的**方法换了**——
+          现在 findItemById 带 is_deleted=eq.false 过滤，
+          所以「查不到了」不能证明「标记写成功了」（本来就查不到也能查不到）。
+          → 必须用 **findItemByIdIncludingDeleted** 复查：
+            它绕过过滤，能真正验证「行还在、且 is_deleted 已变成 true」。
+       ② 404 的含义 broadened：「找不到」现在包含「已软删」——
+          这正好是想要的：软删过的条目再删一次，仍回 404 + 「它可能已经被删过了」。
+
+     ★ 找回的口子留在库里：行还在，
+       `UPDATE items SET is_deleted = FALSE` 就能改回来
+       （用户 Day 22 拍板：本期只做标记 + 查询跳过，不做恢复接口）。 */
+async function handleDeleteItem(req, res) {
+  /* itemId 走 query 而不是 body：DELETE 带 body 在各代理上的行为不一致，
+     而 query 是所有路径都确定支持的（read 接口的两个 GET 也是走 query）。 */
+  const url = req.url || '/';
+  const qs = url.indexOf('?') >= 0 ? url.slice(url.indexOf('?') + 1) : '';
+  const query = {};
+  if (qs) {
+    for (const pair of qs.split('&')) {
+      if (!pair) continue;
+      const i = pair.indexOf('=');
+      const k = decodeURIComponent(i < 0 ? pair : pair.slice(0, i));
+      const v = i < 0 ? '' : decodeURIComponent(pair.slice(i + 1).replace(/\+/g, ' '));
+      query[k] = v;
+    }
+  }
+
+  const itemId = query.itemId;
+  if (itemId === undefined || itemId === null || itemId === '') {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      '缺少 itemId（要删哪一条，得先说清楚它的编号）');
+  }
+  if (itemId.length > MAX_ITEM_ID) {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      'itemId 超长（' + itemId.length + ' 字，上限 ' + MAX_ITEM_ID + '）');
+  }
+
+  /* 先查存在性。★ 这一步不是多余的：
+     软删除之后，「查到了」=「它在，且没被软删过」，这正是要删的前提。
+     若它已经软删过，这里返回 null → 走下面的 404「它可能已经被删过了」——
+     与真删时期的行为一致，用户看到的提示没变。 */
+  let before;
+  try {
+    before = await itemsRepo.findItemById(itemId);
+  } catch (err) {
+    const kind = db.classify(err);
+    return sendError(res, 200, kind.code, kind.message);
+  }
+  if (!before) {
+    return sendError(res, 404, 'NOT_FOUND',
+      '找不到这一条（itemId=' + itemId + '），没有东西可删。它可能已经被删过了。',
+      { gotItemId: itemId });
+  }
+
+  /* 真要说有什么该拦的：删一条被收藏的条目会让收藏区少一条，
+     但那是用户自己的数据、自己的判断，后端不该替他决定。
+     ★ 软删除会顺手清掉这条的收藏标记（见 softDeleteItemById 注释），
+       所以「收藏区少一条」这件事仍然成立，不需要额外拦。 */
+  try {
+    await itemsRepo.softDeleteItemById(itemId);
+
+    /* 标记之后再查一次，确认标记真落到行上了。
+       ★★ 这里**必须**用 IncludingDeleted 那个方法，不能用 findItemById ——
+         软删之后 findItemById 带 is_deleted=eq.false 过滤，
+         它天然查不到刚软删的那条。用它验证等于「用结论证明结论」：
+         查不到是因为过滤生效了，而过滤生效恰恰就是我这次要验证的那件事 ——
+         但真正该验的是「**行还在，且 is_deleted 变成 true 了**」。
+
+       多这一次查询换一条可信结论，值得 —— 这正是今天这个知识点本身。 */
+    const after = await itemsRepo.findItemByIdIncludingDeleted(itemId);
+    if (!after || after.is_deleted !== true) {
+      /* 标记没生效，这是最不该悄悄过去的一种状态：用户以为删掉了，
+         刷新列表又看见它。宁可报错也不要回「成功」。 */
+      return sendError(res, 200, 'DB_QUERY_FAILED',
+        '删除没有生效，刷新后这条记录仍然在。可能是同一条被并发改动过，请刷新列表重试。');
+    }
+
+    return sendOK(res, {
+      itemId: itemId,
+      /* softDeleted=true 是给前端的一句人话：
+         「这一条已经对所有查询不可见了」，而不是「那一行从库里消失了」。
+         前端拿它决定提示措辞 —— 用户 Day 22 拍板「契约与文案同步说明」，
+         对外口径必须与实际一致，不能还说「从库里删掉了」。 */
+      softDeleted: true,
+      /* 把软删掉的那条摘要回给前端，让它能在提示里说清删了什么，
+         而不是只说「已删除」。 */
+      deleted: {
+        itemId: before.item_id,
+        type: before.type,
+        turn: Number(before.turn),
+        originalText: before.original_text,
+        wasFavorited: before.is_favorited,
+        note: before.note
+      }
+    });
+  } catch (err) {
+    console.error('[write] 删条目失败 itemId=' + itemId + '：' +
+      (err && err.stack ? err.stack : err));
+    const kind = db.classify(err);
+    return sendError(res, 200, kind.code, kind.message);
+  }
+}
+
 /* ---------- 十一、HTTP 服务 ---------- */
 function clientIp(req) {
   const fwd = req.headers['x-forwarded-for'];
@@ -621,28 +958,60 @@ const server = http.createServer(function (req, res) {
   const path = url.split('?')[0];
   const norm = path.replace(/\/+$/, '') || '/';
 
-  /* ★ 路径为什么不是 /api/sessions（Day 18 实测踩到的硬约束）：
+  /* ★ 三个接口为什么共用一条路径（Day 22 实测踩出来的，不是设计偏好）：
      CloudBase HTTP 网关**同一域名下不能有重复路径**（重复会报 INVALID_PARAM），
-     而且路由配置里**没有 method 字段** —— 网关不能按 HTTP 方法分流。
-     `/api/sessions` 已被 read 占了（Day 17 建的 GET 列表），
-     所以写入只能另起一条路径。选 /api/sessions/write 的理由：
-     它仍然读得出「这是 sessions 的写」，将来网关若支持方法分流，
-     改回 /api/sessions 只需要删一条路由、动前端一个字符串。
+     路由配置里**没有 method 字段** → 网关不能按方法分流，
+     一条路径天然就能同时服务 POST / PATCH / DELETE。
+
+     ⚠️ 本来给 PATCH/DELETE 各自建了 /api/items/update 与 /api/items/delete，
+       两条都**建不出来**：控制台「新增触发路径」只能建 `SCF` 类型路由
+       （下拉只有「云函数」与「静态网站托管」），而 write 是 `WEB_SCF` 类型，
+       提交即「创建失败」；CLI 的 routes add/edit/delete 三条路也全被拒
+       （add 报「system internal domain 不支持手工创建」，
+        edit/delete 报「路由不存在」—— 因为压根没进路由表）。
+       结论：HTTP 型函数的路径**只能靠控制台建，且控制台建不了**。
+       所以复用已存在的 /api/sessions/write —— 实测它本来就能收到 PATCH/DELETE。
+
+     ★★ 网关会把 PATCH 与 DELETE 原样转发（方法不改写），这是探针实测的：
+       拿 `PATCH /api/sessions/write` 打这条路由，拿到的是本函数自己写的
+       405 + 中文说明与 gotPath —— 说明请求进了函数且 req.method 就是 PATCH。
+       ★ 所以这两个接口用的是**标准 HTTP 方法**，
+         不需要退化成「POST + body 里带 _method」那种绕法。
+
      ⚠️ 网关路由顺序：**这条必须排在 /api/sessions 之前**，
-       否则更短的路径会先匹配掉它（同一类坑：契约 §1.1 记着「/api 排在 / 之前」）。 */
-  const isSessions = norm === '/api/sessions/write' || norm === '/sessions/write';
-  if (!isSessions) {
+       否则更短的路径会先匹配掉它（同一类坑：契约 §1.1 记着「/api 排在 / 之前」）。
+
+     ★ 路径语义变别扭了（叫 write 却也管改删），这是被网关逼出来的妥协，
+       不是设计选择。将来若控制台能建 WEB_SCF 路由，改回 RESTful 的
+       /api/items/{id} 只需改这张表 + 前端一个字符串，云函数代码不用动。 */
+  const ROUTES = {
+    '/api/sessions/write': {
+      POST: handlePostSession,   /* 写入一场练习（Day 18） */
+      PATCH: handlePatchItem,    /* 改一条条目：备注 / 收藏标记（Day 22） */
+      DELETE: handleDeleteItem   /* 删一条条目：itemId 走 query（Day 22） */
+    },
+    '/sessions/write': {        /* 同一个 key 的双前缀写法（沿用 Day 18） */
+      POST: handlePostSession,
+      PATCH: handlePatchItem,
+      DELETE: handleDeleteItem
+    }
+  };
+
+  const route = ROUTES[norm];
+  if (!route) {
     return sendError(res, 404, 'NOT_FOUND',
-      '本函数提供：POST /api/sessions/write（写入一场练习）。读取会话列表请用 GET /api/sessions',
+      '本函数提供：POST /api/sessions/write（写入一场练习）、' +
+      'PATCH /api/sessions/write（改一条条目）、DELETE /api/sessions/write（删一条条目）。' +
+      '读取会话列表与收藏请用 GET /api/sessions 与 GET /api/favorites',
       { gotPath: path });
   }
-  if (req.method !== 'POST') {
+  if (!route[req.method]) {
     return sendError(res, 405, 'METHOD_NOT_ALLOWED',
-      '本接口只接受 POST（读取会话列表请用 GET /api/sessions，那是另一个云函数）',
+      '这条路径接受 ' + Object.keys(route).join(' / ') + '（收到了 ' + req.method + '）',
       { gotPath: path });
   }
 
-  handlePostSession(req, res).catch(function (err) {
+  route[req.method](req, res).catch(function (err) {
     console.error('[write] 未捕获异常：' + (err && err.stack ? err.stack : err));
     if (!res.headersSent) sendError(res, 500, 'INTERNAL_ERROR', '服务器内部错误');
   }).then(function () {
@@ -658,9 +1027,13 @@ const server = http.createServer(function (req, res) {
 
 server.listen(9000, '0.0.0.0', function () {
   console.log('[write] listening on 0.0.0.0:9000');
-  console.log('[write] route: POST /api/sessions/write（写 sessions + turns + items，每表一次请求 + 补偿删除）');
+  console.log('[write] 三条路由共用一条路径 /api/sessions/write（网关不能按方法分流，原因见路由层注释）：');
+  console.log('[write]   POST   /api/sessions/write（写 sessions + turns + items，每表一次请求 + 补偿删除）');
+  console.log('[write]   PATCH  /api/sessions/write（改 note / isFavorited，先查存在性，收藏连带写 favorited_at）');
+  console.log('[write]   DELETE /api/sessions/write?itemId=（删单条条目，先查存在性 + 删后复查，不存在回 404 中文说明）');
   console.log('[write] 硬约束：原句按 turn 取回（B8）/ 偏题 correction 必须为空（B7）/ FREE 丢弃偏题');
   console.log('[write] 防重复：同sessionId 第二次提交 → 主键冲突 → 400 DUPLICATE');
+  console.log('[write] ★ PATCH 只开放 note 与 isFavorited：originalText/correction/type/turn 一律不改');
   console.log('[write] db: ' + db.describe());
   console.log('[write] 落库方式：每表一次请求 + 失败时补偿删除（跨请求事务在本环境不存在）');
 });

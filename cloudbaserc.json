@@ -36,7 +36,7 @@
       "type": "HTTP",
       "dir": "./cloudfunctions/write",
       "runtime": "Nodejs20.19",
-      "description": "写入一场练习: sessions + turns + items 三张表一个事务。Day 18。路径要排在 GET 的前面",
+      "description": "写与改删: POST /api/sessions/write 写入一场练习; PATCH /api/sessions/write 改条目备注与收藏; DELETE /api/sessions/write 删单条条目。Day 18/22。三个方法共用一条路径(网关不能按方法分流且控制台建不了 WEB_SCF 路由),该路径要排在 GET 的前面",
       "timeout": 20,
       "memorySize": 256,
       "installDependency": true
