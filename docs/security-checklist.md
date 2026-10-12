@@ -18,10 +18,18 @@ git grep -nIE "AKID[A-Za-z0-9]{10,}" -- .
 
 **实跑结果：2 条命中，逐条确认均安全**
 
-| 文件:行号 | 内容 | 为什么安全 |
+| 文件:行号 | 内容（**已截断**，避免本文档自己成为命中源） | 为什么安全 |
 |---|---|---|
-| `.test-asr-sign.js:38` | `AKIDz8krbsJ5yKBZQpn74WFkmLPx3*******` | 腾讯云**官方文档公开的示例值**，尾部带 `*******` 掩码。取自 `https://cloud.tencent.com/document/api/1093/35646` 签名示例，公开可查 |
-| `docs/day23-deploy-speech.md:32` | `AKIDxxxxxxxxxxxxxxxx` | 全是x 的**占位符**，文档里给人看的填写模板 |
+| `.test-asr-sign.js:38` | `AKIDz8krbs…KLPx3*******` | 腾讯云**官方文档公开的示例值**，尾部带 `*******` 掩码。取自 `https://cloud.tencent.com/document/api/1093/35646` 签名示例，公开可查 |
+| `docs/day23-deploy-speech.md:32` | `AKIDxxxx…xxxx` | 全是 x 的**占位符**，文档里给人看的填写模板 |
+
+> ★★★ **为什么这里写的是截断值（Day 23 踩到才发现）**：
+> 最初这份清单里写的是**完整密钥值**，结果**这份文档自己变成了搜索命中源** ——
+> `git grep AKID` 从 2 条变成 7 条，其中 5 条来自本文档。
+> ★★ 一份让搜索变脏的安全文档是有害的：
+> 它逼着每次搜密钥的人多分辨几行噪音，
+> 而分辨噪音靠「人肉判断哪条安全」—— 人总会漏。
+> ★ 保留可辨识前缀（能确认是同一个值），去掉主体（不再构成完整密钥）。
 
 > ★ **为什么这一项不是 0 条**：
 > Day 23 的完成标准写的是「全仓库搜不到密钥特征词」，
@@ -79,10 +87,11 @@ git log --all -p --no-color | grep -oE "AKID[A-Za-z0-9]{10,}" | sort -u
 
 **实跑结果（52 个提交全查）：**
 ```
-AKIDxxxxxxxxxxxxxxxx
-AKIDz8krbsJ5yKBZQpn74WFkmLPx3
+AKIDxxxx…xxxx
+AKIDz8krbs…KLPx3
 ```
 与 1.1 完全相同 —— **只有那两个确认安全的值**。
+（同样截断显示，理由见 §1.1 的说明：这份文档不该成为命中源）
 
 ```bash
 # 再扫一遍 28 位以上的裸串（排除 40 位 commit hash 本身）
@@ -473,10 +482,11 @@ http://localhost:8010/pages/day23-errors.html
 ```bash
 git grep -nIE "AKID[A-Za-z0-9]{10,}" -- .
 ```
-输出：
+输出（**下面同样做了截断**，真源在 `.test-asr-sign.js:38` 与
+`docs/day23-deploy-speech.md:32`）：
 ```
-.test-asr-sign.js:38  'const ASR_SECRET_ID = "AKIDz8krbsJ5yKBZQpn74WFkmLPx3*******";' +
-docs/day23-deploy-speech.md:32    SecretId     AKIDxxxxxxxxxxxxxxxx
+.test-asr-sign.js:38  'const ASR_SECRET_ID = "AKIDz8krbs…KLPx3*******";' +
+docs/day23-deploy-speech.md:32    SecretId     AKIDxxxx…xxxx
 ```
 
 **口径 B · 搜真实密钥（0 条）**
