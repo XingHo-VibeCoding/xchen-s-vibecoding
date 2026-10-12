@@ -92,26 +92,33 @@
       <div class="tr-list" id="tr-list" aria-live="polite">
         <p class="tr-empty" id="tr-empty">
           点「开始说话」之后，你说的话和 AI 的回应会逐句出现在这里。
+          直接开口就行，说完停一下系统会自动发出去。
         </p>
       </div>
     </section>
 
     <!-- 提交发言（Day 14 · F6 第 3 步）
-         本期用**文本框 + 「我说完了」**代替开口：语音识别（js/speech.js）
-         尚未接入，PRD §6.6 边界与约定把这一步写死成这个形态。
-         接入之后文本框的内容来源改成转写结果，**结构与流程不变**
-         （PRD §8.2 E3「转写文字允许用户编辑」就是同一个位置）。
-         只在录音中出现；未开始与已暂停时整块隐藏。 -->
+         ★ Day 23 第七次修订：语音已接入（js/speech.js），
+           这个文本框**不再是「代替开口的替代品」**，而是两个用途：
+             ① 语音的落地处 —— 转写结果先填进这里，用户核对/修改
+                （PRD §8.2 E3「转写文字允许用户编辑」就是为这一步留的）
+             ② 语音不可用时的降级路径 —— 浏览器不支持、没麦克风、
+                密钥没配时，这个框仍然是完整的输入途径
+           ★ 所以它一直都在、一直能用，不是「语音没接时的备胎」。 -->
     <form class="composer" id="composer" hidden>
+      <p class="queue-note" id="queue-note" hidden></p>
       <textarea class="say-input" id="say-input" rows="2"
                 aria-label="你想说的话，用英语"
                 placeholder="用英语说说你想说的……"></textarea>
       <button class="primary" id="btn-say" type="submit">我说完了</button>
     </form>
 
-    <!-- 语音状态区：三态切换（未录音 / 正在录音 / 已暂停）
+    <!-- 语音状态区：三态切换（未开始 / 正在收你说话 / 已暂停）
          由 dialogue.js 统一管理 state + 文案，HTML 只提供挂载点。
-         说明：真正的录音与转写属第 2 步，这里先只做界面态与计时。 -->
+         ★ Day 23 第七次修订：识别改走服务端之后，
+           下面那行**不再实时显示英文**（服务端只在录完后给整句），
+           实时反馈改成下方的音量条 —— 它是用户判断
+           「麦克风有没有在收」的**唯一**依据。 -->
     <div class="recorder" id="recorder" data-state="idle">
       <div class="rec-status">
         <span class="rec-label" id="rec-label">未录音</span>
@@ -121,22 +128,52 @@
         <span class="rec-text" id="rec-text">正在听……</span>
         <span class="rec-timer" id="rec-timer">00:00</span>
       </div>
+      <!-- ★ Day 23 第七次修订：音量条。
+           换成服务端识别后没有「正在听：xxx」这种实时文字了
+           （服务端只在录完后给整句），所以这条音量条成了
+           用户判断「麦克风到底有没有在收我的声音」的唯一依据。
+           没有它的话，用户只能凭猜 —— 而猜错一次就会放弃。 -->
+      <div class="rec-meter" id="rec-meter" aria-hidden="true"></div>
       <p class="rec-hint" id="rec-hint">点「开始说话」进入对话状态，计时会从第一次发言开始走。</p>
+      <!-- ★ Day 23 新增：语音提示行。
+           为什么要有独立的一行而不是塞进 rec-hint：
+           这几条是**瞬时状态**（没听清 / 麦克风没权限 / 浏览器不支持），
+           处理完就该消失；而 rec-hint 是常驻说明。
+           混在一起会让用户分不清「这是长期提示还是刚才出问题了」。
+           隐藏时用 hidden 属性，不占布局（不加会留一个空行）。 -->
+      <p class="rec-note" id="rec-note" hidden></p>
     </div>
 
     <!-- 按钮：开始说话（录音中变成 暂停 / 已暂停变成 继续）+ 结束对话
-         「说完了」已按 Day 10 决定删去；「结束对话」兼任录音中的「结束本次对话」。 -->
+         「说完了」已按 Day 10 决定删去；「结束对话」兼任录音中的「结束本次对话」。
+         ★ Day 23 新增「跳过朗读」：AI 开口时想让它闭嘴就点它。
+           这是本实现里的「打断」方式——不能靠「一开口就打断」，
+           原因见 js/speech.js 顶部那段（浏览器没有回声消除）。 -->
+
+    <!-- ★ 隐私告知（Day 23 第七次修订）—— 必须是**页面上看得见的元素**，
+         不能写成 HTML 注释（那是给我看的，用户看不到）。
+         为什么必须说：选浏览器原生方案当初就是为了避免这件事
+         （TECH_DESIGN §3.3），现在触发退路就得接受它 ——
+         而「用户是否知情」不能靠我们自己心里知道。
+         ★ 放在按钮附近而不是页脚：页脚没人看。 -->
+    <p class="privacy-note">
+      语音识别由腾讯云完成：<b>录音会离开你的设备</b>发给它的服务器，
+      不落库、不留存，只用于这一次识别。想完全不上传，可以不用语音，直接打字。
+    </p>
     <div class="actions">
       <button class="primary" id="btn-talk">🎙 开始说话</button>
       <button id="btn-pause" hidden>暂停</button>
+      <!-- ★ Day 23：AI 朗读时才出现。点它 AI 立刻闭嘴。 -->
+      <button id="btn-skip-speech" hidden>跳过朗读</button>
       <button class="link" id="btn-end">结束对话 →</button>
     </div>
 
     <!-- 开发期提示（不再渲染给用户看）：
-         「开始说话」按下后只切换界面态与计时，不接真实录音（属第 2 步）。
          「结束对话」会把轮次与时长带到结果页（result.html）。
          Day 10：原为 .placeholder-note 段落，会把内部文档编号显示给终端用户，
-         现改为 HTML 注释；该类已随之删除。 -->
+         现改为 HTML 注释；该类已随之删除。
+         ★ Day 23：「不接真实录音」这句已过期 —— js/speech.js 已接上，
+         「开始说话」现在真的会听你说话并转成文字。 -->
 
     <footer class="page-foot">
       口语对话实战器 · 对话练习页
@@ -147,9 +184,12 @@
   <!-- 加载顺序有讲究：storage 在前、api 在中、页面逻辑在后——
        storage.js 是 localStorage 的唯一出口（TECH_DESIGN.md §4.2 规矩 2），
        api.js 是后端唯一出口（规矩 1，Day 17 新建）。
-       页面逻辑要用 window.Storage 与 window.Api，所以两者都必须先加载。 -->
+       页面逻辑要用 window.Storage 与 window.Api，所以两者都必须先加载。
+       ★ speech.js（Day 23 新建）排在 api 之后 —— 它自己不调接口，
+         但页面的语音逻辑要等 Api 与Speech 都就绪。 -->
   <script src="../js/storage.js"></script>
   <script src="../js/api.js"></script>
+  <script src="../js/speech.js"></script>
   <script>
     // P2 对话页逻辑（Day 10 升级）：
     //   ① 从地址栏取主题编号并在顶部显示主题名
@@ -238,11 +278,26 @@
         trEmpty: document.getElementById('tr-empty'),
         trCount: document.getElementById('tr-count'),
         composer: document.getElementById('composer'),
-        sayInput: document.getElementById('say-input')
+        sayInput: document.getElementById('say-input'),
+        /* Day 23：排队提示（AI 还在回，用户又说了几句时的状态） */
+        queueNote: document.getElementById('queue-note'),
+        /* Day 23：语音提示行 + 跳过朗读按钮 */
+        recNote: document.getElementById('rec-note'),
+        btnSkipSpeech: document.getElementById('btn-skip-speech'),
+        /* Day 23 第七次修订：音量条 */
+        recMeter: document.getElementById('rec-meter')
       };
 
       // ---------- 状态 ----------
       var state = 'idle';   // idle | recording | paused
+
+      /* ★ Day 23：这一场里用户**有没有开口过**。
+         为什么单独记一个布尔，不用 turns > 0：
+         turns 数的是「说了几句」，而光球文案要区分的是
+         「这一场还没轮到你」还是「说过了，该AI 接话了」——
+         turns = 1 时两种阶段都可能是「刚说完正等 AI」。
+         判据错了文案就会说反（说「等你开口」的时候其实正在等 AI）。 */
+      var hasUserSpoken = false;
 
       /* 用户在本次对话里说过几句。**与下面的 rounds 不是一回事**：
          rounds 是「这个主题练过几次」（点结束对话才 +1 的练习次数），
@@ -328,7 +383,13 @@
         idle: {
           mood: 'rest',
           line: '准备好了就说一声，我在这儿。',
-          label: '未录音',
+          /*★ Day 23 第七次修订：「未录音」改成「未开始」。
+            为什么：现在录音是**真实采集音频**了（不再只是界面态），
+            「未录音」这个说法会让人以为「按了才会开始录」——
+            实际上点「开始说话」就自动开始收了。
+            ★ 更重要的是它得体面：这一栏现在的身份是「对话状态」
+              （idle/recording/paused 说的是练习状态，不是设备状态）。 */
+          label: '未开始',
           live: false,
           composer: false,
           hint: '点「开始说话」进入对话状态，计时会从第一次发言开始走。',
@@ -336,13 +397,28 @@
           pause: { show: false }
         },
         recording: {
+        /* ★ Day 23：光球上方那行引导语按「用户有没有开口过」分两种。
+           动机：同伴反馈「AI 一直讲，他没办法说话」——除了被打断，
+           还有一层是**他不知道此刻该不该开口**。
+           改之前整个 recording 态只有一句「慢慢说，不着急，我听着」，
+           用户分不清「该我了」和「AI 在想」，只能等着被催。
+           现在两句话各说各的阶段，一眼能看出轮到自己没有。 */
           mood: 'listen',
-          line: '慢慢说，不着急，我听着。',
-          label: '正在录音',
+          /* line 与 text 由 render() 按 hasUserSpoken 覆写，
+             这里给的是「还没开口」那一套（recording 态的默认值）。 */
+          line: '轮到你了，说什么都行。',
+          lineAfterSpeak: '我在听，接着说。',
+          label: '正在收你说话',
           live: true,
-          text: '正在听……',
+          text: '等你开口……',
+          textAfterSpeak: '正在听……',
           composer: true,
-          hint: '在下面的框里写下你说的话，点「我说完了」提交；也可以「暂停」停表或「结束对话」收尾。',
+          /*★ Day 23 第七次修订：把「语音怎么用」讲清楚。
+            用户报过「说了半天 AI 没反应」——除了 bug，
+            也有「他不知道说完要停一下」这一层。
+            ★ 明说「说完停一下」：这是语音交互的必需动作，
+              不说的话用户会以为要手动点按钮。 */
+          hint: '直接说话就行，说完停一下（大约 2 秒），系统会自动发出去。想打字也可以用下面的框。',
           talk: { show: false },
           pause: { text: '暂停', show: true }
         },
@@ -361,14 +437,24 @@
 
       function render() {
         var v = VIEW[state];
-        // 光球与引导语先写：它们的变化最显眼，放在前面便于核对状态是否真切过去了
+        /* 光球与引导语先写：它们的变化最显眼，放在前面便于核对状态是否真切过去了
+           ★ Day 23：引导语与录音区文字按 hasUserSpoken 取两套之一。
+             「等你开口」与「我在听」必须是两句话 —— 用一句含糊话覆盖两个阶段，
+             用户就不知道此刻该不该出声，这正是同伴反馈里「插不上话」的一半。 */
+        var spoken = hasUserSpoken;
         el.stage.setAttribute('data-mood', v.mood);
-        el.orbLine.textContent = v.line;
+        el.orbLine.textContent = (state === 'recording')
+          ? (spoken ? v.lineAfterSpeak : v.line)
+          : v.line;
 
         el.recorder.setAttribute('data-state', state);
         el.recLabel.textContent = v.label;
         el.recLive.hidden = !v.live;
-        if (v.text) el.recText.textContent = v.text;
+        if (v.text) {
+          el.recText.textContent = (state === 'recording')
+            ? (spoken ? v.textAfterSpeak : v.text)
+            : v.text;
+        }
         el.recHint.textContent = v.hint;
 
         el.btnTalk.hidden = !v.talk.show;
@@ -412,10 +498,40 @@
         el.trCount.textContent = turns ? ('你说了 ' + turns + ' 句') : '还没有发言';
       }
 
+      /* ★ Day 23：排队状态的显示。
+         为什么必须让用户看见队列长度：
+         排队 = 他说的话已经记下了、AI 正在回上一句。
+         不显示的话他会以为页面卡住，或者又点一次「我说完了」
+         —— 而第二次会被再排一条，AI 就要回两次，越等越长。
+         显示「已排队，AI 回应后会接着说」把因果讲清楚，
+         用户就知道现在该等，而不是该点。 */
+      function renderQueue() {
+        if (!el.queueNote) return;
+        var n = pendingQueue.length;
+        if (!n) {
+          el.queueNote.hidden = true;
+          el.queueNote.textContent = '';
+          return;
+        }
+        el.queueNote.hidden = false;
+        el.queueNote.textContent = n === 1
+          ? '这句已经记下了，AI 回应完就接着说。'
+          : '已经记下 ' + n + ' 句，AI 会一句一句接着回。';
+      }
+
       /* 往记录区加一条。who 只有两个值：'user' / 'ai'。
          AI 那一侧的署名就写 "AI"：这一版没给它起人格化的名字，
          页面别处（主题卡、光球）也一律只叫它 AI，保持一致，
-         不在这里单独给它一个名字。 */
+         不在这里单独给它一个名字。
+
+         ★ Day 23：AI 那一侧多一件事 —— **朗读出来**（用户明确要求 AI 要能出声）。
+           放在 appendLine 里而不是四个调用点各写一遍：
+             - 有 4 处 appendLine('ai')（:757/:759/:787/:789），
+               漏一处就有一句 AI 永远不出声，而且极难发现
+             - 语义上也更对：**凡是上了屏的 AI 台词就该能听**，
+               这不是某一处的特性，是 AI 台词的通性
+           降级台词（本地句库）同样朗读 —— 用户听见的是同一句话，
+           配合 noteDegraded 的说明，不会有「听到的和看到的不一样」。 */
       function appendLine(who, text) {
         // 第一条真发言到了，空态那句话就该退场
         if (el.trEmpty && el.trEmpty.parentNode) el.trEmpty.parentNode.removeChild(el.trEmpty);
@@ -451,14 +567,71 @@
         el.trList.appendChild(row);
         // 新的一句永远留在视线内：记录区自己滚，不推着整页跑
         el.trList.scrollTop = el.trList.scrollHeight;
+
+        /* ★ Day 23：AI 的台词上屏之后朗读一遍。
+           为什么放在这里而不是四个调用点：见上面那段注释 ——
+           「凡是上了屏的 AI 台词就该能听」，在这一个函数里写一次就够。
+           speakAiLine 内部会判canSpeak()，朗读不可用时静默跳过（E10），
+           文字照常显示、对话不阻塞。 */
+        if (who === 'ai') speakAiLine(text);
       }
 
       /* ---------- 沉默计时：轮到用户说的时候才走 ----------
          起算点（PRD.md §6.6 边界与约定）：进入对话状态时、
          以及**每次 AI 说完之后**；用户提交发言即重置。
-         两条线的秒数不同，见文件开头的 SILENCE_MS。 */
+         两条线的秒数不同，见文件开头的 SILENCE_MS。
+
+         ★ Day 23 修订：起算点加一条硬前提 —— **输入框里有字就不倒计时**。
+           动机来自同伴反馈的实测：「AI 一直讲，他没办法说话」。
+           8 秒这个数是按「真人对话里的接话间隔」定的，但本期是文本框：
+           在输入框里组织一句 A2 英语要 15–30 秒，那 8 秒里 AI 插进来，
+           用户的句子必然写到一半被打断 —— 体感就是「我一直插不上话」。
+           ★ 只改「什么时候开始算」，**不改 8 秒/ 5 秒这两个值**
+             （这两个是用户拍板的，PRD §6.6 与 B27 验收都写着），
+             「停手不说了超过 8 秒 AI 仍会先开口」这条验收仍然成立。 */
       var silenceTimer = null;
       var aiTimer = null;
+
+      /* ★ Day 23：待发队列。
+         为什么需要它：改之前 submit 里是 `if (CHAT_BUSY) return;` ——
+         AI 等后端的那 3–8 秒里，用户点「我说完了」，**这一句既不上屏、
+         也不清空、也没有任何提示**。用户以为自己没点到，于是反复点，
+         反复被吞。这是「他说不了话」最直接的机制性原因。
+         现在改成：话**当场上屏**（用户能看见自己说过了），
+         再把「让 AI 回什么」压进队列，AI 一空闲就按顺序发出去。
+         队列里排队的条数会显示在按钮上方，用户知道要等多久。 */
+      var pendingQueue = [];
+
+      /* ★ Day 23：判断「用户是不是正在准备说话」——
+         返回 false 才可以起算倒计时 / 开口催促。
+
+         ★★ Day 23 二次修订（同伴实测「AI 还是在插嘴」后发现上一版漏了）：
+         上一版只看 `sayInput.value` 有没有字 —— 于是两种情况照样被催：
+
+           ① 光标落在输入框里、正在想怎么措辞，但一个字都还没打
+              （想 15秒 → 第 8 秒就被催，而此时框里是空的）
+           ② 倒计时已经排定在跑，中途用户才开始打字
+              （起算那一刻判定是"没在打字"，之后就不管了）
+
+         所以现在补两样：
+           - **焦点在输入框**也算正在组织语言（覆盖 ①）。
+             焦点是比字数更早的信号：他点进来就是要说话。
+           - 倒计时回调里**再判一次**，并且监听 input 事件主动取消（覆盖 ②，见 bindGuards）。 */
+      function userIsTyping() {
+        if (pendingQueue.length) return true;
+        /* ★★ Day 23 第三次修订：语音模式下**永远算「正在说话」**。
+           为什么：识别开着就说明麦克风在工作，用户随时可能开口。
+           原来只用「有没有字 / 焦点在不在框里」判断，
+           而语音场景里他**根本不在打字** —— 于是 8 秒倒计时照跑，
+           他思考停顿超过 8 秒，AI 就抢先开口了。
+           这是「第 1 步修好了、语音一接上来又回来」的原因：
+           计时器整套是为「打字时代」设计的，语音形态下不该存在。 */
+        if (SPEECH_OK) return true;
+        if (!el.sayInput) return false;
+        if (el.sayInput.value && el.sayInput.value.trim()) return true;
+        // 光标在框里就是「打算说」——哪怕还没落一个字
+        return document.activeElement === el.sayInput;
+      }
 
       function clearSilence() {
         if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
@@ -468,9 +641,45 @@
         clearSilence();
         // 没在对话（未开始 / 已暂停）就不计时 —— 停表要连沉默一起停
         if (state !== 'recording') return;
+        /* ★★ Day 23 第三次修订：语音模式下**不排定倒计时**。
+           语音里「你说完了」由静音检测（speech.js 的 1.2 秒）负责，
+           已经有第二套计时器了 —— 两个计时器同时跑必然打架：
+             静音检测在等你说完，沉默倒计时在等你开口。
+             谁先到谁先生效，于是「停顿久一点AI 就自己说自己的」。
+
+           ★ 那B27「沉默 8 秒必有接话」怎么办？
+             它是**打字时代的验收项**（8 秒这个数是按真人对话定的）。
+             语音形态下它的对应物是「你沉默时 AI 有没有递话」——
+             而语音里用户开口成本极低、几乎不会沉默，催不催意义不大。
+             浏览器不支持语音时（Firefox）会自动退回打字模式，
+             那时 SPEECH_OK 为 false，倒计时就照常跑 —— **B27 仍成立**。
+             用户拍板：「语音下彻底关掉」。 */
+        if (SPEECH_OK) return;
+        /* 正在组织语言（或队列里还压着话）就不倒计时。
+           队列这一条同样重要：用户已经开口了，只是 AI 还没答完，
+           这时候催他等于催一个正在排队的人。
+
+           ★ 这里**直接返回、不排定**是对的：等 blur（他停手、点走）
+             或提交之后，由那两处重新起算。见 bindGuards。 */
+        if (userIsTyping()) return;
         silenceTimer = setTimeout(function () {
           silenceTimer = null;
-          aiSay('silence', 0);
+          /* ★★ Day 23 二次修订：开口的这一刻**再看一次**。
+             倒计时是 8 秒前排定的，这 8 秒里用户可能刚开始打字/点了输入框。
+             第 1 版不在这里判，于是「排定时没在打字」就一路催到底——
+             这是同伴第二次反馈「AI 还是在插嘴」的直接原因。 */
+          if (!userIsTyping()) aiSay('silence', 0);
+          /* ★★★ 这里**什么都不做**，是刻意的，不是漏写。
+             第 2 版曾写成 `else armSilence()`，想给他「重新来一轮」，
+             结果把自己锁死了：armSilence 开头判 userIsTyping() 为 true
+             就直接 return，于是这个定时器永远排不上、也永远不响——
+             定时器被吃掉、且没有任何补偿。
+             症状是「用户一开始打字，AI 就再也不主动开口了」，
+             那比插嘴更糟：沉默催促是 B27 验收项，功能被悄悄废掉。
+
+             正确做法：他把焦点留在框里期间**本来就不该有倒计时**；
+             等他说完、焦点离开（blur）或提交，由那两处重新起算。
+             这一路只需让计时器自然结束。 */
         }, SILENCE_MS);
       }
 
@@ -598,7 +807,12 @@
       var lastChatError = '';
 
       /* AI 说一句。kind 只影响语气标签，当前界面不显示它，
-         但记进 transcript 便于将来做「追问」样式（契约 §3 的 followUpType）。 */
+         但记进 transcript 便于将来做「追问」样式（契约 §3 的 followUpType）。
+
+         ★ Day 23：说完之后**先看队列有没有人在等**（pumpQueue），
+           队列空了才重新起算沉默倒计时。
+           改之前是「说完就 armSilence」—— 用户在 AI 回答期间又说了两句，
+           那两句（队列里）还在等，AI 却已经重新开始数 8 秒要催他了。 */
       function aiSay(name, delay, opts) {
         if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
         aiTimer = setTimeout(function () {
@@ -618,9 +832,47 @@
               appendLine('ai', localLine(name));
               noteDegraded(lastChatError);
             }
-            armSilence();
+            /* ★ Day 23：优先清队列，没人等才回到「等用户开口」状态。
+               注意 armSilence 放在 pumpQueue 之后 —— 顺序反了的话，
+               队列里有人等的时候倒计时也会被挂上（虽然 armSilence
+               自己有pendingQueue.length 的判断，但显式顺序更不容易读错）。 */
+            if (pendingQueue.length) {
+              pumpQueue();
+            } else {
+              armSilence();
+              renderQueue();
+            }
           });
         }, delay || 0);
+      }
+
+      /* ★ Day 23 新增：把排队的话依次送去问 AI。
+         一次只发一条（并发问会让模型的上下文互相看不见，
+         而且 order 不可控）。每条都带当轮的 userText。 */
+      function pumpQueue() {
+        if (CHAT_BUSY || !pendingQueue.length) return;
+        var next = pendingQueue.shift();
+        CHAT_BUSY = true;
+        askAi({ userText: next, kind: 'reply', silenceSeconds: 0 })
+          .then(function (aiText) {
+            CHAT_BUSY = false;
+            if (aiText) {
+              appendLine('ai', aiText);
+            } else {
+              appendLine('ai', localLine('reply'));
+              noteDegraded(lastChatError);
+            }
+            renderQueue();
+            /* 还有人排就继续发，都发完了才回到「等你开口」。
+               renderQueue 必须在 pumpQueue 之前 —— 它要先更新
+               「还剩几句」的计数，用户才不会看着数字不动。 */
+            if (pendingQueue.length) {
+              pumpQueue();
+            } else {
+              armSilence();
+              renderQueue();
+            }
+          });
       }
 
       /* 降级说明：紧跟在 AI 那句后面显示一行小字。
@@ -638,22 +890,419 @@
         el.trList.scrollTop = el.trList.scrollHeight;
       }
 
+      /* ================= Day 23：语音接线 =================
+         上面那些是「文字时代的」逻辑；下面把 speech.js 接进来。
+
+         ★ 一句话说明这套东西改变了什么：
+           **不再靠 8 秒倒计时判断「你说完了」，改用静音检测**。
+           你说完停一下（约 2.5 秒），系统自动识别并提交。
+           倒计时逻辑（armSilence 等）**保留但降级为备用** ——
+           浏览器不支持语音时（Firefox），整套体验回落到打字，
+           那时它还得工作。这不是冗余，是降级路径。
+
+         ★ 为什么转写落进输入框而不是直接上屏：
+           PRD §8.2 E3「转写文字允许用户编辑」——中文口音识别不准是已知的
+           （PRD R1）。让他能改，才是对的做法。而且改了直接点「我说完了」，
+           流程不多一层。 */
+      var SPEECH_OK = !!(window.Speech && window.Speech.supported());
+
+      /* 语音提示行：显示即自动消失的瞬时状态。 */
+      function noteSpeech(msg, ms) {
+        if (!el.recNote) return;
+        /* ★★ Day 23 第六次修订：**别把诊断信息冲掉**。
+           原来直接 `textContent = msg`，于是后来的提示
+           （「这句没听清」）会把之前打的诊断整行替换掉——
+           而那些诊断恰恰是排查「为什么不录音」的唯一线索。
+           实测：我加了诊断行还是查不出问题，因为每次都被覆盖，
+           最后只看到「这句没听清」这句最没用的。
+
+           现在：诊断信息**永远保留**，普通提示追加在后面。 */
+        var diag = el.recNote.textContent || '';
+        var isDiagOnly = diag.indexOf('【诊断】') === 0 &&
+                         diag.indexOf('　|　') === -1;
+        el.recNote.textContent = (isDiagOnly || !diag)
+          ? msg
+          : (diag + '　|　' + msg);
+        el.recNote.hidden = false;
+        if (noteSpeech._t) clearTimeout(noteSpeech._t);
+        if (ms !== 0) {
+          noteSpeech._t = setTimeout(function () {
+            /* ★ 到期只隐藏普通提示那部分，诊断行留着 ——
+               它是给人排查用的，不该跟着倒计时一起消失。 */
+            el.recNote.hidden = (el.recNote.textContent || '').indexOf('【诊断】') !== 0;
+          }, ms || 6000);
+        }
+      }
+
+      function clearSpeechNote() {
+        if (noteSpeech._t) { clearTimeout(noteSpeech._t); noteSpeech._t = null; }
+        if (el.recNote) { el.recNote.hidden = true; el.recNote.textContent = ''; }
+      }
+
+      /* ================= 诊断行（Day 23 第五次修订）=================
+         为什么加这个：用户报「完全没反应」时，最花时间的**不是修 bug，
+         是不知道卡在哪一步** —— 是不支持语音？是没麦克风？
+         是权限被拒？还是识别起来了但提交失败？四种情况的修法完全不同，
+         没有诊断就只能一轮轮问。
+
+         ★ 这一行是给「试的人」看的，不是给最终用户看的：
+           它常驻、不自动消失、信息密度高。
+           最终用户看到的是 degradeToText / noteSpeech 那两句人话。 */
+      function noteDiag(msg) {
+        if (!el.recNote) return;
+        var txt = '【诊断】' + msg;
+        /* 追加而不是覆盖：一次点「开始说话」要报好几项，
+           覆盖的话只剩最后一项，看不到前面的关键信息。 */
+        el.recNote.textContent = el.recNote.textContent
+          ? (el.recNote.textContent + '　|　' + txt)
+          : txt;
+        el.recNote.hidden = false;
+      }
+
+      /* 点「开始说话」时打一遍环境快照。
+         ★ 麦克风权限**真的去问一次** —— 这是唯一能确认
+           「浏览器到底给不给」的办法，光看 API 存在没用。 */
+      function diagnose() {
+        if (!el.recNote) return;
+        var supported = !!(window.Speech && window.Speech.supported());
+        var canSpeak = !!(window.Speech && window.Speech.canSpeak());
+        var secure = (location.protocol === 'https:' ||
+                      location.hostname === 'localhost' ||
+                      location.hostname === '127.0.0.1');
+        noteDiag(
+          '支持语音=' + (supported ? '是' : '否') +
+          '｜能朗读=' + (canSpeak ? '是' : '否') +
+          '｜安全来源=' + (secure ? '是' : '否') +
+          '｜后端=' + (window.Api ? '就绪' : '未加载')
+        );
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          noteDiag('这个浏览器没有麦克风接口（device=无）');
+          return;
+        }
+        /* 不 await：诊断不能挡住对话流程。 */
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(function (stream) {
+            noteDiag('麦克风=已允许');
+            /* 拿到就立刻关掉：这里只要「准不准」这个信息。 */
+            if (stream && stream.getTracks) {
+              stream.getTracks().forEach(function (t) { t.stop(); });
+            }
+          })
+          .catch(function (err) {
+            var n = (err && err.name) || 'UNKNOWN';
+            noteDiag('麦克风=' + n +
+              (n === 'NotAllowedError'
+                ? '（浏览器拒绝了：地址栏右侧小锁 → 麦克风 → 允许）'
+                : '（没有设备，或被微信/钉钉等程序占用）'));
+          });
+      }
+
+      /* 浏览器不支持：说清楚 + 保留打字能力。
+         ★ 不能静默降级 —— 用户会以为麦克风坏了。 */
+      function degradeToText(why) {
+        SPEECH_OK = false;
+        noteSpeech(why + '先在下面的框里写下你说的话，效果一样。', 0);
+        /* 按钮文案改掉「说话」两个字：它现在不录音了，
+           还写「开始说话」就是又一次误导（同Day 23 开头那个问题）。 */
+        el.btnTalk.textContent = '开始练习';
+      }
+
+      /* ---------- 识别 → 提交 ---------- */
+      /* 转写完成后**不直接提交**，而是填进输入框 + 自动提交。
+         为什么自动提交而不是等你点：
+           语音的交互节奏是「说完→等回应」，中间插一个「点我说完了」
+           会把语音的优势全丢掉（那正是你今天遇到的问题）。
+         为什么仍然填进输入框：
+           E3 —— 识别错了你要能改；而且填进去之后，
+           即使识别失败，页面也留得住你这句话。 */
+      /* Day 23 第七次修订：改名 onSpeechFinal → onSpeechResult。
+         「final」是浏览器识别才有的概念（interim/final），
+         换成服务端识别后没有中间结果了，叫 final 会误导。 */
+      function onSpeechResult(text) {
+        if (!text || !text.trim()) return;
+        el.sayInput.value = text.trim();
+        updateCount();
+        /* 焦点进框：让用户能立刻改（E3），也让
+           userIsTyping() 判true —— AI 不会在这期间催他。 */
+        focusComposer();
+        el.sayInput.focus();
+        /* 触发提交走同一个入口，不要另写一份提交逻辑 ——
+           两条路必须行为一致（入队、计数、转写、焦点处理全一样）。 */
+        submitSpeech();
+
+        /* ★★ Day 23 第四次修订：提交后**立刻**恢复识别。
+           为什么要这一句：AI 回话要3–8 秒，这几秒里用户很可能已经在说
+           下一句了（真人对话就是这样）。不重启的话，那几秒说的话会被丢掉 ——
+           而且是**静默丢掉**，用户根本不知道。
+
+           为什么不会和AI 的朗读撞上：
+             startListening 内部有 `if (speaking) return 'busy-speaking'`
+             —— AI 正在朗读时它不启动，不会把AI 的声音当成用户输入。
+             等朗读结束那侧还会再调一次（见 speakAiLine），两边不冲突。 */
+        if (SPEECH_OK && state === 'recording') {
+          window.Speech.startListening();
+        }
+      }
+
+      /* 复用一个已有的提交按钮，避免「两条路径行为不一致」。 */
+      function submitSpeech() {
+        var form = document.getElementById('composer');
+        if (!form) return;
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          /* 老浏览器没有 requestSubmit：造一个 submit 事件。
+             ★ 要 cancelable，否则 submit 处理器里的 e.preventDefault()
+               在合成事件上可能不生效。 */
+          form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+      }
+
+      /* 把 speech.js 的回调接到页面
+         ★ Day 23 第七次修订：识别方案从「浏览器原生」换成「录音上传」，
+           所以这一整套回调**重写了**。对照关系：
+             ~~onInterim~~  →  onVolume（浏览器不再返回中间结果，只能看音量）
+             ~~onQuieting~~  →  onStateChange('transcribing')（录音结束、正在上传）
+             ~~onFinal~~     →  onResult
+             ~~onEmpty~~     →  onEmpty（不变）
+             ~~onError~~     →  onError（错误码换了，去掉 aborted/no-speech）
+
+           ★ 为什么「浏览器识别」这条路整个换掉：
+             Chrome 的 SpeechRecognition **不是本地识别**，它把录音传到
+             Google 的服务器去识别，国内访问不通就一直等（真机报 network）。
+             这不是代码问题，继续调参数没有用。 */
+      function bindSpeech() {
+        if (!window.Speech) return;
+
+        /* 音量：让用户看到「麦克风真的在收你的声音」——
+           换成服务端识别后没有中间结果了，这行是唯一的实时反馈。
+           ★ 为什么用音量条而不是文字：服务端识别拿到的是整句，
+             「正在听：xxx」这种实时的半句话已经没有了。 */
+        window.Speech.on('onVolume', function (level) {
+          if (!el.recMeter) return;
+          var pct = Math.min(100, Math.round(level * 600));
+          el.recMeter.style.width = pct + '%';
+          el.recMeter.style.opacity = pct > 0 ? '1' : '0.25';
+          if (el.recText) {
+            if (pct < 4) el.recText.textContent = '等你开口……';
+            else el.recText.textContent = '正在听……（说完停一下就好）';
+          }
+        });
+
+        /* 录音态变化：'recording' / 'transcribing' / 'idle' */
+        window.Speech.on('onStateChange', function (st) {
+          if (st === 'transcribing') {
+            /* ★ 这一句很重要：上传 + 腾讯云识别要 1–3 秒，
+               不说的话用户看到「停住了，什么都没发生」，
+               会以为又不灵了，然后重复说话 → 被当成两句。 */
+            if (el.recText) el.recText.textContent = '听到了，正在识别……';
+            noteSpeech('听到了，正在识别（第一次会稍慢一点）。', 3000);
+          } else if (st === 'idle') {
+            if (el.recMeter) { el.recMeter.style.width = '0'; el.recMeter.style.opacity = '0'; }
+          } else if (st === 'recording') {
+            if (el.recText) el.recText.textContent = '正在听……（说完停一下就好）';
+          }
+        });
+
+        /* 转写完成 → 走提交 */
+        window.Speech.on('onResult', onSpeechResult);
+
+        /* 没听清：重开录音，用户不需要做任何事 */
+        window.Speech.on('onEmpty', function () {
+          noteSpeech('这句没听清，再说一次好吗。', 4000);
+          if (el.recText) el.recText.textContent = '等你开口……';
+          if (SPEECH_OK && state === 'recording') {
+            window.Speech.startListening();
+          }
+        });
+
+        /* 错误（E1 麦克风未授权、密钥没配、网络不通等） */
+        window.Speech.on('onError', function (code) {
+          if (code === 'not-allowed' || code === 'denied') {
+            degradeToText('麦克风没有授权。请点浏览器地址栏的小锁允许使用麦克风。');
+          } else if (code === 'audio-capture' || code === 'mic-failed') {
+            degradeToText('找不到麦克风（可能正被微信/钉钉等程序占用）。');
+          } else if (code === 'no-api') {
+            degradeToText('语音接口没接上，先打字也一样。');
+          } else if (code === 'no-supported-format' ||
+                     code === 'recorder-init-failed') {
+            /* ★ 格式不支持：不是浏览器不支持语音，是它录音的格式
+               腾讯云不收（Chrome 默认 webm，腾讯云只收 m4a/mp3/wav 等）。 */
+            degradeToText('这个浏览器录音格式不支持语音识别，先用文字。');
+          } else if (code === 'ASR_NOT_CONFIGURED') {
+            degradeToText('语音识别服务还没配好（缺密钥），先用文字。');
+          } else if (code === 'ASR_AUTH_FAILED') {
+            degradeToText('语音识别密钥无效，先用文字。');
+          } else if (code === 'ASR_BAD_AUDIO') {
+            noteSpeech('音频格式识别不了，先用文字。', 5000);
+          } else if (code === 'ASR_RATE_LIMITED') {
+            noteSpeech('识别请求太频繁，慢一点再试。', 5000);
+          } else if (code === 'ASR_TIMEOUT' || code === 'ASR_UNREACHABLE') {
+            noteSpeech('识别服务连不上或超时，检查网络后重试。', 5000);
+          } else if (code === 'HTTP_404' || code === 'HTTP_501' ||
+                     code === 'HTTP_404_NOT_JSON') {
+            /*★ 404/501 在这里几乎总是「云函数还没部署」或「网关路由没加」，
+              跟用户没关系 —— 页面不该让他以为是自己操作错了。 */
+            noteSpeech('语音接口还没部署好（服务端问题），先用文字。', 6000);
+          } else {
+            noteSpeech('语音识别暂时用不了，先在下面的框里写下你说的话。', 6000);
+          }
+          noteDiag('语音失败：' + code);
+        });
+
+        /* 跳过朗读：AI 开口时想让它闭嘴就点它。 */
+        if (el.btnSkipSpeech) {
+          el.btnSkipSpeech.addEventListener('click', function () {
+            window.Speech.stopSpeaking();
+            if (el.btnSkipSpeech) el.btnSkipSpeech.hidden = true;
+            if (SPEECH_OK && state === 'recording') {
+              window.Speech.startListening();
+            }
+          });
+        }
+      }
+
+      /* AI 上屏后朗读一句。
+         ★ 朗读失败（E10）不阻塞：文字照常显示，只是没有声音。 */
+      function speakAiLine(text) {
+        /* ★★ Day 23 第四次修订：**不能因为不能朗读就不重启识别**。
+           原写法是`if (!canSpeak()) return;` —— 于是「没有语音合成能力」
+           这条路径上，识别永远不再重启：用户能听到第一句，之后说的一律
+           没反应。这与「朗读失败」是**两件独立的事**，
+           把它们绑在一起会让「没声音」变成「没法说话」。
+
+           正确做法：没有朗读能力也要回到「在听你说话」——
+           语音形态下的常态是「轮到你了」，朗读只是附加的。 */
+        if (!window.Speech || !text) return;
+        if (!window.Speech.canSpeak()) {
+          /* 浏览器没有语音合成：文字照常，识别继续。 */
+          if (SPEECH_OK && state === 'recording') window.Speech.startListening();
+          return;
+        }
+        window.Speech.speak(text).then(function (ok) {
+          if (el.btnSkipSpeech) el.btnSkipSpeech.hidden = true;
+          if (!ok) {
+            noteSpeech('这遍没有声音，看文字也一样。（朗读功能不可用）', 5000);
+          }
+          /* 读完回到「在听你说话」——语音形态下这才是常态。 */
+          if (SPEECH_OK && state === 'recording') {
+            window.Speech.startListening();
+          }
+        });
+        if (el.btnSkipSpeech) el.btnSkipSpeech.hidden = false;
+      }
+
+      /* ---------- 「正在组织语言」的三道闸（Day 23 二次修订）----------
+         userIsTyping() 改成看焦点之后，就得让焦点真的待在输入框里 ——
+         否则那道判断形同虚设（光标在别处，它永远返回 false）。
+         三处配套：
+           ① 开始说话 / 暂停后继续 → 主动把焦点放进输入框
+             （用户点「继续」的意图就是「我要说了」）
+           ② 提交之后 → 焦点**留在**输入框
+             （点「我说完了」按钮会把手柄带走；不拉回来，
+               用户正在想下一句时页面以为他没在说话）
+           ③ 输入框 focus / input / blur 三个事件直接驱动计时器：
+             一开始打字就取消已排定的催话；离开输入框才重新起算。
+
+         ★ 为什么 ② 特别重要：它同时解决了「提交后 8 秒被催」
+           和「点继续后 8 秒被催」两个场景 —— 用户在按钮上点了提交，
+           光标被按钮带走，接下来 8 秒他都在想措辞，而页面判他「没在说话」。
+           这是上一版剩下最大的一处漏洞。 */
+      function focusComposer() {
+        if (!el.sayInput) return;
+        try { el.sayInput.focus({ preventScroll: true }); }
+        catch (e) { el.sayInput.focus(); }   // 老浏览器不支持 options 对象
+      }
+
+      function bindGuards() {
+        if (!el.sayInput) return;
+
+        /* 焦点进来 = 他打算说话 → 立刻取消催话。
+           这一条覆盖了「还没落字就在想措辞」那段最容易被抢走的时间。 */
+        el.sayInput.addEventListener('focus', function () {
+          if (state === 'recording') clearSilence();
+        });
+
+        /* 开始打字 → 取消催话。
+           ★ 不在这里重新起算：他手还在键盘上，起算等于又开始数他打字的时间。
+             真正的「说完停手了」由 blur 或提交后重新判断。 */
+        el.sayInput.addEventListener('input', function () {
+          if (state === 'recording') clearSilence();
+        });
+
+        /* 焦点离开（点别处 / 切标签页）→ 他不打算说了，重新给一轮倒计时。
+           不这么做的话：他点完提交顺手点了个别处，AI 就再也不开口了
+           （因为最后一次 clearSilence 之后再没人 arm 过）。 */
+        el.sayInput.addEventListener('blur', function () {
+          // 有内容说明他还在写，只是点了别处 —— 不催
+          if (state === 'recording' && !userIsTyping()) armSilence();
+        });
+      }
+
       // ---------- 事件 ----------
       // 开始说话：本轮正式起步，起表。
       // 轮次不在这里 +1 —— 轮次表示「这个主题练过几次」，由「结束对话」完成一轮时才累加。
       el.btnTalk.addEventListener('click', function () {
         state = 'recording';
+        /* ★ Day 23：每开一场对话都从「还没开口」重新起算。
+           不重置的话，上一场说过话的光球文案（「我在听，接着说」）
+           会带进这一场 —— 而这一场其实还没轮到用户开口。 */
+        hasUserSpoken = false;
+        pendingQueue.length = 0;
+        renderQueue();
         render();
         startTimer();
 
-        /* 谁先开口，两种模式不同（见文件开头 isFree 那段）：
+        /* 谁先开口，两种模式不同（见文件开头isFree 那段）：
              8 个职场主题 —— 场景本身就是"被同事 / 上司当场问到"，
                              所以一进来由对方说第一句（topics.json 的 opening）
              自由对话     —— **不先说话**。PRD.md §6.6 的规则是"点开始后
                              5 秒内用户没说话，AI 才先开口"，
-                             这里只把沉默计时挂上，让 opening 在第 5 秒出现 */
+                             这里只把沉默计时挂上，让 opening 在第 5 秒出现
+
+         ★ Day 23 二次修订：最后把焦点放进输入框。
+           8 主题这条路径之前有个隐蔽漏洞：开场白说完 → armSilence，
+           而这时焦点还停在「开始说话」按钮上 → userIsTyping() 返回 false
+           → 用户正打算开口就被排上了倒计时。
+           焦点进框之后，那 8 秒从他准备好说话的那一刻才开始算。 */
+        focusComposer();
         if (isFree) armSilence();
         else aiSay('open', 0);
+
+        /* ★ Day 23：语音识别在这之后启动。
+           为什么放在最后：开场白可能立刻就要发出去（8 主题），
+           而 speakAiLine 里的 startListening 会等朗读结束才真正开始听 ——
+           顺序对了就不会出现「AI 的话被当成你说的话」。
+           ★ 识别不支持时不报错，页面继续用打字（降级）。 */
+        if (SPEECH_OK) {
+          /* ★★ 兜底：startListening 返回的是一个 Promise，
+             它 resolve 的字符串才是**真实结果**（'ok' / 'denied' /
+             'unsupported' / 'start-failed'…）。
+             ★ 我原来的写法是「调了就不管」—— 万一它 resolve 成
+               'denied'，页面依然一声不吭（用户报「完全没反应」）。
+               现在把结果接过来：不是 'ok' 就明确说出来。
+               这一层是防「钩子漏掉」，属于最后一道保险。 */
+          window.Speech.startListening().then(function (r) {
+            if (r && r !== 'ok' && r !== 'already' && r !== 'busy-speaking') {
+              if (r === 'unsupported') {
+                degradeToText('这个浏览器不支持语音识别。');
+              } else if (r === 'denied') {
+                degradeToText('麦克风没有授权。请点浏览器地址栏的小锁允许使用麦克风。');
+              } else if (r === 'error') {
+                degradeToText('麦克风打不开（可能没设备或被别的程序占用）。');
+              }
+              noteDiag('启动结果=' + r);
+            } else {
+              noteDiag('语音已启动');
+            }
+          });
+        } else {
+          noteSpeech('这个浏览器不支持语音识别，用下面的框写字也一样。', 0);
+        }
+        /* ★ Day 23 第五次修订：开跑前先报一遍环境。
+           用户报「完全没反应」时，这一行能直接告诉我们在哪一步卡住，
+           不用再来回问。 */
+        diagnose();
       });
 
       // 暂停 / 继续：只切换计时，不改轮次
@@ -662,11 +1311,32 @@
           state = 'paused';
           stopTimer();
           clearSilence();     // 停表就连沉默一起停，别在暂停里冒出 AI 的一句
+          /* ★ Day 23：暂停 = 别再听我说话了。
+             不停的话你在暂停状态讲话，识别照样在转、转完还会自动提交——
+             「暂停」就名存实亡了。 */
+          if (SPEECH_OK) window.Speech.stopListening();
         } else if (state === 'paused') {
           state = 'recording';
           startTimer();
-          armSilence();       // 接着算：用户还没说话，AI 仍然会递话
+          /* ★ Day 23：继续后先把排队的处理掉。
+             暂停前用户可能攒了几句在队列里，那些话他已经在记录区看得见，
+             但还没得到回应 —— 继续对话就该先补上，不能装作没发生。
+             队列不空就先 pump，armSilence 自己会在队列非空时直接返回。 */
+          if (pendingQueue.length) {
+            pumpQueue();
+          } else {
+            armSilence();     // 接着算：用户还没说话，AI 仍然会递话
+          }
+          /* 继续 = 再听。放在 pumpQueue 之后：
+             若先启动识别，而 AI 正好要开口，识别会把 AI 的话当成用户的。 */
+          if (SPEECH_OK) window.Speech.startListening();
         }
+        /* ★ Day 23 二次修订：把焦点交回输入框。
+           点「继续」的意图就是「我要接着说了」，但点按钮会把手柄带走 ——
+           不拉回来的话，armSilence 刚排上 8 秒，用户还在想措辞就被催。
+           必须放在 armSilence **之后**：focus 事件会 clearSilence，
+           顺序反了会把刚排好的计时器清掉、倒计时再也不走。 */
+        focusComposer();
         render();
       });
 
@@ -679,6 +1349,18 @@
            还可能弹出一句迟到的 AI 台词（用户已经按了结束）。 */
         clearSilence();
         if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+        /* ★ Day 23：结束对话必须把麦克风和朗读都关掉。
+           漏掉任一个都会出事：
+             漏识别 → 页面已经在跳了，麦克风还在听，
+                      下一句你说的话会被记进这场已经结束的对话
+             漏朗读 → 跳转之后还在念上一句，用户以为页面出问题了
+           这两个都必须在 location.href **之前**做——
+           跳转之后代码就不会执行了。 */
+        if (window.Speech) {
+          window.Speech.stopListening();
+          window.Speech.stopSpeaking();
+        }
+        if (el.btnSkipSpeech) el.btnSkipSpeech.hidden = true;
         if (window.Storage && topicId && state !== 'idle') {
           rounds = window.Storage.bumpPracticeCount(topicId);
         }
@@ -707,24 +1389,60 @@
       });
 
       /* 提交一句发言（Day 14 · F6 第 3 步）。
-         本期用文本框代替开口（PRD.md §6.6 边界与约定）；接入语音识别后
-         内容来源改成转写结果，这里一行都不用动。
-         顺序是刻意的：先让用户的话出现在记录区，再让 AI 延迟一点回应 ——
-         反过来会变成 AI 抢在用户前面说话。 */
+         ★ Day 23：原注释写的「本期用文本框代替开口，接入语音识别后这里一行都不用动」
+           —— 语音已经接上了，**它确实一行都没改**：
+           speech.js 把转写填进同一个输入框，再触发同一个 submit。
+           这就是当初那个设计换来的好处。
+顺序是刻意的：先让用户的话出现在记录区，再让 AI 延迟一点回应 ——
+         反过来会变成 AI 抢在用户前面说话。
+
+         ★ Day 23 修订：**不再丢用户说的话**。
+           改之前第 3 行是 `if (CHAT_BUSY) return;` —— AI 等后端那3–8 秒里
+           点提交，这一句被静默扔掉：不上屏、不清空、没提示。
+           用户以为是自己没点到，反复点、反复被吞，这就是同伴说的
+           「他没办法说话」里最直接的那一条。
+           现在：先上屏（用户立刻看到自己说过了），再入队，
+           AI 空闲时按顺序回应，队列长度显示在按钮上方。 */
       el.composer.addEventListener('submit', function (e) {
         e.preventDefault();
         var text = (el.sayInput.value || '').trim();
         if (!text) return;               // 空的一句不算发言，也不重置沉默计时
-        if (CHAT_BUSY) return;           // AI 还在回上一句，不连着发
 
         clearSilence();                  // 用户开口了，沉默计时停
         appendLine('user', text);
         turns += 1;
+        hasUserSpoken = true;
         updateCount();
         el.sayInput.value = '';
+
         /* ★ userText 传下去：模型要看到用户**这一句**才谈得上「接话」。
            不传的话它只能泛泛追问，那和固定句库就没区别了。 */
-        aiSay('reply', AI_DELAY_MS, { userText: text });
+        if (CHAT_BUSY) {
+          /* AI 还在回上一句 → 排队，不打断它。
+             为什么不当成「连续说话」把两句合并发一次：
+             模型看到 user/assistant/user/assistant 的历史，
+             只会把后一句当成对前一句的补充，而用户很可能
+             说的是**另一个意思**（A2 水平的人常这样）。分开回更安全。 */
+          pendingQueue.push(text);
+          renderQueue();
+          // 排队中不给 aiSay 加延迟：AI 是空出来的才轮到它，延迟只会让人多等
+        } else {
+          aiSay('reply', AI_DELAY_MS, { userText: text });
+        }
+
+        /* ★★ Day 23 二次修订：焦点**留在**输入框，不要留在按钮上。
+           这是上一版剩下最大的一处漏洞，场景极常见：
+           点「我说完了」→ 焦点被按钮带走 → AI 回应完armSilence 排上 8 秒
+           → 用户这时正在想下一句怎么措辞，但焦点不在框里
+           → userIsTyping() 判false → 8 秒后又被插一句。
+
+           ★ 注意这里不要手动调armSilence：
+             focusComposer 会触发 focus 事件，那个事件会 clearSilence ——
+             结果是「本来该给的一轮倒计时被清掉了」，
+             于是 blur 之前 AI 永远不开口（那比插嘴更糟）。
+             此刻焦点已回框，userIsTyping() 返回 true 是**正确的**：
+             他确实还在准备说。等他说完、焦点离开，blur 再起算。 */
+        focusComposer();
       });
 
       // ---------- 主题名、职场角色、AI 台词池 ----------
@@ -784,6 +1502,21 @@
             // 池子取不到就靠 takeLine() 的兜底（TECH_DESIGN.md §8.2 E12）
           });
       }
+
+      /* ★ Day 23：把语音接上（识别回调 + 跳过朗读按钮）。
+         必须放在最后 —— 它要用到 el.recNote / el.btnSkipSpeech，
+         而那些元素在本函数之前都已挂到 el 上。
+
+         ★★ Day 23 第四次修订：把 bindSpeech 挂到 window.__rebind 上。
+           为什么要暴露这个钩子：无头实测里要往window.Speech 注入假对象，
+           而页面脚本早已跑完、回调挂在了真 Speech 上 → 换成假的之后回调就丢了。
+           有了这个钩子，测试能重新接线，不必改被测代码。 */
+      bindSpeech();
+      window.__rebind = bindSpeech;
+
+      /* ★ Day 23 二次修订：把三道闸挂上（focus / input / blur）。
+         必须在函数定义之后、首次 render 之前调用。 */
+      bindGuards();
 
       updateCount();
       render();

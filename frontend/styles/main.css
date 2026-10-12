@@ -1621,6 +1621,103 @@ body::before {
   display: flex;
   align-items: flex-end;
   gap: var(--space-3);
+  /* 允许换行：排队提示要独占一行（下面用 flex-basis: 100% 强制） */
+  flex-wrap: wrap;
+}
+
+/* 隐私告知（Day 23 第七次修订 · 语音改走腾讯云）。
+   ★ 为什么用警示色：这不是错误，也不是警告，而是**用户有权知道的事实**——
+     录音离开设备。用 --text-muted 的灰字会被当成脚注，
+     而这件事必须被看见。
+   ★ 但也不能用珊瑚（那是珊瑚=警示的族色，PRD 视觉规范里专管失败/偏题）——
+     所以用 --primary-deep（蜜橘深档），它是「说明」而非「出事了」。 */
+.privacy-note {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--primary-deep);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.privacy-note b {
+  font-weight: 500;      /* 全站只用400/500 两个字重 */
+}
+
+/* 音量条（Day 23 第七次修订）。
+   ★ 为什么需要它：识别换成服务端之后，浏览器不再返回中间结果，
+     所以「正在听：xxx」那种实时文字没有了。用户判断
+     「麦克风到底有没有在收我的声音」只剩这一个依据 ——
+     没有它，用户只能凭猜，而猜错一次就放弃了。
+
+   为什么用 --primary（蜜橘）而不是绿色或蓝色：
+     它是「A 组（会议上）」的族色，而这个录音条属于通用控件；
+     用珊瑚会误读成警示（那是降级提示才用的）。 */
+.rec-meter {
+  height: 6px;                     /* 细条：它只是辅助信息，不该抢戏 */
+  margin-top: var(--space-2);
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  position: relative;
+}
+
+/* 真正随音量变化的那一段。
+   ★ 为什么用 ::after 而不直接改 .rec-meter 的 width：
+     父元素要留住轨道底色（让用户看得出「总共多宽」），
+     子元素只负责「现在到哪」。这是两种不同的信息，不能合并。 */
+.rec-meter::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;               /* 用 inset 简写，不必写四条 */
+  width: 0;                        /* 初始宽度，由 JS 实时改 */
+  background: var(--primary);
+  border-radius: 3px;
+  opacity: 0.25;                   /* 没声音时淡一点，别像坏了 */
+  transition: width 80ms linear;   /* ★ 80ms：跟得上说话，又不抖 */
+}
+
+/* 语音提示行（Day 23）。
+   为什么用 --primary-deep（蜜橘深档）而不是 --accent-deep：
+   这条提示的性质是「现在需要你做一件事」（授权麦克风 / 没听清 / 换用打字），
+   偏「指引」；而 .queue-note 说的是「你的话已经存下了」，
+   偏「状态告知」。两者都 不是错误，用珊瑚（警示）都过重。
+   ★ 但一旦降级为「用打字」，这件事是**需要用户改习惯**的，
+     所以那一条由 JS 换成更长的说明文字，颜色仍保持可读（非错误态）。 */
+.rec-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--primary-deep);
+}
+
+/* 「跳过朗读」按钮（Day 23）。
+   为什么不用 .link（那个样式是纯文字链）：
+   它是一个**当场要按的动作**，需要看得见、点得准，
+   文字链的点击区太小（且已达44px 触控下限附近）。
+   但它也不该抢主操作「开始说话」的视觉重量 —— 用次级按钮样式。 */
+#btn-skip-speech {
+  min-height: 44px;              /* 触控目标下限（PRD §4.4） */
+}
+   为什么用 --accent-deep 而不是 --text-muted：
+   它不是一句中性说明，是「你的话已经进去了、AI 正在回上一句」
+   的**状态告知** —— 用 tertiary 的灰字会被当成不重要的注释，
+   而这恰好是同伴反馈里最缺的那点确定性（「我说了，它收到了吗」）。
+   珊瑚族是警示色，这里不是警示，所以走 accent 档而不是 coral。 */
+/* 排队提示（Day 23）。
+   为什么用 --accent-deep 而不是 --text-muted：
+   它不是一句中性说明，是「你的话已经进去了、AI 正在回上一句」
+   的**状态告知** —— 用 tertiary 的灰字会被当成不重要的注释，
+   而这恰好是同伴反馈里最缺的那点确定性（「我说了，它收到了吗」）。
+   珊瑚族是警示色，这里不是警示，所以走 accent 档而不是 coral。 */
+.queue-note {
+  flex: 0 0 100%;          /* 独占一行，不挤到输入框旁边 */
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--accent-deep);
 }
 
 .say-input {

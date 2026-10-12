@@ -50,6 +50,16 @@
       "timeout": 60,
       "memorySize": 256,
       "installDependency": true
+    },
+    {
+      "name": "speech",
+      "type": "HTTP",
+      "dir": "./cloudfunctions/speech",
+      "runtime": "Nodejs20.19",
+      "description": "Speech-to-text via Tencent Cloud ASR. Browser SpeechRecognition is unusable in mainland China (it uploads audio to Google servers). Audio leaves the device for Tencent Cloud, never stored. Secrets: ASR_SECRET_ID / ASR_SECRET_KEY / ASR_APPID",
+      "timeout": 30,
+      "memorySize": 256,
+      "installDependency": true
     }
   ],
   "hosting": [
@@ -85,6 +95,11 @@
       {
         "path": "/api/chat",
         "target": "function:chat",
+        "enablePathTransmission": true
+      },
+      {
+        "path": "/api/speech-to-text",
+        "target": "function:speech",
         "enablePathTransmission": true
       },
       {

@@ -1,0 +1,11 @@
+{
+  "name": "speech",
+  "version": "1.0.0",
+  "description": "POST /api/speech-to-text —— 服务端语音转写（Day 23）。浏览器原生 SpeechRecognition 在国内走不通（Chrome 要联 Google 服务器），改由腾讯云一句话识别。密钥只从环境变量读",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -458,6 +458,86 @@ return {
     });
   }
 
+  /* ---------- POST /api/speech-to-text（Day 23）----------
+     把一段录音送去转成文字。
+
+     ★★ 为什么要有这个（不是「想加个功能」，是被逼出来的）：
+       初版用浏览器原生 SpeechRecognition，真机一试就报 network——
+       **Chrome 的语音识别不是本地的**，它把录音上传到 Google 的服务器
+       去识别，国内访问不通就一直等。
+       ★ `TECH_DESIGN.md:107` 早就写明了这一条（"Chrome 上还依赖网络"），
+         `:139` 留了后路（Q-T1），`docs/api-contract.md §5`
+         把接口位置也预留好了 —— 现在就是那个触发时。
+
+     ★ 为什么单独写一个发送函数、**不复用 sendWithTimeout**：
+       那个函数把 body 一律 `JSON.stringify`，而音频是 Blob。
+       硬塞进去会变成 "[object Blob]" 发出去，云函数收到一坨文本。
+       —— 「发送层按内容类型分家」比「加个 if 判断」清楚。
+
+     ★ Content-Type 用**录音自己的类型**（audio/mp4 等）：
+       腾讯云按 content-type 判断音频格式，传错会直接报错。
+       ⚠️ 不要写成 application/octet-stream —— 云函数侧
+       voiceFormatOf() 的映射就靠它。
+
+     ★ 超时给 30 秒：上传 + 腾讯云识别 + 回程。
+       比 chat 短（不用等模型生成），但比读库长得多。 */
+  function speechToText(blob) {
+    var url = buildUrl('/api/speech-to-text');
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 30000) : null;
+
+    var opt = {
+      method: 'POST',
+      headers: {
+        'Content-Type': (blob && blob.type) ? blob.type : 'audio/mp4',
+        'Accept': 'application/json'
+      },
+      body: blob
+    };
+    if (controller) opt.signal = controller.signal;
+
+    return fetch(url, opt).then(function (res) {
+      return res.text().then(function (txt) {
+        var body = null;
+        try { body = JSON.parse(txt); } catch (e) {}
+
+        /* ★ 错误分类顺序与 sendWithTimeout 完全一致：
+           **先看 body.error.code**，没有才按 HTTP 状态码判。
+           反了就成 —— 契约 §1.2 规定业务失败是 200 + ok:false，
+           而 ASR_NOT_CONFIGURED 这类也是 200，
+           只看 res.ok 会把「没配密钥」说成「成功但没结果」。 */
+        if (body && body.ok === false && body.error && body.error.code) {
+          var be = new Error(body.error.message || '语音识别失败');
+          be.code = body.error.code;
+          be.httpStatus = res.status;
+          throw be;
+        }
+        if (!res.ok || !body) {
+          var e2 = new Error(body ? '' :
+            'HTTP ' + res.status + '（返回的不是 JSON，多半是路由没配上）');
+          e2.code = 'HTTP_' + res.status;
+          throw e2;
+        }
+        if (body.ok !== true) {
+          var e3 = new Error((body.error && body.error.message) || '语音识别失败');
+          e3.code = (body.error && body.error.code) || 'UNKNOWN';
+          throw e3;
+        }
+        var d = body.data || {};
+        /* ★ 转写为空**不算失败**：
+           腾讯云对「只有静音的音频」会正常返回空字符串。
+           那属于「没听清」，不是故障 —— 由页面走重说提示。 */
+        return {
+          text: d.text || '',
+          engine: d.engine || '',
+          reason: d.reason || ''
+        };
+      });
+    }).finally(function () {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
   /* ---------- PATCH /api/sessions/write（Day 22）----------
      改一条 item 的**备注**与**收藏标记**（api-contract §4.2）。
 
@@ -553,6 +633,7 @@ return {
     getSessionsOrLocal: getSessionsOrLocal,
     getFavoritesOrLocal: getFavoritesOrLocal,
     chat: chat,
+    speechToText: speechToText,
     analyze: analyze,
     analyzeOrLocal: analyzeOrLocal,
     writeSession: writeSession,
