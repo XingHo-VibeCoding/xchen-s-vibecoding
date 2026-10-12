@@ -1,6 +1,14 @@
 # ===== 环境变量与密钥（绝对不能上传）=====
 .env
 .env.*
+# ★ 例外：.env.example 要进仓库（Day 23）。
+#   上面第 3 行的 `.env.*` 会把它一起吃掉 —— 通配符不区分
+#   `.env.production`（真配置，要挡）和 `.env.example`（只有键名的模板，要留）。
+#   ★ git 只认**最后一条**匹配规则，所以这条例外必须写在第 3 行**之后**，
+#     挪到前面无效（Day 12 的 .workbuddy 已经踩过同一件事，notes 里有记）。
+#     写 .env.example 而不是 .env.sample / .env.template —— 只有这一个例外，
+#     别扩成通配，否则将来真有 .env.template.local 时会被顺手放过。
+!.env.example
 *.env
 *.key
 *.pem

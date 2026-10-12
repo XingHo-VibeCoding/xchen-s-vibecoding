@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 23 · 三类错误提示对照</title>
+<style>
+  /* ★ 这页只服务于截图，所以刻意做得「一屏装得下」——
+     .wrap 的 max-width 与主站一致（1080，不是 1440，
+     否则右侧会空出 360px，见 MEMORY 里记过的截图坑）。 */
+  :root {
+    --cream: #FDFBF6;
+    --orange: #D97706;
+    --orange-deep: #9A4708;
+    --coral: #E8624A;
+    --coral-deep: #A83A23;
+    --teal: #0F7A6B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 40px;
+    background: var(--cream);
+    color: #2B2A26;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header { border-bottom: 2px solid #EFE7D8; padding-bottom: 16px; margin-bottom: 20px; }
+  h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: .5px; }
+  .sub { color: #6B6559; font-size: 14px; }
+  .verdict {
+    margin-top: 12px; padding: 8px 12px; background: #F1EDE2;
+    border-left: 4px solid var(--teal); border-radius: 4px;
+    font-size: 13px; color: #4A4640;
+  }
+
+  .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .dot.old { background: var(--coral); }
+  .dot.new { background: var(--teal); }
+
+  .demo-row {
+    background: #fff; border: 1px solid #EDE6D6; border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .demo-t { font-size: 16px; font-weight: 600; }
+  .demo-s { font-size: 12px; color: #8A8377; margin-bottom: 10px; }
+
+  .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .demo-cell { padding: 10px 12px; border-radius: 8px; }
+  .demo-cell.before { background: #FDF0ED; border-left: 4px solid var(--coral); }
+  .demo-cell.after  { background: #EAF6F4; border-left: 4px solid var(--teal); }
+  .demo-cap { font-size: 11px; color: #7A7365; margin-bottom: 6px; }
+  .demo-old { font-size: 14px; color: var(--coral-deep); word-break: break-all; }
+  .demo-new { font-size: 14px; color: var(--teal); font-weight: 600; }
+  .demo-code {
+    margin-top: 6px; font-size: 11px; color: #A09686;
+    font-family: Consolas, Monaco, monospace; word-break: break-all;
+  }
+  .demo-hint { margin-top: 8px; font-size: 13px; color: #5C574E; }
+
+  footer { margin-top: 20px; padding-top: 14px; border-top: 2px solid #EFE7D8;
+           font-size: 12px; color: #8A8377; }
+  footer code {
+    background: #F1EDE2; padding: 1px 5px; border-radius: 3px;
+    font-family: Consolas, Monaco, monospace;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Day 23 · 三类错误提示对照</h1>
+    <div class="sub">口语对话实战器 · 安全审计与错误处理</div>
+    <div class="verdict" id="verdict">加载中…</div>
+  </header>
+
+  <div class="legend">
+    <span><i class="dot old"></i>改前：英文错误码直接显示给用户</span>
+    <span><i class="dot new"></i>改后：中文人话 + 能做什么</span>
+  </div>
+
+  <div id="rows"></div>
+
+  <footer>
+    本页加载的是真实的 <code>frontend/js/api.js</code>，不是另写的文案副本 ——
+    截图里每一句都与线上页面显示的逐字相同。<br>
+    自查清单见 <code>docs/security-checklist.md</code>；
+    映射表单测 <code>node .test-friendly-message.js</code>（14 项全过）。
+  </footer>
+</div>
+
+<script src="../js/api.js"></script>
+<script src="../js/pages/day23-errors.js"></script>
+</body>
+</html>

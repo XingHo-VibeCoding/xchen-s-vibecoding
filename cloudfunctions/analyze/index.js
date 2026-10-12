@@ -100,8 +100,44 @@ function checkEnv() {
   return need.filter((k) => !process.env[k]);
 }
 
+/* ---------- 请求日志（Day 23 · 余力加练）---------- */
+/* 与 chat/index.js 的 logReq 逐字同形（只有前缀不同）。
+   ★ 为什么五个函数各存一份而不是抽公共模块：
+     CloudBase 云函数**没有共享模块机制**，每个函数独立部署，
+     仓库里也没有 build 步骤能替你合并（Day 19 已确认）。
+     所以「抽出来复用」在这里等于「复制五份」——
+     真要合并就得改部署方式，那是另一件事，不在今天的范围。
+   ★ 改这一份时必须同步另外四份（.test-request-log.js 里有检查钉住）。
+     不同步的症状：有的接口有日志、有的没有 —— 排查时会以为
+     「那个接口没被调用过」，而它其实调用了、只是没记。 */
+function logReq(res, httpStatus, body) {
+  try {
+    const req = res.req || {};
+    /* 时间用本地格式而不是 ISO：
+       ISO 的 'T' 和 'Z' 在 CloudBase 日志面板里不好读，
+       而排查时最常做的是「上一条是几点」这种时间上相邻的对比。 */
+    const t = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const method = req.method || '?';
+    /* 只取路径段，丢掉 query —— query 里可能带 topicId / itemId，
+       那属于业务数据，日志里没必要留（DAY23 安全要求：日志不记业务数据）。*/
+    const path = (req.url || '?').split('?')[0];
+    /* 结果只看「成功还是失败 + 错误码」，不打印 body.data ——
+       那是接口的返回内容，可能是整份转写。 */
+    const ok = body && body.ok === true;
+    const code = ok ? 'ok' : ((body && body.error && body.error.code) || '?');
+    console.log('[analyze] ' + t + ' ' + method + ' ' + path +
+      ' → ' + httpStatus + ' ' + code);
+  } catch (e) {
+    /*★ 日志失败绝不能影响请求：
+       写日志是为了排错，不是业务的一部分。
+       这行 catch 是为了「日志本身出异常时，用户的请求照样能返回」。 */
+  }
+}
+
+/* ---------- HTTP 响应 ---------- */
 /* ---------- HTTP 响应 ---------- */
 function sendJSON(res, httpStatus, body) {
+  logReq(res, httpStatus, body);
   res.writeHead(httpStatus, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store'

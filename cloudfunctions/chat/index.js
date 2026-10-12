@@ -79,7 +79,46 @@ function checkEnv() {
 }
 
 /* ---------- HTTP 响应 ---------- */
+/* ---------- 请求日志（Day 23 · 余力加练）---------- */
+/*只记「时间 / 方法+路径 / 结果」三样，不记请求体。
+ ★ 为什么不记请求体：body 里是用户的对话内容（还可能有个人信息），
+   打进日志等于在云端留一份没脱敏的用户数据，而且日志保留期通常长得多。
+   ★ 为什么加在 sendJSON 里而不是路由入口：
+     sendJSON 是**所有响应的唯一出口**（成功走 sendOK、失败走 sendError，
+     两条都汇到它）。改这一处五个函数各5 行就够；
+     写在路由入口则每个return 分支都要记得写一次，漏一处就少一条日志 ——
+     而「漏掉的那条」恰恰是出问题时最想看的那条。
+   ★ 怎么拿到路径：Node 里 res.req 就是产生这个 res 的请求对象
+     （标准别名，不用自己传 req 进来）。
+     ★ 这样 sendJSON 的签名不用改 —— 改签名要动全部调用点，
+       而调用点有二十几处（api-contract §4 里每条路由都可能提前 return）。 */
+function logReq(res, httpStatus, body) {
+  try {
+    const req = res.req || {};
+    /* 时间用本地格式而不是 ISO：
+       ISO 的 'T' 和 'Z' 在 CloudBase 日志面板里不好读，
+       而排查时最常做的是「上一条是几点」这种时间上相邻的对比。 */
+    const t = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const method = req.method || '?';
+    /* 只取路径段，丢掉 query —— query 里可能带 topicId / itemId，
+       那属于业务数据，日志里没必要留（DAY23 安全要求：日志不记业务数据）。*/
+    const path = (req.url || '?').split('?')[0];
+    /* 结果只看「成功还是失败 + 错误码」，不打印 body.data ——
+       那是接口的返回内容，可能是整份转写。 */
+    const ok = body && body.ok === true;
+    const code = ok ? 'ok' : ((body && body.error && body.error.code) || '?');
+    console.log('[chat] ' + t + ' ' + method + ' ' + path +
+      ' → ' + httpStatus + ' ' + code);
+  } catch (e) {
+    /*★ 日志失败绝不能影响请求：
+       写日志是为了排错，不是业务的一部分。
+       这行 catch 是为了「日志本身出异常时，用户的请求照样能返回」。 */
+  }
+}
+
+/* ---------- HTTP 响应 ---------- */
 function sendJSON(res, httpStatus, body) {
+  logReq(res, httpStatus, body);
   res.writeHead(httpStatus, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store'

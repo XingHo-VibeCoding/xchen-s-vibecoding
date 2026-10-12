@@ -105,9 +105,24 @@
     stampUpdated();
   }
 
+  /* ★ Day 23：检查台的失败提示也走中文人话了，但**错误码保留在括号里**。
+     为什么不把错误码删掉：检查台是**开发者工具**，它存在的意义就是
+     告诉你「哪一步坏了、错误码是什么」。
+     只显示「服务器出了点问题」反而丢了排查信息 ——
+     ★ 那正是 Day 23 之前的毛病：用户看不懂；
+       但对检查台来说，需要看得懂的人恰恰是开发者。
+     所以顺序是：**中文人话在前（说清能不能重试），错误码在后（给排查用）。 */
+  function friendlyOf(code, message) {
+    if (window.Api && window.Api.friendlyOf) {
+      return window.Api.friendlyOf({ code: code, message: message });
+    }
+    return message || '出了点问题，请再试一次';
+  }
+
   function renderHealthFail(code, message) {
     healthList.replaceChildren(statRow('状态', '不通'));
-    note(healthNote, '健康检查失败（错误码 ' + code + '）：' + message, true);
+    note(healthNote, friendlyOf(code, message) +
+      '（错误码 ' + code + '）', true);
   }
 
   function loadHealth() {
@@ -207,7 +222,8 @@
   function renderSessFail(code, message) {
     sessList.replaceChildren(statRow('状态', '读不到'));
     sessRows.replaceChildren();
-    note(sessNote, '读取失败（错误码 ' + code + '）：' + message +
+    note(sessNote, friendlyOf(code, message) +
+      '（错误码 ' + code + '）' +
       ' —— 页面显示 0 行不代表库里没有数据。', true);
   }
 
@@ -289,7 +305,8 @@
 
   function renderWriteFail(code, message) {
     writeHint.className = 'ic-hint';
-    writeHint.textContent = '写入失败（错误码 ' + code + '）：' + message;
+    writeHint.textContent = friendlyOf(code, message) +
+      '（错误码 ' + code + '）';
     note(writeNote, '接口返回了失败。没写进去 —— 库里行数不变。', true);
   }
 

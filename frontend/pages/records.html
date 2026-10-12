@@ -382,8 +382,14 @@
             return;
           }
 
+          /* ★ Day 23：原来这里是 '没能删掉：' + err.message ——
+             err.message 是接口层的原始原因，删一条不存在的条目时
+             它可能是 `HTTP 404` 或 `INTERNAL_ERROR`，用户看不懂。
+             现在走 Api.friendlyOf()拿中文人话。 */
           mockBar.textContent = '没能删掉：' +
-            (err && err.message ? err.message : '（未知原因）') +
+            ((window.Api && window.Api.friendlyOf)
+              ? window.Api.friendlyOf(err)
+              : (err && err.message ? err.message : '出了点问题，请再试一次')) +
             '　—— 这条记录还在，可以再试一次。';
           mockBar.classList.add('mock-bar-warn');
         });
@@ -511,7 +517,17 @@
             /* 后端读不到（DB_CONNECTION_REFUSED / 网络问题）→ 错误态。
                这一条现在**直接落到 renderError**，不再退回假条目。 */
             if (remoteFav && remoteFav.degraded) {
-              renderError(remoteFav.errorMessage || '', { code: remoteFav.errorCode });
+              /* ★ Day 23：原来直接传 errorMessage（接口层原始原因，
+                 可能是英文码），现在翻成中文人话。
+                 注意 getFavoritesOrLocal 挂在结果上的字段是
+                 errorCode / errorMessage，这里要拼成err 形状给
+                 friendlyOf ——它只读 .code 与 .message 两个键。 */
+              renderError(
+                (window.Api && window.Api.friendlyOf)
+                  ? window.Api.friendlyOf({ code: remoteFav.errorCode,
+                                            message: remoteFav.errorMessage })
+                  : (remoteFav.errorMessage || ''),
+                { code: remoteFav.errorCode });
               return;
             }
             if (!remoteFav) {
@@ -541,7 +557,11 @@
             mockBar.classList.remove('mock-bar-warn');
           })
           .catch(function (err) {
-            renderError(err && err.message ? err.message : '');
+            /* ★ Day 23：原来直接显示 err.message（英文码裸奔）。 */
+            renderError((window.Api && window.Api.friendlyOf)
+              ? window.Api.friendlyOf(err)
+              : (err && err.message ? err.message : ''),
+              { code: err && err.code });
           });
       }
 
@@ -597,12 +617,27 @@
            ② 其它异常（网络抖动、页面被双击打开）—— 重新加载有可能就好 */
       function renderError(detail, opts) {
         var o = opts || {};
-        var backendsDown = (o.code === 'DB_CONNECTION_REFUSED') || (o.code === 'DB_ERROR');
+        /* ★★ Day 23修一个静默失效的判断。
+           原来是 (o.code === 'DB_CONNECTION_REFUSED') || (o.code === 'DB_ERROR')，
+           而这两个码**Day 18 已经删掉了**（见 api-contract §1.4 的删除说明）
+           —— 代码里现在实际发的是 DB_QUERY_FAILED / DB_AUTH_FAILED /
+           DB_TABLE_MISSING / DB_TIMEOUT。
+           后果：这个判断恒为false，「后端暂时读不到记录」那条分支
+           **永远进不去**，所有数据库故障都被说成「页面本身没问题」，
+           而这句在双击打开 HTML 时才成立 —— 方向完全说反了，用户按提示
+           去检查本地服务，白折腾。
+
+           ★ 为什么改成**前缀判断**而不是把四个码逐个列出来：
+             今天修的正是「逐个列 → 新增一个就漏掉一个」这个病。
+             DB_ 前缀已经是本项目约定好的分类（api-contract §1.4 按前缀分），
+             跟着前缀走，以后新增 DB 码自动归到这一支。 */
+        var backendsDown = (typeof o.code === 'string') &&
+          (o.code.indexOf('DB_') === 0 || o.code === 'LLM_NOT_CONFIGURED');
 
         var msg = emptyBox(
           backendsDown ? '后端暂时读不到记录' : '记录没能加载',
           (backendsDown
-            ? '你的练习记录存在服务器上，而当前环境连不上数据库（' + (detail || o.code || '未知原因') + '）。'
+            ? '你的练习记录存在服务器上，而当前环境连不上数据库（' + (detail || '未知原因') + '）。'
             : '页面本身没问题，是数据没读上来。' +
               (detail ? '（' + detail + '）' : '') +
               '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'));

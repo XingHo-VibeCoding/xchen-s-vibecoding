@@ -428,6 +428,9 @@
       errorCode: sess.degraded ? sess.errorCode : fav.errorCode
     });
   }).catch(function (err) {
-    renderError(err && err.message ? err.message : '');
+    /* ★ Day 23：原来直接显示 err.message（英文码裸奔）。 */
+    renderError((window.Api && window.Api.friendlyOf)
+      ? window.Api.friendlyOf(err)
+      : (err && err.message ? err.message : ''));
   });
 })();

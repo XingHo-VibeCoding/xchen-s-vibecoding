@@ -879,10 +879,15 @@
          为什么用小字而不是醒目提示：这是**临时状态说明**，不是错误警告——
          用户不需要为它做什么，放太显眼反而打断练习节奏。 */
       function noteDegraded(code) {
-        var why = code && code !== 'UNKNOWN'
-          ? '（' + code + '）'
-          : '';
-        var hint = '这一句用的是预设台词，不是即时回应' + why;
+        /* ★ Day 23：原来直接写 '（' + code + '）'，
+           页面上会出现「这一句用的是预设台词，不是即时回应（LLM_TIMEOUT）」
+           —— 用户看到的是英文下划线大写，不知道那是什么意思。
+           现在走 Api.friendlyOf() 拿中文人话。
+           ★ 下面 onError 那套**故意不用** Api.friendlyOf：
+             它分得比通用映射更细（区分「麦克风没授权」「格式不支持」…），
+             通用表给不出这个精度，两者不是同一层的东西。 */
+        var why = (window.Api && window.Api.friendlyOf) ? window.Api.friendlyOf({ code: code }) : '';
+        var hint = '这一句用的是预设台词，不是即时回应' + (why ? '（' + why + '）' : '');
         var row = document.createElement('div');
         row.className = 'tr-note';
         row.textContent = hint;

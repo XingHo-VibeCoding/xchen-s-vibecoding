@@ -84,6 +84,123 @@
   /* ---------- 底层：带超时的 fetch ---------- */
   /* fetch 本身没有超时能力，不加控制台会一直转圈。
      AbortController 是标准做法，没有它就没有「等不下去就放弃」这条退路。 */
+  /* ---------- 错误码 → 中文人话（Day 23）----------
+     -------------------------------------------------------------
+     ★★★ 这个函数是 Day 23 加的，改的就是「裸报错」。
+
+     **改前**：各页面拿到错误后直接把 err.message 显示给用户。
+       后果是屏幕上会出现 `INTERNAL_ERROR`、`LLM_NOT_CONFIGURED`、
+       `ASR_AUTH_FAILED` 这种英文下划线大写 —— 用户看不懂，
+       而他真正需要知道的是「现在该怎么办」。
+
+     **改后**：页面调friendlyMessage(err) 拿一句中文人话，
+       拿不到就用 err.message 兜底。**原始 err.message 仍然保留在
+       err 对象上**，开发者打开控制台照样能看到真实原因 ——
+       这只是改「给用户看的那一句」，不是把信息销毁。
+
+     ★ 为什么按「三类」分而不是逐个码写：
+       后端有 20+ 个错误码（api-contract §1.4），逐个翻成中文
+       会得到一张 20 行的大表，而绝大多数码用户根本遇不到
+       （比如 PAYLOAD_TOO_LARGE 是我们自己发的请求太大）。
+       用户能遇到的其实是三件事：
+         ① 我自己说错了/没说完→ 用户可以自己改
+         ② 网络或服务没连上     → 用户可以重试
+         ③ 服务器自己出问题了    → 用户只能等，重试没用
+       按三类给**行动建议**，比逐个码给精确解释更有用。
+
+     ★ 每条文案都回答同一个问题：「用户现在能做什么」。
+       只说「出错了」的提示等于没提示 —— 他不知道是该重说、
+       该刷新、还是该关掉页面等。 */
+  function friendlyMessage(err) {
+    var code = (err && err.code) || '';
+    var raw = (err && err.message) || '';
+    /* 含中文的判定。放在函数外复用（Day 23 加）——
+       兜底层要靠它决定「能不能把 raw 显示给用户」。 */
+    var HAS_CHINESE = /[\u4e00-\u9fa5]/;
+
+    /* 一、输入类：用户自己造成的，且他能自己改 */
+    var INPUT_MAP = {
+      INVALID_PARAMS: '这次说的内容不太对，换个说法试试',
+      INVALID_JSON: '这次说的内容不太对，换个说法试试',
+      PAYLOAD_TOO_LARGE: '这次说的内容太长了，试着说短一点',
+      NOT_FOUND: '没找到要找的内容，可能已经被删掉了',
+      METHOD_NOT_ALLOWED: '这个操作不被支持，请刷新页面后重试',
+      ASR_EMPTY_BODY: '没听到你说话，靠近麦克风再说一次',
+      ASR_BAD_AUDIO: '这段录音没听清，换个安静的地方再说一次',
+      ASR_TOO_LARGE: '这段录音太长了，说短一点试试'
+    };
+
+    /* 二、网络类：连不上，用户可以重试 */
+    var NET_MAP = {
+      LLM_UNREACHABLE: '连不上服务器，检查一下网络再试',
+      ASR_UNREACHABLE: '连不上服务器，检查一下网络再试',
+      LLM_TIMEOUT: '等得太久了，AI 还没回话，可以再说一次',
+      ASR_TIMEOUT: '等得太久了，识别还没出来，可以再说一次',
+      DB_TIMEOUT: '服务器响应太慢，等一会儿再试',
+      LLM_RATE_LIMITED: '请求太频繁了，歇一会儿再试',
+      ASR_RATE_LIMITED: '请求太频繁了，歇一会儿再试'
+    };
+
+    /* 三、服务端类：用户改不了，重试也没用 */
+    var SERVER_MAP = {
+      INTERNAL_ERROR: '服务器出了点问题，我们正在处理，稍后再试',
+      LLM_ERROR: '服务器出了点问题，我们正在处理，稍后再试',
+      LLM_NOT_CONFIGURED: 'AI 服务暂时不可用，我们正在处理',
+      LLM_AUTH_FAILED: 'AI 服务暂时不可用，我们正在处理',
+      LLM_NO_CREDIT: 'AI 服务暂时不可用，我们正在处理',
+      ASR_NOT_CONFIGURED: '语音功能暂时不可用，你也可以用文字继续',
+      ASR_AUTH_FAILED: '语音功能暂时不可用，你也可以用文字继续',
+      ASR_FAILED: '语音识别出了点问题，重说一次试试',
+      ASR_UPSTREAM_ERROR: '语音识别出了点问题，重说一次试试',
+      ASR_BAD_RESPONSE: '语音识别出了点问题，重说一次试试',
+      LLM_BAD_RESPONSE: 'AI 服务出了点问题，稍后再试',
+      LLM_BAD_FORMAT: '这次没能理解内容，换个说法试试',
+      DB_QUERY_FAILED: '服务器暂时读不到记录，我们正在处理',
+      DB_AUTH_FAILED: '服务器暂时读不到记录，我们正在处理',
+      DB_TABLE_MISSING: '服务器暂时读不到记录，我们正在处理'
+    };
+
+    if (INPUT_MAP[code]) return INPUT_MAP[code];
+    if (NET_MAP[code]) return NET_MAP[code];
+    if (SERVER_MAP[code]) return SERVER_MAP[code];
+
+    /* ★ 没见过的码（新增的、HTTP_xxx 这类前端自己造的）→ 按前缀兜底。
+       这里必须有兜底：映射表是人写的，代码在长，
+       漏一个码的表现是页面上出现 undefined 或者空字符串 ——
+       那比显示英文码更糟（用户连「出错了」都看不到）。 */
+    if (code.indexOf('HTTP_') === 0) {
+      if (code.indexOf('NOT_JSON') >= 0) {
+        return '连不上服务器，请检查网络或换个浏览器试试';
+      }
+      return '连不上服务器，请检查网络后重试';
+    }
+
+    /* ★ 最后一层：连 code 都没有（或 code 没匹配上）→ 用后端给的中文 message。
+     api.js 里所有 sendError 的 message 按契约 §1.3 本来就是中文
+     （「给用户看的一句话，不堆栈、不暴露内部信息」），实测线上也确实如此。
+
+     ★★ 但这里必须**加一道「含中文」的检查**（Day 23 补的）：
+       我原本写的是 `return raw || '出了点问题，请再试一次'`，赌 message 一定是中文。
+       做演示页时我把某一条的 message 填成了英文码本身（线上不会发生，
+       但演示页那句「不会出现 undefined 或英文码」正是在承诺这件事）——
+       结果那句话**当场自我否证**：页面上真的显示出了英文码。
+       ★ 赌契约成立是脆的：契约写在文档里，代码随时会改；
+         而这一层是**最后一道**，前面所有分支都没兜住时才走到它。
+       ★ 与 MEMORY 里那条「静默失败比崩溃更贵」同类：
+         「假定上游一定是好人」在跨越模块边界时必然失效。
+
+     ★ 为什么不是「一律不返回 raw」：message 里的中文细节
+       （比如「本接口只接受 GET」）比任何通用兜底都有用，不该浪费。 */
+    if (HAS_CHINESE.test(raw)) return raw;
+    return '出了点问题，请再试一次';
+  }
+
+  /* 给页面用的便捷版：只传错误对象就够，不用自己拼 code 与 message。
+     ★ 页面侧统一调它，不要自己去读 err.message —— 读了就会绕过映射表。 */
+  function friendlyOf(err) {
+    return friendlyMessage(err);
+  }
+
   /* ---------- URL 拼装（一处，两个请求函数共用）---------- */
   /* 为什么要抽出来：Day 22 加 DELETE 时，itemId 要走 query，
      若在 sendWithTimeout 里再写一遍拼 qs 的循环，就是两份几乎一样的代码 ——
@@ -641,6 +758,10 @@ return {
     deleteItem: deleteItem,
     pingHealth: pingHealth,
     mapItem: mapItem,
-    typeLabelOf: typeLabelOf
+    typeLabelOf: typeLabelOf,
+    /* Day 23 新增：错误码 → 中文人话。页面显示错误时调这个，
+       不要直接用 err.message（那是给开发者看的原始原因）。 */
+    friendlyMessage: friendlyMessage,
+    friendlyOf: friendlyOf
   };
 })();

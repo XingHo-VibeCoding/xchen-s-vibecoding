@@ -380,8 +380,14 @@
                真成功时不写任何提示条 —— 页面上的条目本来就是你真练出来的，
                没有需要说明的来源问题（这一条是 Day 11 那条 mock 提示条的替代品）。*/
             if (r.degraded) {
+              /* ★ Day 23：原来直接显示 r.errorCode（英文下划线大写，
+                 比如 LLM_TIMEOUT / INTERNAL_ERROR），用户看不懂。
+                 现在显示中文人话，errorCode 仍在控制台可查。 */
               var bar = document.getElementById('issue-mock');
-              bar.textContent = '这次没能完成判断（' + (r.errorCode || '未知原因') +
+              bar.textContent = '这次没能完成判断（' +
+                ((window.Api && window.Api.friendlyOf)
+                  ? window.Api.friendlyOf({ code: r.errorCode, message: r.errorMessage })
+                  : (r.errorCode || '出了点问题，请再试一次')) +
                 '），所以下面没有条目。';
               bar.classList.add('mock-bar-warn');
             } else {
@@ -390,7 +396,10 @@
             }
           }).catch(function (err) {
             renderError('这次没能完成判断',
-              (err && err.message ? err.message : '') +
+              /* ★ Day 23：原来把 err.message 直接拼进提示（英文码裸奔）。 */
+              ((window.Api && window.Api.friendlyOf)
+                ? window.Api.friendlyOf(err)
+                : (err && err.message ? err.message : '出了点问题，请再试一次')) +
               ' 这一场的话已经存过了，你可以回到对话页再练一次。');
           });
         });
