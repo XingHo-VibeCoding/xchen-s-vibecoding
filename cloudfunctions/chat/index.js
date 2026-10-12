@@ -221,7 +221,19 @@ function systemPromptFor(topic) {
       '   not from a prepared list. If they go off topic, just follow wherever they went.',
       '5. Keep it natural and conversational, like a colleague chatting between meetings.',
       '   Vary your sentence length and phrasing. Do not reuse the same opening word twice in a row.',
-      '6. Reply in English only. Even if they switch to Chinese, stay in English.'
+      '6. Reply in English only. Even if they switch to Chinese, stay in English.',
+      '',
+      'Turn length (this matters more than it looks):',
+      /* ★ Day 23 新增。同伴反馈「AI 一直讲，他没办法说话」——加语音之后
+         这条从「优化」变成「必需」：AI 出声时15 词要说 7–10 秒，
+         而用户组织一句A2 英语要 15–30 秒。AI 每多说一句，
+         用户能开口的窗口就少一截。数字定 12 而不是 15：
+         口头追问 12 词左右足够，问句本来就不长。 */
+      '7. Keep every turn under 12 words. One short question or one short remark.',
+      '   Never two sentences. Never a paragraph. Never a list.',
+      '8. End with a question whenever you can. A question hands the floor back to them;',
+      '   a statement leaves them nothing to answer, and they go quiet.',
+      '9. If you have more than one thing you could ask, ask the SMALLEST one only.'
     ].join('\n');
   }
 
@@ -247,6 +259,17 @@ function systemPromptFor(topic) {
     '4. Do not praise them unconditionally. Only acknowledge when they actually got',
     '   something clear and specific. Vague answers get a follow-up question, not a compliment.',
     '5. Stay strictly inside this topic\'s scope. Reply in English only.',
+    '',
+    /* ★ Day 23 新增。数字定 12 词而非 15 —— 与同伴反馈直接相关：
+       他说「AI 一直讲，我没办法说话」。加语音之后 AI 每多说一句，
+       用户的开口窗口就少 7–10 秒。追问本来就不需要长句，
+       12 词够把一个具体的东西问清楚。 */
+    'Turn length (this matters more than it looks):',
+    '6. Keep every turn under 12 words. One short question. Never two sentences,',
+    '   never a paragraph, never a list of questions.',
+    '7. End with a question. A question hands the floor back to them; a statement',
+    '   leaves them nothing to answer, and they go quiet.',
+    '8. Ask the SMALLEST thing you are unsure about - not everything you are unsure about.',
     ''
   ];
 
@@ -322,6 +345,29 @@ function buildMessages(topic, history, userText, silenceSeconds) {
     }
   });
 
+  /* ★★ Day 23 新增：把「上一轮他没说明白」这件事带进本轮提示词。
+     为什么需要：pickKind 一直在算 kind（含 follow_up / too_short），
+     但它**只被回传给前端**，而前端 dialogue.html 只取 aiText，
+     kind 走到那里就被丢了 —— 于是「模型知道他说得含糊」这个信息
+     从来没被用上。提示词里那两句硬约束（不许无条件肯定、
+     说得含糊就追问）没有具体抓手，模型看到含糊就习惯性连问两层。
+
+     同伴反馈「AI 一直讲，我没办法说话」在这里有一份：
+     被连问两层的人答不上来 → 更沉默 → 更被催。
+     现在把 kind 变成**下一句的约束**而不是一个没人看的返回值。 */
+  const lastUser = recent.length ? recent[recent.length - 1] : null;
+  if (lastUser && isVague(lastUser.userText)) {
+    msgs.push({
+      role: 'system',
+      content: [
+        'Their last answer was too short or too vague to build on.',
+        'Ask ONE very small, very concrete follow-up question - a single word answer',
+        'would be enough. Do NOT ask a second question. Do NOT restate what they said.',
+        'Keep it under 8 words.'
+      ].join('\n')
+    });
+  }
+
   msgs.push({
     role: 'user',
     content: userText +
@@ -329,6 +375,35 @@ function buildMessages(topic, history, userText, silenceSeconds) {
   });
 
   return msgs;
+}
+
+/* 「这句话含糊到撑不起下一轮」的判据。
+   ★ 为什么阈值定 4 个词：目标用户 CEFR A2–B2，真实口语里
+     "Yeah, I think so." 就是 4 个词，但那确实撑不起追问 ——
+     它没有任何具体内容。
+   ★ 为什么要单独处理中文（Day 23 单测实测踩到）：
+     中文没有空格，按 `\s+` 分词只有「一项」，
+     于是任何中文句子都被判成 ≤4 词 = 含糊 —— 明显错。
+     用户切中文聊两句很常见（提示词第6 条就是为此写的），
+     判据不能只对英文成立。用**字符数**兜住这个case。 */
+const FILLER_WORDS = /^(uh|um|erm|ah|well|so|yeah|yes|no|maybe|ok|okay|not sure|idk|i guess|whatever|sure)\b[,.\s]*$/i;
+function isVague(text) {
+  const s = String(text || '').trim();
+  if (!s) return true;
+
+  /* 中日韩文本按字符数判（没有词边界的概念）。
+     阈值取 8 个字符：低于这个长度撑不起一个追问，
+     高于就有具体信息（"我觉得应该先做完前两个功能"= 14 字）。 */
+  if (/[一-鿿぀-ヿ]/.test(s)) {
+    return s.length <= 8;
+  }
+
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length <= 4) return true;
+  /* 长度够但全是 "yeah... okay" 这种 —— 一句话里没有任何实词，
+     同样撑不起追问。用比例判：超过一半是填充词就算含糊。 */
+  const fillers = words.filter((w) => FILLER_WORDS.test(w.toLowerCase())).length;
+  return fillers / words.length > 0.5;
 }
 
 function summarizeHistory(history) {
@@ -364,6 +439,45 @@ function pickKind(raw, userText) {
     return { kind: 'follow_up', followUpType: 'too_short' };
   }
   return 'normal';
+}
+
+/* 把超过上限的回复截到**最后一个完整的句子**上。
+   ★ 为什么按句子边界而不是按字符（Day 23）：
+     直接 slice 会切出半句话，页面上出现 "So what I'm thinking is that we…"
+     —— 用户读到的是一句没说完的话。加语音之后朗读半句还会显得卡住。
+   ★ 为什么留一句而不是全丢：
+     模型偶尔真的写长（不听指令时），全丢会让这一轮空着。
+     留最长的那个完整句子，至少是一句能读的话。
+   ★ 为什么末尾标成中文的「…」：它表明「后面还有，被截了」，
+     和英文原文不冲突（清理包装时只剥引号和星号，不动这个）。 */
+function clampToSentence(text, maxChars) {
+  const s = String(text || '');
+  if (s.length <= maxChars) return s;
+  /* 找最后一个「句号/问号/叹号 + 可选闭引号」的位置。
+     ★ 为什么 `\s` 改成可选（Day 23 实测踩到）：
+       原来要求「标点 + 空格」，但maxChars 常常正好切在句号**之后**
+       —— 那时句号本身落在截断之外，正则匹配不到，
+       整段就退化成硬截，页面上又出现半句话（实测复现）。
+       标点后有没有空格对「这是不是句子边界」没有意义。
+     ★ 为什么是**最后**一个边界而不是第一个：
+       取最后一个才能在上限内尽量多保留内容；
+       再由调用处的长度上限兜住，不会失控。 */
+  const head = s.slice(0, maxChars + 1);
+  let cut = -1;
+  for (let p = 0; p < head.length; p++) {
+    const c = head[p];
+    if (c === '.' || c === '?' || c === '!') {
+      // 吃掉紧跟的闭引号/括号（"..." / '...' / ...!）
+      let q = p + 1;
+      while (q < head.length && /["')\]]/.test(head[q])) q++;
+      /* ★ 只有后面**还有内容**时才把它当边界。
+         若它就是最后一个字符（后面被切掉了），保留它更完整 ——
+         「留最长的完整句」比「切在句号前」好。 */
+      cut = q;
+    }
+  }
+  if (cut <= 0) return s.slice(0, maxChars).trim() + '…';
+  return s.slice(0, cut).trim() + '…';
 }
 
 /* 把模型可能带出来的包装剥掉：引号、markdown 强调、常见前缀。
@@ -496,8 +610,19 @@ async function handleChat(req, res) {
   }
 
   /* 单句上限：模型偶尔会写一大段。契约 §3 规定是一句回合，
-     超长说明它没按要求来 —— 截断比原样上屏更像真实对话。 */
-  const finalText = aiText.length > 400 ? aiText.slice(0, 400).trim() + '…' : aiText;
+   超长说明它没按要求来 —— 截断比原样上屏更像真实对话。
+   ★ Day 23：改按**句号边界**截断。
+     原来直接 `slice(0,400)` 会切在句子中间，页面上出现半句话
+     （"So what I'm thinking is that we should probably..."），
+     那比长句更伤—— 用户读到的是一个没说完的句子。
+     同一个毛病在加语音之后更明显：朗读半句话会显得卡住。 */
+  const finalText = clampToSentence(aiText, 400);
+
+  /* ★ Day 23：`kind` 不再只是回传。
+     它在 buildMessages 里已经被用来给「上一轮含糊」加约束了
+     （见 isVague 那段）。这里照旧回传，前端可以将来用。
+     ★ 前端 dialogue.html 目前只取 aiText，kind 走到那里会被丢 ——
+       那是前端的事，本轮不动（契约 §3 的字段仍然保留）。 */
 
   const kindRaw = silenceSeconds > 0 ? 'nudge' : null;
   const kind = kindRaw || pickKind(raw, userText);
