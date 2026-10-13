@@ -700,13 +700,26 @@
         var backendsDown = (typeof o.code === 'string') &&
           (o.code.indexOf('DB_') === 0 || o.code === 'LLM_NOT_CONFIGURED');
 
+        /* ★★ Day 24 余力加练修：else 这一支原来**无条件断言**失败原因，
+           一律写「最常见的原因是直接双击打开了 HTML 文件」。
+           ★ 而今天真实发生的恰恰相反：新加的网关路由 `/api/items` 没开**跨域设置**，
+             浏览器按 CORS 拦掉了请求（错误码落到兜底的 UNKNOWN）。
+             用户明明是用本地服务打开的，页面却让他去查本地服务 —— 方向说反、白折腾。
+           ★ 这与上面那段注释（686-699）描述的是**同一个病**：
+             当时只改了 DB 那一支的判断，else 支的文案没跟着改，于是病留在了这里。
+           ★ 修法：只说**能当场验证的事**。`file://` 是可以当场判的 →
+             是 file:// 才提「双击打开」；否则不指认原因，只给可执行的动作。 */
+        var viaFile = (location.protocol === 'file:');
+
         var msg = emptyBox(
           backendsDown ? '后端暂时读不到记录' : '记录没能加载',
           (backendsDown
             ? '你的练习记录存在服务器上，而当前环境连不上数据库（' + (detail || '未知原因') + '）。'
-            : '页面本身没问题，是数据没读上来。' +
+            : '数据没读上来。' +
               (detail ? '（' + detail + '）' : '') +
-              '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'));
+              (viaFile
+                ? '最常见的原因是直接双击打开了 HTML 文件——请用本地服务打开本页。'
+                : '先点「重新加载」再试一次；若一直这样，按 F12 看 Network 里那条请求的结果。')));
         msg.className = 'empty state-error';
 
         var btn = document.createElement('button');
@@ -725,9 +738,15 @@
           emptyBox('收藏也读不到', '记录要先从服务器取回来，收藏是从里面筛出来的。'));
         allList.replaceChildren(msg);
         countEl.textContent = '没能读到记录';
+        /* 这一条是**开发提示条**（#rec-mock），给排错用 —— 所以这里保留错误码：
+           今天就是因为只剩一句「页面本身没问题」，把「CORS 拦了请求」这个真因
+           完全盖住了。留一个码，打开控制台就知道往哪查。 */
         mockBar.textContent = backendsDown
           ? '错误态：后端数据库暂时读不到，所以这里没有任何条目——不是「你没有记录」。'
-          : '错误态：数据没读上来，页面本身没问题。';
+          : '错误态：数据没读上来。错误码 ' + (o.code || 'UNKNOWN') +
+            (viaFile
+              ? '；地址栏是 file://，请用本地服务打开。'
+              : '；本页不是 file:// 打开的 —— 问题在请求那一段，看 F12 的 Network。');
         mockBar.classList.add('mock-bar-warn');
       }
 

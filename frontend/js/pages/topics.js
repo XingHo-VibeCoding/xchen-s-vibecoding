@@ -111,10 +111,19 @@
   function renderError(detail) {
     var box = el('div', 'empty state-error');
     box.appendChild(el('div', 'big', '主题数据没能加载'));
+    /* ★ Day 24 余力加练修：这里原来**无条件断言**失败原因 ——
+       不论真因是什么，一律写「最常见的原因是直接双击打开了 HTML 文件」。
+       今天真实撞到的是「新加的网关路由没开跨域（CORS）」：用户明明是用本地服务
+       打开的，页面却让他去检查本地服务 —— 方向说反，白折腾。
+       （项目里同一个病在 records.html 的错误态里也有，同一并修。）
+       ★ 修法：只说**能当场验证的事**。`file://` 是当场可判的 →
+         真的 file:// 才提「双击打开」；否则不指认原因。 */
     box.appendChild(el('div', 'small',
       '页面本身没问题，是数据没读上来。' +
       (detail ? '（' + detail + '）' : '') +
-      '最常见的原因是直接双击打开了 HTML 文件——请按 README.md 里的命令用本地服务打开本页。'));
+      (location.protocol === 'file:'
+        ? '最常见的原因是直接双击打开了 HTML 文件——请按 README.md 里的命令用本地服务打开本页。'
+        : '先点「重新加载」再试一次；若一直这样，按 F12 看 Network 里那条请求的结果。')));
 
     var btn = el('button', 'primary', '重新加载');
     btn.style.marginTop = '16px';
