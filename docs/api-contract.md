@@ -1166,7 +1166,7 @@ node .test-modify.js
 | R2 | `GET` | `/api/sessions/{id}` | 单场详情（含 `transcript`） | 同上 |
 | R3 | `POST` | `/api/sessions/write` | 写入一场会话（点「结束对话」时）| 同上 |
 | — | | | ⚠️ **路径不是 `/api/sessions`**：网关同域名下不能有重复路径、且路由没有 method 字段（Day 18 实测）。`/api/sessions` 归 R1。见 [§4.1](#s41) |
-| R4 | `GET` | `/api/items` | **列表读取**：条目与精彩句子（记录页用，支持按主题/时间筛选） | `vibecoding.issues` + `goodSentences` |
+| R4 | `GET` | `/api/items` | **列表读取**：条目与精彩句子（记录页用，按主题筛选） | `vibecoding.issues` + `goodSentences` | 🟢 **Day 24 已实现**（记录页「全部条目」用它；形状见下方「R4 实现说明」） |
 | R5 | `PATCH` | `/api/items/{id}` | 改收藏标记 / 备注 | `favoriteItems` 的 `isFavorited` / `note` |
 | — | `PATCH` | **`/api/sessions/write`** | **R5 的实际实现路径**：改 `note` / `isFavorited` | 同上（🟢 Day 22 已实现，见 [§4.2](#s42)） |
 | R6 | `GET` | `/api/practice-count` | 某主题练过几次 | `vibecoding.practiceCount` |
@@ -1226,15 +1226,34 @@ GET /api/items?topicId=T1&limit=20&cursor=xxx
 >
 > 转换只发生在云函数出口那一处：读库拿到 `TIMESTAMP` → 直接拼上 `+08:00`。
 
-> **本表是「预留接口设计」，不是已实现清单**（这些接口属§6.1，v1 不实现）。
-> 已实现的 20 个错误码见 §1.4。
+> **本表是「预留接口设计」，不是已实现清单** —— 但这句 Day 24 起要收窄：
+> 表里 **R1 / R4 / R5 只读侧** 已实现（R1 Day 17、R4 Day 24、R5 只读侧 Day 17），
+> 路径与网关一致；**R2 / R6 仍未实现**。已实现的 20 个错误码见 §1.4。
 >
-> 两处与已实现代码的差异，将来实现时要留意：
+> 三处与已实现代码的差异，实现时要注意：
 >
 > | 本表写的 | 已实现代码的情况 |
 > |---|---|
 > | `NOT_FOUND` =「指定的 `sessionId` 不存在」 | `read/index.js` 目前的 `NOT_FOUND` **只用于「路径不对」**（路由匹配失败时）。查不到 sessionId 走的是 `200 + {items:[], count:0}`，不是 404 |
 > | `RATE_LIMITED` = 超频（**我们自己**限用户调用频次） | 代码里的 `LLM_RATE_LIMITED` 是**模型厂商**返回 429，含义完全不同。我们**尚未实现**用户级限频 |
+> | R4 的形状 `{ok, items, nextCursor}`（本表 §6.1 草图） | 已实现的 R4 **不采用这张草图**：它写在统一外壳 §1.2 之前。实现在下面「R4 实现说明」 |
+
+### R4 实现说明（★ Day 24 补，`GET /api/items`）
+
+```bash
+B=https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
+curl -s "$B/api/items?limit=20"
+```
+
+| 项 | 实现 |
+|---|---|
+| 外壳 | `{ok:true, data:{items:[…], count:N}}` —— 与 R1 / R5 只读侧一致，**不采用** §6.1 草图的 `{ok,items,nextCursor}` |
+| 参数 | `topicId`（可选，不传=全部主题，白名单 T1–T8/FREE）、`limit`（可选，默认 20、上限 100） |
+| `cursor` 分页 | **本期不做**（与 R1 同样只用 `limit`）——草图上写了，实现里没有，所以在这里显式记一笔 |
+| 行形状 | 与 `/api/favorites` 的 item 完全同形（同一个 `shapeItem`） |
+| 与 `/api/favorites` 的差别 | **只有一处**：**不带** `is_favorited=eq.true` 过滤。两条都带 `is_deleted=eq.false` |
+| 为什么必须有这条 | R5 只读侧的定义是「只返已收藏」，凑不出「全部条目」。Day 24 前记录页借用了 `/api/favorites`，导致**没收藏的条目一条都显示不出来**（库里 7 条、页面「共 2 条」） |
+| 网关 | `cloudbaserc.json` 的 `gateway.routes` 里 **`/api/items` 必须排在 `/api/items/favorites` 之后**（前缀匹配） |
 
 ### 6.2 为什么这些接口先不实现（重要）
 

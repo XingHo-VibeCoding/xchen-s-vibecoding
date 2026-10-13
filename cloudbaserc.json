@@ -93,6 +93,11 @@
         "enablePathTransmission": true
       },
       {
+        "path": "/api/items",
+        "target": "function:read",
+        "enablePathTransmission": true
+      },
+      {
         "path": "/api/chat",
         "target": "function:chat",
         "enablePathTransmission": true

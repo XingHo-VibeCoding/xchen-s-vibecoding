@@ -6,7 +6,8 @@
    ★ 接口清单与接进来的时间：
      GET  /api                health   ✅ Day 20（pingHealth，检查台用）
      GET  /api/sessions       read     ✅ Day 17
-     GET  /api/favorites      read     ✅ Day 17
+     GET  /api/items          read     ✅ Day 24（getItems，「全部条目」，契约 §6.1 R4）
+     GET  /api/favorites      read     ✅ Day 17（R5 只读侧，「只看收藏」）
      POST /api/chat           chat     ✅ Day 18
      POST /api/analyze        analyze  ✅ Day 19
      POST /api/sessions/write write    ✅ Day 20（writeSession，检查台用）
@@ -339,6 +340,17 @@
     });
   }
 
+  /* 全部条目（不分收藏与否）。契约 §6.1 R4「列表读取：条目与精彩句子（记录页用）」。
+     ★★ Day 24 补它：记录页原先把「全部条目」错接在 getFavorites 上，
+     而那个接口的定义就是「只返已收藏的」——于是库里没收藏的条目
+     一条都显示不出来（表现为「共 N 条」远小于库里实际条数）。
+     ★ 参数口径与 getSessions 一致：不传 topicId = 全部主题；limit 默认 20（上限 100）。 */
+  function getItems(params) {
+    return request('/api/items', params).then(function (data) {
+      return { items: (data.items || []).map(mapItem), count: data.count };
+    });
+  }
+
   /* ---------- 带降级的取数（今天页面的真实用法）----------
      失败时回落到传入的本地数据，并把错误信息挂上供页面显示。
      **页面因此永远不会空**——这是 ② 的直接落点。 */
@@ -351,6 +363,14 @@
 
   function getFavoritesOrLocal(params, localFallback) {
     return getFavorites(params).catch(function (err) {
+      return { items: localFallback || [], count: (localFallback || []).length,
+               degraded: true, errorCode: err.code, errorMessage: err.message };
+    });
+  }
+
+  /* 与上一条同形（返回形状必须一致，记录页的 degraded 分支才能两处通用）。 */
+  function getItemsOrLocal(params, localFallback) {
+    return getItems(params).catch(function (err) {
       return { items: localFallback || [], count: (localFallback || []).length,
                degraded: true, errorCode: err.code, errorMessage: err.message };
     });
@@ -746,8 +766,10 @@ return {
   window.Api = {
     BASE: BASE,
     getSessions: getSessions,
+    getItems: getItems,
     getFavorites: getFavorites,
     getSessionsOrLocal: getSessionsOrLocal,
+    getItemsOrLocal: getItemsOrLocal,
     getFavoritesOrLocal: getFavoritesOrLocal,
     chat: chat,
     speechToText: speechToText,

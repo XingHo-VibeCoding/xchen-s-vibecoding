@@ -5,7 +5,7 @@
    ★ items 一张表装三类（offtopic / logic / good），不拆成 issues / goodSentences
      两张表 —— 那是用户 Day 16 拍板的数据模型（笔记 §7）。
 
-   ★★ 本文件只提供**只读**入口：listFavoritedItems()。
+   ★★ 本文件只提供**只读**入口：listFavoritedItems() 与 listAllItems()（★ Day 24 新增后者）。
      写入、收藏（PATCH note / is_favorited）在 write 那个函数的
      itemsRepository.js 里，两边不共用方法——
      同一个文件里同时有读和写，会让「这个接口只读」这件事看不出来。 */
@@ -59,8 +59,39 @@ async function listFavoritedItems(topicId, limit) {
   return db.select('items', buildFavoritesQuery(topicId, limit), SELECT_FAVORITES);
 }
 
+/* ---------- 四、第二条入口：**全部条目**（Day 24 新增，实现契约 §6.1 的 R4）----------
+   与上面的差别只有一处：**不带 is_favorited 过滤**。
+
+   ★ 为什么必须在数据访问层再开一个入口，而不是在接口层拿收藏结果凑：
+     契约 §6.1 R4 登记的就是「列表读取：条目与精彩句子（记录页用）」——
+     它要的是**全部**条目。而 R5 只读侧（/api/favorites）的定义是「只返已收藏的」，
+     两者是不同的查询条件，凑不出来。
+
+   ★★ 记录页原来的错就在这里：它借用了 /api/favorites 取「全部条目」，
+     于是库里没收藏的条目一条都显示不出来（Day 24 复现：库里 7 条 items、
+     只收藏了 3 条，页面「共 2 条」—— 少的那些不是没数据，是查错了接口）。
+
+   ★ 仍然带 is_deleted=eq.false：「已软删的不算存在」这条可见性规则
+     对两个入口都成立 —— 软删掉的东西不该从「全部条目」里漏出来。 */
+function buildAllItemsQuery(topicId, limit) {
+  return {
+    is_deleted: 'eq.false',
+    /* 按创建时间倒序：记录页的「全部条目」是「历次练习混排、按时间倒序」
+       （PRD §6.4），与收藏区按 favorited_at 倒序是两回事。 */
+    order: 'created_at.desc',
+    limit: limit,
+    ...(topicId ? { topic_id: 'eq.' + topicId } : {})
+  };
+}
+
+async function listAllItems(topicId, limit) {
+  return db.select('items', buildAllItemsQuery(topicId, limit), SELECT_FAVORITES);
+}
+
 module.exports = {
   listFavoritedItems: listFavoritedItems,
+  listAllItems: listAllItems,
   SELECT_FAVORITES: SELECT_FAVORITES,
-  buildFavoritesQuery: buildFavoritesQuery
+  buildFavoritesQuery: buildFavoritesQuery,
+  buildAllItemsQuery: buildAllItemsQuery
 };

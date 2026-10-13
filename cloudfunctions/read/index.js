@@ -1,8 +1,8 @@
-/* GET /api/sessions 与 GET /api/favorites —— 第一个读接口（Day 17 · 板块 ①）
+/* GET /api/sessions · GET /api/items · GET /api/favorites —— 读接口（Day 17 · 板块 ①｜Day 24 加 items）
    -------------------------------------------------------------
    位置：整个后端第1 号「真正查库」的接口（第 0 号是 health，不连库）。
-   它做的是 api-contract §6.1 里登记的 R1（读核心表 sessions）与
-   R5 的一部分（只读侧：读 items 里已收藏的条目）。
+   它做的是 api-contract §6.1 里登记的 R1（读核心表 sessions）、
+   R4（读 items 全部条目，★ Day 24 补）与 R5 只读侧（读 items 里已收藏的条目）。
 
    ★ 为什么不是清单上写的 /api/hot（今日热搜）：
      清单给的是「打卡 / 热搜」类项目的范例。本项目没有热搜表、
@@ -202,8 +202,8 @@ function shapeItem(row) {
   };
 }
 
-/* ---------- 六、两个处理函数 ---------- */
-/* ★★ Day 19：这两段现在只剩接口层该做的事——
+/* ---------- 六、三个处理函数 ---------- */
+/* ★★ Day 19：这几段现在只剩接口层该做的事——
    校验参数（limit / topicId）、调repository、把行转成响应形状、返回。
    「查哪张表、查哪些列」已经不在这个文件里了。 */
 async function handleSessions(query, res) {
@@ -236,6 +236,35 @@ async function handleFavorites(query, res) {
   }
 
   const rows = await itemsRepo.listFavoritedItems(topicId, limit);
+  const data = rows.map(shapeItem);
+  return sendOK(res, { items: data, count: data.length });
+}
+
+/* ★★ Day 24 新增：GET /api/items —— 契约 §6.1 R4「列表读取：条目与精彩句子（记录页用）」。
+   与 handleFavorites 只差一行（调 listAllItems 而不是 listFavoritedItems），
+   但**必须是两条独立的路由**：一条是「全部条目」，一条是「只收藏的」，
+   把两种语义塞进一个 handler 靠参数切换，会让 /api/favorites 的定义变模糊
+   （「只读收藏」是那个接口的定义本身，不该能被关掉）。
+
+   ★ 为什么今天要补它：记录页的「全部条目」原先借用了 /api/favorites，
+     于是没收藏的条目一条都看不到。R4 在契约里登记了很久，只是一直没实现。
+   ★ 形状与 R1/R5 只读侧一致（{ok:true,data:{items,count}}），不复用 §6.1 那张
+     预先设计的草图（{ok,items,nextCursor}）—— 那张草图写在统一外壳 §1.2 之前，
+     已实现的四个接口都用 {ok,data,error}，这里跟着已实现的走。
+     `cursor` 分页本期不做（与 R1 同样只用 limit），所以在契约里注明。 */
+async function handleItems(query, res) {
+  const limit = parseLimit(query.limit);
+  if (limit === null) {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      'limit 只能是 1–100 的整数', { gotParams: JSON.stringify(query) });
+  }
+  const topicId = validTopicId(query.topicId);
+  if (topicId === null) {
+    return sendError(res, 400, 'INVALID_PARAMS',
+      'topicId 只允许 T1–T8 或 FREE', { gotParams: JSON.stringify(query) });
+  }
+
+  const rows = await itemsRepo.listAllItems(topicId, limit);
   const data = rows.map(shapeItem);
   return sendOK(res, { items: data, count: data.length });
 }
@@ -292,16 +321,18 @@ const server = http.createServer((req, res) => {
   const routes = {
     '/api/sessions': handleSessions,
     '/sessions': handleSessions,
-    '/api/favorites': handleFavorites,
+    '/api/items': handleItems,                 // ★ Day 24：契约 §6.1 R4「全部条目」
+    '/items': handleItems,
+    '/api/favorites': handleFavorites,         // 契约 §6.1 R5 只读侧「只看收藏」
     '/favorites': handleFavorites,
-    '/api/items/favorites': handleFavorites,   // 契约 §6.1 R4 的「只看收藏」写法
+    '/api/items/favorites': handleFavorites,   // R5 只读侧的另一种门户
     '/items/favorites': handleFavorites
   };
 
   const handler = routes[norm];
   if (!handler) {
     return sendError(res, 404, 'NOT_FOUND',
-      '本函数提供：GET /api/sessions 与 GET /api/favorites',
+      '本函数提供：GET /api/sessions、GET /api/items 与 GET /api/favorites',
       { gotPath: path });
   }
 
@@ -321,7 +352,7 @@ const server = http.createServer((req, res) => {
 /* 端口 9000 + 0.0.0.0：CloudBase HTTP 云函数只认这个（Day 15 踩过）。 */
 server.listen(9000, '0.0.0.0', () => {
   console.log('[read] listening on 0.0.0.0:9000');
-  console.log('[read] routes: GET /api/sessions · GET /api/favorites');
+  console.log('[read] routes: GET /api/sessions · GET /api/items · GET /api/favorites');
   console.log('[read] db: ' + (process.env.PGHOST ? 'env 已配置' : 'env 未配置（会连不上）'));
 });
 
