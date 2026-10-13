@@ -111,8 +111,22 @@
       busyLabel: '保存中…',   // 收藏的动作语义是「存起来」，比默认的「处理中…」更具体
       /* pressed 传**函数**而不是布尔值：本页可能有同一 itemId 的两个按钮
          （记录页的收藏区与全部条目就是），其中一个被改动后，另一个要能
-         重新去存储里取真值校正过来。传死值的话两边会各说各话。 */
+         重新去取真值校正过来。传死值的话两边会各说各话。
+
+         ★ Day 24 修：取真值的**顺序**变了。
+           原先只问 Storage（本机 localStorage）。但记录页的数据源是后端库、
+           库里那份才是真相（口径见 records.html 顶部那段），于是出现
+           「清掉浏览器存储后收藏区 0 条，而库里明明有已收藏条目」。
+           现在分两级：
+             ① 条目自带 isFavorited（记录页的条目来自 /api/favorites，
+                api.js 的 mapItem 会带上这个布尔值）→ **直接用它**，
+                与页面显示的数据同源；
+             ② 没有这个字段（结果页的条目来自 analyze、还没落库）→
+                回落 Storage，那边行为一个字不变。 */
       pressed: function () {
+        if (item.isFavorited !== undefined && item.isFavorited !== null) {
+          return !!item.isFavorited;
+        }
         return !!(window.Storage && window.Storage.isFavorite(item.itemId));
       },
       onToggle: function (next, api) {

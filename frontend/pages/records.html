@@ -105,12 +105,17 @@
     //     确认后才发 DELETE /api/sessions/write（见 handleDelete 上方那段注释）
     //
     // 跨页面同步怎么做的（口径：PRD.md §6.4 第 469 行「收藏状态跨页面同步」）
-    //   收藏状态现在**有两份**：后端库的 items.is_favorited（读页面的数据源）
-    //   与本机 localStorage（Storage 的 favoriteItems 键，仍在用）。
-    //   两份的关系：★ Day 22 起，**后端那份是真相**，localStorage 只是在
-    //   收藏按钮按下去、请求还没回来的那一瞬用来显示「已按下的样子」。
-    //   本页渲染时先按后端数据画（getFavorites 只回 is_favorited=TRUE 的），
-    //   再用 localStorage 做同页两个按钮之间的即时同步。
+    //   收藏状态有**两份**：后端库的 items.is_favorited 与本机 localStorage
+    //    （Storage 的 favoriteItems 键，还在用）。
+    //   两份的关系：**后端那份是真相**，localStorage 只是在收藏按钮按下去、
+    //   请求还没回来的那一瞬用来显示「已按下的样子」。
+    //   ★★ Day 24 修：这段口径原先只是**写在注释里**，代码没照做 ——
+    //      收藏只写 localStorage（Patch 接口 Day 22 建好了却没接上），
+    //      收藏区又按 localStorage 算，于是清掉浏览器存储后
+    //      「收藏区 0 条、而库里明明有收藏」。现在两处都真的按库来了：
+    //        · 取数走 GET /api/items（契约 §6.1 R4，全部条目）
+    //        · 收藏区 = 行上的 isFavorited（库真值）
+    //        · 点收藏 → PATCH /api/sessions/write
     //
     // 本页与结果页的区别：
     //   结果页 = 本次会话（从待分析转写现算，见 result.html）
@@ -214,14 +219,21 @@
         /* ---------- 收藏区（**按收藏时间倒序**，不是按会话时间） ----------
            两次排序的差别：全部条目按会话时间排，收藏区按「你什么时候标的」排。
            所以同一屏里两块的顺序可能不同 —— 这是对的，PRD §6.4 第 468 行
-           要求收藏区「最近标的在最上面」。顺序由 Storage.favoriteIds() 给。 */
-        var favOrder = window.Storage ? window.Storage.favoriteIds() : [];
-        var byId = {};
-        rows.forEach(function (r) { byId[r.item.itemId] = r; });
+           要求收藏区「最近标的在最上面」。
 
-        var favRows = favOrder
-          .map(function (id) { return byId[id]; })
-          .filter(function (r) { return !!r; })   // 收藏了但列表里没有的忽略掉
+           ★ Day 24 修：判据从「本机存储」改成「**库里的 is_favorited**」。
+             原来用 Storage.favoriteIds() 排，而本页显示的数据来自库 ——
+             两份状态一旦不一致（清过浏览器存储、换设备、无痕窗口），
+             收藏区就会与「共 N 条」对不上，最极端的情形是
+             收藏区 0 条而库里全是收藏（Day 24 复现的就是这一条）。
+             现在直接按行上的 isFavorited 算，与页面显示的数据同源；
+             排序按 favoritedAt 倒序（库里那列，PATCH 时由接口层连带维护）。 */
+        var favRows = rows
+          .filter(function (r) { return !!(r.item && r.item.isFavorited); })
+          .sort(function (a, b) {
+            return String(b.item.favoritedAt || '')
+              .localeCompare(String(a.item.favoritedAt || ''));
+          })
           .filter(function (r) { return match(r, KEY); });
 
         if (favRows.length) {
@@ -243,31 +255,77 @@
           : '共 ' + rows.length + ' 条（收藏区 ' + favHit + ' 条）';
       }
 
-      /* 本页没有 ?favfail 这种演示开关，失败只来自真实原因（浏览器不允许本地存储）。
-         为什么不做随机失败：本页是「回看」场景，用户在检查自己的收藏是否还在，
-         这时随机报错会造成「我的收藏丢了」的误解 —— 演示用的随机失败只放在
-         结果页（写入的那一刻），回看页保持诚实。 */
+      /* 收藏：**写库**（Day 24 修）
+         -------------------------------------------------------------
+         ★ 修的是什么：原来这里只调 window.Storage.toggleFavorite（本机存储），
+           而本页的数据源是后端库、库里那份才是真相（口径见本文件顶部那段）。
+           后果是「清掉浏览器存储后收藏区空空如也，而库里的收藏还在」——
+           同一屏里「共 N 条」与「收藏区 M 条」两个数字长期对不上。
+         ★ 接口 Day 22 就建好了（api.js 的 patchItem），只是从没接上。
+
+         为什么还保留 FAV_DELAY_MS 那点延迟：interact.js 的状态机需要一个
+         「处理中」的可见瞬间（它自己有 MIN_BUSY_MS=350ms 的下限），
+         320ms 是按下与结果之间的呼吸，不是网络延迟 —— 真正的等待由
+         按钮的 busy 态承担。 */
       function handleFavorite(next, api, item) {
-        if (!window.Storage) {
-          api.reject('这个浏览器不允许本地保存，收藏暂时用不了。');
+        if (!window.Api || typeof window.Api.patchItem !== 'function') {
+          api.reject('页面脚本没加载成功（window.Api 缺失），收藏没能保存。');
           return;
         }
+        var want = (next === true);
+
         setTimeout(function () {
-          var ok = window.Storage.toggleFavorite(item.itemId, {
-            type: item.type,
-            topicId: item.topicId || ''
+          window.Api.patchItem(item.itemId, { isFavorited: want }).then(function (res) {
+            /* ★ 用**接口回读的真值**改本地缓存，不是把 want 原样写上去 ——
+               接口层 PATCH 之后自己又查了一次库（契约 §4.2），
+               并发下别人可能也改过同一条，重画的必须是库里的状态。
+               ★ 改缓存必须在 api.resolve() 之前：interact.js 的 resolve()
+               会回头再问一次数据源（item-card 的 pressed 函数读的正是
+               这里这个 isFavorited），顺序反了按钮会显示旧状态。 */
+            var saved = res && res.item ? res.item : null;
+            if (CACHE.rows) {
+              CACHE.rows.forEach(function (r) {
+                if (r.item && r.item.itemId === item.itemId) {
+                  r.item.isFavorited = saved ? saved.isFavorited : want;
+                  if (saved) r.item.favoritedAt = saved.favoritedAt;
+                }
+              });
+            }
+
+            /* localStorage 退居二线：只在「按下那一瞬」做同页即时显示
+               （口径见本文件顶部）。这里失败也**不该**让整次操作失败 ——
+               真相已经写进库了，本机存储只是那一瞬的视觉过渡。 */
+            try {
+              if (window.Storage && window.Storage.isFavorite &&
+                  window.Storage.isFavorite(item.itemId) !== want) {
+                window.Storage.toggleFavorite(item.itemId, {
+                  type: item.type, topicId: item.topicId || ''
+                });
+              }
+            } catch (e) { /* 存储不可用不影响结果：库已经改了 */ }
+
+            api.resolve();
+            /* 先通知同页按钮校正，再重算两个列表。
+               顺序不能反：本页同一个 itemId 会在「收藏区」和「全部条目」各出现一次，
+               若不先通知，重渲染前那一瞬两块会显示不一致的状态。 */
+            document.dispatchEvent(new CustomEvent('ic-sync'));
+            // 收藏状态变了 → 两个列表都要重算（收藏区可能多一条、也可能少一条）
+            if (CACHE.rows) paint(CACHE.rows);
+            mockBar.textContent = want
+              ? '已收藏，这条的状态已写回数据库。'
+              : '已取消收藏，这条的状态已写回数据库。';
+            mockBar.classList.remove('mock-bar-warn');
+          }).catch(function (err) {
+            /* 失败：库里的状态**没变**。页面也不该显示改过 —— 直接 reject，
+               interact.js 会照数据源把按钮拨回原位，并把这句原因显示在卡片上。 */
+            var why = (window.Api && window.Api.friendlyOf)
+              ? window.Api.friendlyOf(err)
+              : (err && err.message ? err.message : '');
+            mockBar.textContent = '收藏没保存上：' + why +
+              '（错误码 ' + ((err && err.code) || 'UNKNOWN') + '）';
+            mockBar.classList.add('mock-bar-warn');
+            api.reject('没能保存收藏：' + why);
           });
-          if (ok !== next) {
-            api.reject('没能保存收藏，可能是浏览器不允许本地存储。');
-            return;
-          }
-          api.resolve();
-          /* 先通知同页按钮校正，再重算两个列表。
-             顺序不能反：本页同一个 itemId 会在「收藏区」和「全部条目」各出现一次，
-             若不先通知，重渲染前那一瞬两块会显示不一致的状态。 */
-          document.dispatchEvent(new CustomEvent('ic-sync'));
-          // 收藏状态变了 → 两个列表都要重算（收藏区可能多一条、也可能少一条）
-          if (CACHE.rows) paint(CACHE.rows);
         }, FAV_DELAY_MS);
       }
 
@@ -486,27 +544,31 @@
          没进过库）。空白 + 一句「读不到」比「看着像真的」诚实。
          ------------------------------------------------------------------ */
 
-        /* 收藏走后端（api-contract §2.1 的 R5 只读侧）
-           ★ 用 OrLocal 版而不是 getFavorites —— 后者失败时会 **reject**，
+        /* 条目走后端（契约 §6.1 R4 的 GET /api/items）
+           ★★ Day 24 修：这里原先是 getFavoritesOrLocal（那个接口**只返已收藏的**），
+             而本页「全部条目」要的是全部 —— 于是没收藏过的条目一条都显示不出来。
+             证据：库里 7 条 items、只收藏了 3 条，页面却写「共 2 条」。
+             契约 §6.1 R4 早就登记了这个接口，只是一直没实现，记录页就借用了收藏接口。
+           ★ 用 OrLocal 版而不是 getItems —— 后者失败时会 **reject**，
              而这里是 Promise.all，一旦有一个 reject 整个 then 都不走，
              直接掉进 catch 的错误态，页面变成「记录没能加载」。
              那正是 api.js 头注释约定 ② 要避免的事：接口一挂，页面不该空。
              OrLocal 把失败转成 { items: [], degraded: true, errorCode }，
              下游用 degraded 标志决定显示什么。 */
-        var favPromise = window.Api
-          ? window.Api.getFavoritesOrLocal({ limit: 100 }, [])
+        var itemsPromise = window.Api
+          ? window.Api.getItemsOrLocal({ limit: 100 }, [])
           : Promise.resolve(null);
 
-        /* 全部条目走后端：sessions 与 items 是两张表，
-           先取收藏（已是 items 的形态），再用 sessions 补出「所属主题与时间」。
+        /* sessions 单独取：items 与 sessions 是两张表，
+           R4 只给条目本身，还要用 sessions 补出「所属主题名与时间」。
            同理用 OrLocal：sessions 拿不到不该连累 items。 */
         var sessionsPromise = window.Api
           ? window.Api.getSessionsOrLocal({ limit: 100 }, [])
           : Promise.resolve(null);
 
-        Promise.all([favPromise, sessionsPromise])
+        Promise.all([itemsPromise, sessionsPromise])
           .then(function (r) {
-            var remoteFav = r[0];
+            var remoteItems = r[0];
             var remoteSessions = r[1];
 
             /* Day 13 补：强制空态（与成功态的区别是**数据先真的取到了**再决定显示空）。
@@ -514,28 +576,32 @@
                notFoundBox() 请求成功、有数据，只是筛选词没命中。*/
             if (FORCED === 'error') throw new Error('演示用：强制错误状态');
 
-            /* 后端读不到（DB_CONNECTION_REFUSED / 网络问题）→ 错误态。
-               这一条现在**直接落到 renderError**，不再退回假条目。 */
-            if (remoteFav && remoteFav.degraded) {
+            /* 后端读不到（凭据/表缺失/超时/网络问题）→ 错误态。
+               这一条现在**直接落到 renderError**，不再退回假条目。
+               ⚠️ 旧注释里举的 DB_CONNECTION_REFUSED 这个码 Day 18 就删掉了
+               （改走 HTTP API 后既没有 TCP 连接可拒、也没有 PGHOST 要解析），
+               现役的 DB 类是 DB_AUTH_FAILED / DB_TABLE_MISSING / DB_TIMEOUT /
+               DB_QUERY_FAILED —— 见契约 §1.4。 */
+            if (remoteItems && remoteItems.degraded) {
               /* ★ Day 23：原来直接传 errorMessage（接口层原始原因，
                  可能是英文码），现在翻成中文人话。
-                 注意 getFavoritesOrLocal 挂在结果上的字段是
-                 errorCode / errorMessage，这里要拼成err 形状给
-                 friendlyOf ——它只读 .code 与 .message 两个键。 */
+                 注意 getItemsOrLocal 挂在结果上的字段是
+                 errorCode / errorMessage，这里要拼成 err 形状给
+                 friendlyOf —— 它只读 .code 与 .message 两个键。 */
               renderError(
                 (window.Api && window.Api.friendlyOf)
-                  ? window.Api.friendlyOf({ code: remoteFav.errorCode,
-                                            message: remoteFav.errorMessage })
-                  : (remoteFav.errorMessage || ''),
-                { code: remoteFav.errorCode });
+                  ? window.Api.friendlyOf({ code: remoteItems.errorCode,
+                                            message: remoteItems.errorMessage })
+                  : (remoteItems.errorMessage || ''),
+                { code: remoteItems.errorCode });
               return;
             }
-            if (!remoteFav) {
+            if (!remoteItems) {
               renderError('NO_API', '这一页要访问后端取记录，但页面脚本没加载成功。');
               return;
             }
 
-            var rows = rowsFromRemote(remoteFav.items,
+            var rows = rowsFromRemote(remoteItems.items,
               remoteSessions ? remoteSessions.sessions : []);
 
             if (rows.length === 0 || FORCED === 'empty') {
