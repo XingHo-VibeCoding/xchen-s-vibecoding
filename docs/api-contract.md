@@ -108,7 +108,7 @@ https://cxj1528-d4g55ng0o54cbe296-1499954233.ap-shanghai.app.tcloudbase.com
 > 一种是 `sendError(res, 400, 'CODE', …)`，另一种是 `e.code = 'CODE'` 挂在抛出的错误上，
 > **只 grep `sendError` 会漏掉后面这半**（Day 19 就是这么漏了 `INVALID_JSON` 与 `PAYLOAD_TOO_LARGE` 的）。
 
-#### 通用（4 个，全接口共用）
+#### 通用（5 个；其中 `DUPLICATE` 只有 `write` 会返回、`INTERNAL_ERROR` 只有 `chat` / `analyze` 会返回）
 
 | `error.code` | 对应 | 场景 | HTTP | 出现在 |
 |---|---|---|---|---|
