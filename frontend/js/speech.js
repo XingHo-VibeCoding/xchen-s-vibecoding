@@ -96,6 +96,7 @@
   var audioCtx = null;      /* AudioContext，做音量分析 */
   var analyser = null;
   var rafId = null;         /* 音量检测的动画帧 */
+  var lastTs = 0;           /* 上一帧的时间戳，用来算「真实过了多少毫秒」 */
   var voiceFrames = 0;      /* 连续「有声音」的帧数 */
   var quietMs = 0;          /* 已经静音多久 */
   var spoke = false;        /* 这一轮里说过话没有（决定能否靠静音收尾） */
@@ -159,6 +160,16 @@
   function startRecording() {
     if (!canRecord()) return Promise.resolve('unsupported');
     if (recording) return Promise.resolve('already');
+    /* ★★ Day 24 修（界面与服务端对不上的一处）：AI 正在朗读时不开麦。
+       dialogue.html 一直按这个返回值在处理 —— 它明确把 'busy-speaking'
+       排除在「需要降级」之外（见那里的 startListening().then(...)），
+       但这里**从来没写过这条判断**，那条防护一直是空的。
+
+       ★ 为什么必须挡：浏览器没有回声消除，AI 外放的声音会被麦克风
+         拾到、当成用户说的话（理由同文件顶部「为什么不做一开口就打断」）。
+       ★ 不会把对话卡住：朗读结束时 speakAiLine 那一侧会再调一次
+         startListening，所以这里挡掉只是「等它说完」，不是「不听了」。 */
+    if (speaking) return Promise.resolve('busy-speaking');
 
     return micPermission().then(function (perm) {
       /* ★ 权限失败要说出来 —— 静默返回是最贵的错误：
@@ -178,6 +189,7 @@
           spoke = false;
           voiceFrames = 0;
           quietMs = 0;
+          lastTs = 0;
           hooks.onStateChange('recording');
           startVolumeWatch();
           clearTimeout(timerId);
@@ -250,6 +262,14 @@
       recording = true;    /* ★ 必须在建好音量检测后才置 true */
       recorder = makeRecorder();
       recorder.start();
+      /* ★★★ Day 25 修（缺陷 1/2）：循环必须在这里**第一次启动**。
+         之前 tickVolume 只在自己末尾用 requestAnimationFrame 给自己续帧，
+         **没有任何地方第一次调用它** —— 于是这个循环从来没跑过：
+         音量条不动、静音秒数永远不累计、「说完停一下自动提交」从未生效。
+         录音就只能靠手动点「我说完了」或 30 秒上限结束 ——
+         这正是用户报的「讲完了他还没输入」+「还在讲就被截断提交」。 */
+      lastTs = 0;
+      rafId = requestAnimationFrame(tickVolume);
     } catch (e) {
       /* 建不起来就退化成「只能手动停」——
          不因为音量检测失败就整个功能不可用。 */
@@ -280,7 +300,7 @@
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 
-  function tickVolume() {
+  function tickVolume(ts) {
     if (!recording || !analyser || !buf) return;
     analyser.getByteTimeDomainData(buf);
     /* ★ 算平均绝对偏差：时域信号围绕 128 摆动，
@@ -293,12 +313,25 @@
     var level = sum / buf.length / 128;
     hooks.onVolume(level);
 
+    /* ★★★ Day 25 修（缺陷 2/2）：算「这一帧离上一帧**真实过了多少毫秒**」。
+       原来这一行是 `quietMs += FRAME_MS`，而 FRAME_MS 全项目没有定义 ——
+       一旦执行到这里就抛 ReferenceError。而且它抛错的位置很毒：
+       末尾那句 `rafId = requestAnimationFrame(tickVolume)` 会被跳过，
+       循环从此静默停摆（不报给用户，只在 Console 里留一行）。
+
+       ★ 为什么按时间戳差，而不是按「帧数 × 16.7」：
+         rAF 的间隔不是恒定的 —— 切到后台标签页会被节流到约 1 次/秒，
+         按帧数累加会把静音时长严重低估（要 150 帧才够 2.5 秒 → 实际拖到 150 秒）。
+         用真实时间差则在 60fps 和 1fps 两种情况下都算得对。 */
+    var dt = (lastTs && ts > lastTs) ? (ts - lastTs) : 0;
+    lastTs = ts;
+
     if (level > VOLUME_THRESHOLD) {
       voiceFrames++;
       quietMs = 0;
       spoke = true;
     } else if (voiceFrames >= VOICE_FRAMES) {
-      quietMs += FRAME_MS;
+      quietMs += dt;
       /* ★ 只有「已经说过话」之后才允许靠静音收尾。
          否则用户还没开口就因为环境安静被判为「说完」，
          得到一个空录音、弹一次「没听清」—— 纯属骚扰。 */

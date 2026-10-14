@@ -1378,6 +1378,16 @@ body::before {
 
 .rec-text {
   font-weight: 500;
+  /* ★★ Day 25：锁定宽度 + 不换行（抖动修复的第 3 道保险）。
+     这行字会在「等你开口……」（6 字）和「正在听……（说完停一下就好）」
+     （14 字）之间切换，长度差一倍多。它和右边的 .rec-hint 同在
+     .recorder 这一行 flex 里 —— 宽度一变，右边那行说明文字就被
+     推来推去，看起来「一直在跳」。
+     光靠 JS 侧「只在翻转时改」只能让跳变得稀疏，锁定宽度才能让它彻底不跳。
+     15em 是按最长那条（14 字）留的余量。 */
+  display: inline-block;
+  min-width: 15em;
+  white-space: nowrap;
 }
 
 /* 计时数字：等宽数字，跳秒时不会左右抖。
@@ -1656,6 +1666,13 @@ body::before {
      它是「A 组（会议上）」的族色，而这个录音条属于通用控件；
      用珊瑚会误读成警示（那是降级提示才用的）。 */
 .rec-meter {
+  /* ★★★ Day 25 修（「那块一直闪」的根因）：这是一条**轨道**，宽度必须固定。
+     改之前 JS 每帧把它的 width 写成百分比（`el.recMeter.style.width = pct+'%'`）——
+     于是它自己每帧伸缩，而 .recorder 是 flex-wrap 行，它的宽度一变，
+     右边 .rec-hint 就被推来推去（音量再大点还会把整行顶得换行）。
+     flex: 0 1 140px = 基准 140px、空间不够时可缩，但**绝不随音量变**。 */
+  flex: 0 1 140px;
+  min-width: 0;
   height: 6px;                     /* 细条：它只是辅助信息，不该抢戏 */
   margin-top: var(--space-2);
   border-radius: 3px;
@@ -1667,12 +1684,17 @@ body::before {
 /* 真正随音量变化的那一段。
    ★ 为什么用 ::after 而不直接改 .rec-meter 的 width：
      父元素要留住轨道底色（让用户看得出「总共多宽」），
-     子元素只负责「现在到哪」。这是两种不同的信息，不能合并。 */
+     子元素只负责「现在到哪」。这是两种不同的信息，不能合并。
+   ★★ Day 25：宽度改由自定义属性 --voice 驱动。
+     自定义属性会**继承**，所以 JS 只要把 --voice 写在 .rec-meter 上，
+     这个 ::after 就能读到 —— 这是「父元素定尺寸、子元素表进度」的正解。
+     （改之前这里写死 width:0，而 JS 去改父元素自己的 width，
+     两边错位 → 填充段从来没显示过，用户看到的是轨道自己在伸缩。） */
 .rec-meter::after {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;               /* 用 inset 简写，不必写四条 */
-  width: 0;                        /* 初始宽度，由 JS 实时改 */
+  width: var(--voice, 0%);         /* 由 JS 实时改 --voice */
   background: var(--primary);
   border-radius: 3px;
   opacity: 0.25;                   /* 没声音时淡一点，别像坏了 */

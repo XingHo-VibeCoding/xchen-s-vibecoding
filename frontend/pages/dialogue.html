@@ -911,37 +911,60 @@
            流程不多一层。 */
       var SPEECH_OK = !!(window.Speech && window.Speech.supported());
 
-      /* 语音提示行：显示即自动消失的瞬时状态。 */
+      /* ★★ Day 25 修（状态文字抖动）：记住「上一次判定的有没有在说话」，
+         只在**真的翻转**时才改 DOM。null = 还没写过，第一帧一定要写一次。
+         ★ 迟滞（hysteresis）：开口要求 ≥6、停下要求 <3，中间地带保持不动。
+           用同一个阈值的话，麦克风底噪会让数值在阈值上下反复横跳 → 文字闪烁。 */
+      var recTextVoiced = null;
+      var VOICE_ON_PCT = 6;
+      var VOICE_OFF_PCT = 3;
+
+      /* ★★ Day 25 修（提示区一路长高）：把「诊断段」和「瞬时提示」
+         分开存，**渲染时才拼**。
+         改之前只有一份字符串、新提示只能往后接（diag + '　|　' + msg）——
+         于是同一句「听到了，正在识别」被接了十几遍，提示区长到四五行，
+         把下面的按钮越推越远。根因是「只有一份、只能追加」，
+         不是「某条文案太长」。拆开之后：诊断段照旧**保留**（Day 23 的初衷不变），
+         瞬时提示变成**替换**语义 —— 接多少次都只占一行。 */
+      var diagText = '';   /* 只装【诊断】段：常驻，不随倒计时消失 */
+      var liveMsg = '';    /* 只装当前那一条瞬时提示：会被替换/清空 */
+
+      function renderNote() {
+        if (!el.recNote) return;
+        var parts = [];
+        if (diagText) parts.push(diagText);
+        if (liveMsg) parts.push(liveMsg);
+        el.recNote.textContent = parts.join('　|　');
+        el.recNote.hidden = parts.length === 0;
+      }
+
+      /* 语音提示行：显示即自动消失的瞬时状态。
+         ★★ Day 23 第六次修订（保留）：**别把诊断信息冲掉** ——
+            诊断恰恰是排查「为什么不录音」的唯一线索。 */
       function noteSpeech(msg, ms) {
         if (!el.recNote) return;
-        /* ★★ Day 23 第六次修订：**别把诊断信息冲掉**。
-           原来直接 `textContent = msg`，于是后来的提示
-           （「这句没听清」）会把之前打的诊断整行替换掉——
-           而那些诊断恰恰是排查「为什么不录音」的唯一线索。
-           实测：我加了诊断行还是查不出问题，因为每次都被覆盖，
-           最后只看到「这句没听清」这句最没用的。
-
-           现在：诊断信息**永远保留**，普通提示追加在后面。 */
-        var diag = el.recNote.textContent || '';
-        var isDiagOnly = diag.indexOf('【诊断】') === 0 &&
-                         diag.indexOf('　|　') === -1;
-        el.recNote.textContent = (isDiagOnly || !diag)
-          ? msg
-          : (diag + '　|　' + msg);
-        el.recNote.hidden = false;
+        liveMsg = msg;
+        renderNote();
         if (noteSpeech._t) clearTimeout(noteSpeech._t);
+        noteSpeech._t = null;
         if (ms !== 0) {
           noteSpeech._t = setTimeout(function () {
-            /* ★ 到期只隐藏普通提示那部分，诊断行留着 ——
+            /* ★ 到期只清瞬时提示，诊断段留着 ——
                它是给人排查用的，不该跟着倒计时一起消失。 */
-            el.recNote.hidden = (el.recNote.textContent || '').indexOf('【诊断】') !== 0;
+            liveMsg = '';
+            renderNote();
           }, ms || 6000);
         }
       }
 
+      /* 清空整个提示区（诊断段 + 瞬时提示）。
+         ★★ Day 25：每开新一场都调一次 —— 否则每点一次「开始说话」，
+         诊断段都会再追加一遍，同样会无限长高（和瞬时提示同一个根因）。 */
       function clearSpeechNote() {
         if (noteSpeech._t) { clearTimeout(noteSpeech._t); noteSpeech._t = null; }
-        if (el.recNote) { el.recNote.hidden = true; el.recNote.textContent = ''; }
+        diagText = '';
+        liveMsg = '';
+        renderNote();
       }
 
       /* ================= 诊断行（Day 23 第五次修订）=================
@@ -957,11 +980,12 @@
         if (!el.recNote) return;
         var txt = '【诊断】' + msg;
         /* 追加而不是覆盖：一次点「开始说话」要报好几项，
-           覆盖的话只剩最后一项，看不到前面的关键信息。 */
-        el.recNote.textContent = el.recNote.textContent
-          ? (el.recNote.textContent + '　|　' + txt)
-          : txt;
-        el.recNote.hidden = false;
+           覆盖的话只剩最后一项，看不到前面的关键信息。
+           ★★ Day 25：改为写进 diagText 再统一渲染（原来直接改
+           textContent）—— 追加语义不变，但它不会再和瞬时提示
+           混成一条只能越来越长的串。 */
+        diagText = diagText ? (diagText + '　|　' + txt) : txt;
+        renderNote();
       }
 
       /* 点「开始说话」时打一遍环境快照。
@@ -1086,12 +1110,34 @@
         window.Speech.on('onVolume', function (level) {
           if (!el.recMeter) return;
           var pct = Math.min(100, Math.round(level * 600));
-          el.recMeter.style.width = pct + '%';
+          /* ★★★ Day 25 修（「那块一直闪」的根因）：
+             这里是 `el.recMeter.style.width = pct + '%'` —— 改的是**轨道自己**的宽度，
+             而 .recorder 是 flex-wrap 行：轨道一宽一窄，右边 #rec-hint
+             就被推来推去（音量再大点还会把整行顶得换行）。
+             现在只改自定义属性 --voice，尺寸交给 CSS：
+             轨道固定 140px 不动，只有 ::after 那段填充在长。
+             ★ 为什么以前看不出问题：::after 的 width 写死 0 且没人改，
+               所以「填充」从来没显示过 —— 用户看到在动的是灰色轨道本身。 */
+          el.recMeter.style.setProperty('--voice', pct + '%');
           el.recMeter.style.opacity = pct > 0 ? '1' : '0.25';
-          if (el.recText) {
-            if (pct < 4) el.recText.textContent = '等你开口……';
-            else el.recText.textContent = '正在听……（说完停一下就好）';
-          }
+
+          /* ★★ Day 25 修（「那块地方一直跳」的根因）：
+             这个回调是**每一帧**都跑的（约 60 次/秒）。原来它每帧都写
+             textContent，而两条文案长度差一倍（6 字 vs 14 字）——
+             .rec-text 在 .rec-live 里，.rec-live 又与 #rec-hint
+             挤在 .recorder 同一行 flex 里：宽度一变，右边那行说明文字
+             就被推来推去，看起来「一直在跳」。
+             改法：① 只在翻转时写一次 ② 加迟滞（见 VOICE_ON_PCT）
+                   ③ 宽度由 CSS 锁死（.rec-text{min-width}），双保险。 */
+          if (!el.recText) return;
+          var voiced = recTextVoiced;
+          if (pct >= VOICE_ON_PCT) voiced = true;
+          else if (pct < VOICE_OFF_PCT) voiced = false;
+          if (voiced === recTextVoiced) return;   /* 没翻转 → 一个字都不碰 */
+          recTextVoiced = voiced;
+          el.recText.textContent = voiced
+            ? '正在听……（说完停一下就好）'
+            : '等你开口……';
         });
 
         /* 录音态变化：'recording' / 'transcribing' / 'idle' */
@@ -1103,7 +1149,7 @@
             if (el.recText) el.recText.textContent = '听到了，正在识别……';
             noteSpeech('听到了，正在识别（第一次会稍慢一点）。', 3000);
           } else if (st === 'idle') {
-            if (el.recMeter) { el.recMeter.style.width = '0'; el.recMeter.style.opacity = '0'; }
+            if (el.recMeter) { el.recMeter.style.setProperty('--voice', '0%'); el.recMeter.style.opacity = '0'; }
           } else if (st === 'recording') {
             if (el.recText) el.recText.textContent = '正在听……（说完停一下就好）';
           }
@@ -1307,6 +1353,10 @@
         /* ★ Day 23 第五次修订：开跑前先报一遍环境。
            用户报「完全没反应」时，这一行能直接告诉我们在哪一步卡住，
            不用再来回问。 */
+        /* ★★ Day 25：开新一场先把上一场的提示清空。
+           不清的话，每点一次「开始说话」诊断段都会再追加一遍，
+           提示区会一场比一场长（和瞬时提示无限追加是同一个根因）。 */
+        clearSpeechNote();
         diagnose();
       });
 
