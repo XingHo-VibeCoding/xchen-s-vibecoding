@@ -241,6 +241,35 @@ const notCalled = FN_NAMES.filter(function (fn) {
 t('五个函数的 sendJSON 都调用了 logReq', notCalled.length === 0,
   notCalled.length === 0 ? '5/5' : '没调用：' + notCalled.join(', '));
 
+console.log('\n【8】云函数不得自己写 CORS 头（Day 24 尾巴：这就是「语音失败: UNKNOWN」的真因）');
+/* ★ 为什么要钉这一条：2026-10-13 语音在**真浏览器**里一直报
+   `【诊断】语音失败: UNKNOWN`，而云函数日志显示每次请求都 `→ 200 ok`。
+   真因：`speech` 函数**自己又写了一组** CORS 响应头，与**网关**按跨域配置
+   回的那一份撞车 —— 浏览器收到**两个同名的 ACAO 头**，规范规定「该头多值即非法」
+   → 跨域校验失败 → `fetch` 被 reject（err **没有 code**）→ 前端只能落到 UNKNOWN。
+   ★ 它极难发现，因为三条路全是绿的、只有真浏览器会挂：
+     · `curl` 全绿（不校验 CORS、也不在乎重复头）
+     · 云函数日志全绿（请求确实到达并成功返回）
+     · 连 `OPTIONS` 预检也绿（预检由**网关自己应答**、不转发给函数，那份是干净的）
+   ★ 口径：CORS 由**网关的跨域设置**统一负责（控制台 `#/env/cross-domain`），
+     函数里一律不写。另外 5 个函数本来就一条都没写，这里把 speech 一起钉住。
+   ★ 判据针对的是「代码里有没有真的设这个头」，所以扫描前会**剥掉注释**——
+     否则光是注释里提到头名就会误报。 */
+const CORS_HEAD_RE = /Access-Control-Allow-(Origin|Methods|Headers)/;
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')   /* 块注释 */
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1'); /* 行注释（避开 http:// 这种） */
+}
+const ALL_FUNCS = FN_NAMES.concat(['health']);
+const corsOffenders = ALL_FUNCS.filter(function (fn) {
+  const s = fs.readFileSync(
+    path.join(__dirname, 'cloudfunctions', fn, 'index.js'), 'utf8');
+  return CORS_HEAD_RE.test(stripComments(s));
+});
+t('六个函数都不自己写 CORS 头（交给网关）', corsOffenders.length === 0,
+  corsOffenders.length === 0 ? '6/6 干净' : '自己去写了：' + corsOffenders.join(', '));
+
 console.log('\n────────────────────────────');
 console.log('通过 ' + pass + ' / 失败 ' + fail);
 if (fail > 0) process.exit(1);

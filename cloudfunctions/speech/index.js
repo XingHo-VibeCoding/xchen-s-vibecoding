@@ -65,15 +65,45 @@ const ASR_APPID = process.env.ASR_APPID || '';
 const ASR_REGION = process.env.ASR_REGION || 'ap-shanghai';
 const ASR_HOST = 'asr.tencentcloudapi.com';
 const ASR_SERVICE = 'asr';
-const ASR_VERSION = '2019-02-14';
-/* 引擎类型：16k 中英混合。目标用户练英语，偶尔会切中文，
-   16k_zh 是中文引擎，纯英语口音准确率反而不如中英混合。 */
-const ASR_ENGINE_MODEL_TYPE = '16k_zh';
-const ASR_VOICE_ID = '40000000';   /* 0 = 自由说；这版不需要说话人分离 */
+/* ★★ Day 24 修：原写 '2019-02-14' 是错的。
+   一句话识别（SentenceRecognition）的 Version 是 **'2019-06-14'** —— 见官方文档「输入参数」表。 */
+const ASR_VERSION = '2019-06-14';
+/* 引擎类型：中英混合 → 官方取值 **`16k_zh-PY`**（文档描述「中英粤」）。
+   ★ Day 24 修正：原写 '16k_zh'，而它在文档里是「**中文通用**」、并非中英混合 ——
+     注释里那句理由（"16k_zh 是中英混合"）与文档不符，已按用户选择改成 16k_zh-PY。 */
+const ASR_ENGINE_MODEL_TYPE = '16k_zh-PY';
+/* ★★ Day 24 删掉 `ASR_VOICE_ID`：VoiceId 是**实时语音识别**的参数，
+   一句话识别的「输入参数」表里**没有**这个字段。原来放在请求体里只会被忽略。 */
 
 function checkEnv() {
   const need = ['ASR_SECRET_ID', 'ASR_SECRET_KEY', 'ASR_APPID'];
   return need.filter((k) => !process.env[k]);
+}
+
+/* ---------- 密钥自检（Day 24 · 排障用）----------
+   用途：腾讯云回 `SignatureFailure` / `SecretIdNotFound` 时，用它区分三种抄写错误 ——
+     · 长度不对（抄漏了字符，或抄了控制台上打了码的显示值）
+     · 带空白（从控制台粘贴时夹带空格或换行 —— **肉眼看不见**，
+       而它产生的正是 `SignatureFailure`，是本类问题最常见的成因）
+     · 填错位（把 SecretId 填到了 SecretKey 上）
+   正常形状（腾讯云的固定规格，可据此判断）：
+     SecretId  = 36 位、`AKID` 开头
+     SecretKey = 32 位、不含任何空白字符
+   ★★ 安全红线：**只打印长度与「有没有空白」，永不打印值本身**。
+      长度和空白不构成泄露 —— 这也正是它能安全留在代码里的原因。 */
+function logEnvShape() {
+  try {
+    const id = ASR_SECRET_ID;
+    const key = ASR_SECRET_KEY;
+    console.log('[speech] env-shape' +
+      ' idLen=' + id.length +
+      ' idIsAKID=' + /^AKID/.test(id) +
+      ' keyLen=' + key.length +
+      ' keyTrimLen=' + key.trim().length +
+      ' keyHasBlank=' + /\s/.test(key));
+  } catch (e) {
+    /* 自检失败绝不影响主流程 —— 它只是排障用的旁路信息 */
+  }
 }
 
 /* ---------- 请求日志（Day 23 · 余力加练）---------- */
@@ -115,17 +145,29 @@ function sendJSON(res, httpStatus, body) {
   /* 日志已打：Day 23 要求每次响应都留一条「时间/路径/结果」 */
   res.writeHead(httpStatus, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    /*★ 浏览器录音页可能跨域调用（本地开发时前端在 8010、函数在别的域）。
-       ★ 为什么放开 Origin 而不是回显它：
-         回显等于反射任意 Origin，等于没设 CORS；
-         CloudBase 函数没有统一的允许列表配置可依，
-         而这个接口**不接受任何凭据**（无 Cookie、无签名），
-         被人拿去刷也会打在没有密钥的空壳上（→ ASR_NOT_CONFIGURED）。
-         所以固定允许即可，不必按请求头动态决定。 */
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Cache-Control': 'no-store'
+    /*★★★ Day 24 尾巴上删掉了这里原本的一组 CORS 头（第一版 bug 的真因）。
+       Day 23 当初在这里多写过一组 CORS 响应头 ——
+       允许来源 `*`、允许方法 `POST, OPTIONS`、允许头 `Content-Type`。
+       理由是「CloudBase 函数没有统一的允许列表配置可依」—— **这句是错的**：
+       网关的「跨域设置」就是那份配置（控制台 `#/env/cross-domain`），
+       而且 `/api/speech-to-text` 这条路由的跨域开关**本来就是开的**，
+       网关自己会回 `Access-Control-Allow-Origin: <请求来源>`。
+
+       ★ 两边都写 → 浏览器收到**两个同名的 ACAO 头** →
+         规范规定「该头出现多值即非法」→ 跨域校验失败 →
+         fetch 被 reject（且 err **没有 code**）→ 前端只能落到 `语音失败: UNKNOWN`。
+
+       ★★ 症状极具迷惑性，三条路都是绿的、只有真浏览器挂：
+         · `curl` 全绿 —— 它根本不校验 CORS、也不在乎重复头；
+         · 预检 `OPTIONS` 也绿 —— 预检由**网关自己应答**、不转发给函数，
+           所以那一份是干净的（实测：预检回 `http://localhost:8010`、
+           实际 POST 回 `http://localhost:8010,*` —— 差异就在这里露的馅）；
+         · 云函数日志也全绿 —— 请求确实到达、也成功返回了 200。
+
+       ★ 另外 5 个云函数（read / write / chat / analyze / health）
+         **一处都没写 CORS 头**，全靠网关 —— 这里对齐它们即可。
+         （`.test-request-log.js` 里加了一条回归检查钉住这件事。） */
   });
   res.end(JSON.stringify(body));
 }
@@ -140,16 +182,49 @@ function sendError(res, httpStatus, errorCode, message, extra) {
 
 /* ---------- 腾讯云 TC3-HMAC-SHA256 签名 ----------
    官方文档给的四步：① 构造规范化请求 ② 构造待签字符串
-   ③ 用密钥派生签名 ④ 拼Authorization 头。
-   每一步都对应下面一段，避免「抄了但不知道为什么」。 */
-function sign(payloadStr) {
-  const now = new Date();
-  /* ① 时间戳：腾讯云要求 RFC3339（UTC，以 Z 结尾） */
-  const timestamp = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  /* 用服务器当前时间而非浏览器传来的，避免客户端时钟不准导致签名失败 */
-  const date = timestamp.slice(0, 8);
+   ③ 用密钥派生签名 ④ 拼 Authorization 头。
+   每一步都对应下面一段，避免「抄了但不知道为什么」。
 
-  /* ② 待签字符串 = 4 行固定文本 + 哈希，顺序与换行都不能变 */
+   ★★ Day 24 修正**两处格式错误**（今天用 `tcb logs search` 挖到的第二个真 bug）。
+     腾讯云的原文报错是：
+       `[AuthFailure.InvalidAuthorization] … Date in Credential not valid format.`
+     对照官方「签名方法 v3」文档里那个**逐值可核**的完整示例
+     （时间戳 1551113065 / 日期 2019-02-25 / service cvm）：
+       ① `stringToSign` 的**第二行是 Unix 时间戳**（示例 `1551113065`）——
+          原来塞的是 `20261013T150150Z` 这种紧凑 RFC3339 串 → **错**。
+       ② `Date`（出现在 Credential、CredentialScope，以及派生密钥第一次 HMAC 的**盐**）
+          是 **`YYYY-MM-DD` 带连字符**（示例 `2019-02-25`），
+          并且必须**由 X-TC-Timestamp 按 UTC+0 换算**（文档专门提醒：混进本地时区，
+          东八区凌晨调用必失败）—— 原来用 `timestamp.slice(0, 8)` 得到 `20261013` → **错**。
+     ★ 时间戳（Unix 秒）改为**由调用方传进来**，保证签名用的与 `X-TC-Timestamp`
+       请求头**是同一个值**（文档：「Date 取值需要和公共参数 X-TC-Timestamp
+       换算的 UTC 标准时间日期一致」）。
+       ★ 该参数可选：不传就取当前时间 —— 这样 `.test-asr-sign.js` 现有的调用方式原样有效。
+     ★ `Authorization` 头里那个 `SignedHeaders=content-type;host` 字段本身是**对的**
+       （规则只要求「至少包含 host 与 content-type」）。
+       ★★ 但规范请求串里**还必须再写一次**它 —— 见下面 ② 处那段说明，
+         漏掉的是**规范请求串里**的那一份，它才是 `SignatureFailure` 的真因。
+         （当时看到 Authorization 里已经有了，就误以为这一项全书都对 —— 这是本次踩的坑。） */
+function sign(payloadStr, tsSeconds) {
+  /* ① 时间戳：Unix 秒（要与 X-TC-Timestamp 请求头一致） */
+  const ts = (tsSeconds === undefined || tsSeconds === null)
+    ? Math.floor(Date.now() / 1000)
+    : tsSeconds;
+  /* 对应的 UTC 日期，形如 2019-02-25（**带连字符**，且只取 UTC 那一天） */
+  const date = new Date(ts * 1000).toISOString().slice(0, 10);
+
+  /* ② 待签字符串 = 4 行固定文本 + 哈希，顺序与换行都不能变
+     ★★ Day 24 修**第三处**（也是 `SignatureFailure` 的真因）：
+        规范请求串的**倒数第二行必须是 `SignedHeaders`**（这里是 `content-type;host`），
+        而原来这一段只有 7 行、**把它整个漏掉了** —— 少了它签名怎么算都对不上，
+        腾讯云回的正是 `[AuthFailure.SignatureFailure]`。
+        ★ 为什么极易漏：`Authorization` 头里**也有**一个 `SignedHeaders=content-type;host`
+          字段，那一处是对的 → 于是「content-type;host 我已经写过了」的错觉就成立。
+          但**规范请求串里必须再出现一次**，两处互相独立、都要写。
+        ★ 官方拼法（tencentcloud-sdk-python `abstract_client._get_tc3_signature`）：
+          `method \n uri \n query \n canonical_headers \n signed_headers \n payload_hash`
+          其中 canonical_headers 自身以 \n 结尾，展开后 `signed_headers` 正落在第 7 行、
+          上面留一个空行 —— 与下面这个数组逐项对应。 */
   const hashedPayload = crypto.createHash('sha256').update(payloadStr, 'utf8').digest('hex');
   const canonicalRequest = [
     'POST',
@@ -157,17 +232,19 @@ function sign(payloadStr) {
     '',                                   /* query 为空 */
     'content-type:application/json; charset=utf-8',
     'host:' + ASR_HOST,
-    '',
-    hashedPayload                          /* 最后一个空行不能省 */
+    '',                                   /* canonical headers 结束后的空行 */
+    'content-type;host',                   /* ★ SignedHeaders：漏了它 = SignatureFailure */
+    hashedPayload                          /* 最后一行是 payload 哈希 */
   ].join('\n');
   const stringToSign = [
     'TC3-HMAC-SHA256',
-    timestamp,
+    String(ts),                            /* ★ 第二行 = Unix 时间戳（不是日期串） */
     date + '/' + ASR_SERVICE + '/tc3_request',
     crypto.createHash('sha256').update(canonicalRequest, 'utf8').digest('hex')
   ].join('\n');
 
-  /* ③ 派生签名：日期 → 服务 → 终止符，三次 HMAC 链 */
+  /* ③ 派生签名：日期 → 服务 → 终止符，三次 HMAC 链
+        ★ 第一次 HMAC 的盐用**带连字符的 date**，与 Credential 里那个必须一致 */
   function hmac(key, str) {
     return crypto.createHmac('sha256', key).update(str, 'utf8').digest();
   }
@@ -187,23 +264,38 @@ function sign(payloadStr) {
 /* ---------- 调用一句话识别 ---------- */
 function callASR(buffer, contentType) {
   return new Promise((resolve, reject) => {
-    /* ★ 数据在Base64 里：腾讯云的 HTTP API 收JSON，音频要base64。
-       一句英语约 100–200KB，转 base64 后 +33% —— 云函数内存 256MB 够用，
-       但**别把这个上限调太大**（见下面的 MAX_BODY）。 */
+    /* ★★ Day 24 重写这一段（本次 speech 修不好的**根因**就在这）。
+       原来这里是 **API v1 风格**的请求体：把 AppId / SecretId / Action / Version /
+       Timestamp 全塞进 JSON 里。而本项目走的是 **v3** ——
+       公共参数必须放**请求头** `X-TC-*`，请求体只放该接口自己的业务参数。
+       症状（今天用 `tcb logs search` 挖出来的）：
+         腾讯云回 `MissingParameter: The request header is missing a required
+         common parameter `X-TC-Action``，被兜底映射成 `ASR_FAILED`。
+       ★ 字段以官方文档「一句话识别 · 输入参数」为准：
+         Action（头）= SentenceRecognition、Version（头）= 2019-06-14；
+         体 = SubServiceType / ProjectId / EngSerViceType / VoiceFormat /
+              SourceType(1=直接传数据) / Data(base64) / DataLen(未编码字节数)。
+       ★ 音频要 base64；一句英语约 100–200KB，+33% 后 256MB 内存够用
+         （上限见下面的 MAX_BODY）。 */
     const payload = JSON.stringify({
-      AppId: Number(ASR_APPID),
-      SecretId: ASR_SECRET_ID,
-      Timestamp: Math.floor(Date.now() / 1000),
-      Version: ASR_VERSION,
-      Action: 'SentenceRecognition',
-      Data: buffer.toString('base64'),
-      EngineModelType: ASR_ENGINE_MODEL_TYPE,
-      VoiceId: ASR_VOICE_ID,
+      SubServiceType: 2,                        /* 2 = 一句话识别（无效会被 InvalidParameterValue 拒） */
+      ProjectId: 0,
+      EngSerViceType: ASR_ENGINE_MODEL_TYPE,    /* ★ 叫 EngSerViceType，不是 EngineModelType */
       VoiceFormat: voiceFormatOf(contentType),
-      RequestId: crypto.randomUUID()
+      SourceType: 1,                            /* 1 = 直接上传语音数据（0 才是传 URL） */
+      Data: buffer.toString('base64'),
+      DataLen: buffer.length                    /* 文档：base64 **之前**的字节数 */
     });
 
-    const auth = sign(payload);
+    /* 发请求前先记一条密钥形状自检：这样一旦腾讯云回鉴权类错误，
+       日志里能直接看出是「值抄错了」还是「密钥不配对」，
+       不用让人反复重填盲试。★ 只记长度/空白，不记值（见 logEnvShape 注释）。 */
+    logEnvShape();
+
+    /* ★ 时间戳只算一次，签名与 X-TC-Timestamp 请求头共用它 ——
+       两者必须是同一个值（见 sign() 上方那段注释）。 */
+    const timestamp = Math.floor(Date.now() / 1000);
+    const auth = sign(payload, timestamp);
 
     const req = https.request(
       {
@@ -214,6 +306,14 @@ function callASR(buffer, contentType) {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Content-Length': Buffer.byteLength(payload),
+          /* ★★ 这四个 `X-TC-*` 公共参数头是本次补的、也是修好的关键：
+             少了它们腾讯云连请求都不认（`X-TC-Action` 必填）。
+             ★ 它们**不参与签名** —— 官方示例里 SignedHeaders 就是 `content-type;host`,
+               所以这里补头即可，sign() 一个字都不用动（它的 20 项单测原样有效）。 */
+          'X-TC-Action': 'SentenceRecognition',
+          'X-TC-Version': ASR_VERSION,
+          'X-TC-Timestamp': String(timestamp),
+          'X-TC-Region': ASR_REGION,
           Authorization: auth,
           Host: ASR_HOST
         }
