@@ -1,0 +1,23 @@
+# 行尾统一 —— 只锁定「必须是 LF 才不出事」的几类文件
+#
+# 为什么要这个文件：
+#   本仓库 core.autocrlf = true。不加这几行时，git 会在 checkout 时把工作区文件
+#   换成 CRLF，于是 `bash xxx.sh` 会因为行尾的 \r 报错
+#   （典型报错：`$'\r': command not found`）。
+#   Day 25 加 .workbuddy/skills/kouyu-verify-project/scripts/check.sh 时实测到：
+#   `git add` 会警告 `LF will be replaced by CRLF the next time Git touches it`。
+#   仓库里存的本来就是 LF，但**下次 clone / checkout 到工作区**会变 —— 那天才炸。
+#
+# 为什么不用 `* text=auto`：
+#   那会重写全仓库的规范化行为，改动面太大。这里只锁定「要被执行 / 项目自己已有规矩」
+#   的三类，其余保持 git 默认。
+#
+# 注意：加这几行**不会**改动任何已有文件的仓库内容（它们本来就是 LF），
+#       只是把「以后 checkout 出来也必须是 LF」这条钉住。
+
+*.sh   text eol=lf
+*.py   text eol=lf
+
+# .sql 不是这里新定的规矩，是项目自己早就写了：
+#   见 .workbuddy/memory/notes/sql-pitfalls.md §2「行尾统一 LF，别留 CRLF」。
+*.sql  text eol=lf

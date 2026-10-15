@@ -157,7 +157,7 @@
 | **出处** | `frontend/regress.js:3`（判据）、`:194`（控制台行）、`:196`；`notes/headless-cache.md §5` |
 | **★ 误报风险** | ① **`regress.js` 永远 `process.exit(0)`，退出码不可信** —— 必须解析输出文本；② **通过数不可信**（只测 DOM/CSS），真正管用的是「控制台 0 条报错」；③ `node --check` **抓不到未定义变量**这类运行时错误，只有真跑才暴露；④ 本地服务没起时本项判 **SKIP**，不许判 PASS |
 | **★★ 实测证据（Day 25 故意弄坏）** | 在 `frontend/js/speech.js` 末尾加一行 `var __day25BrokenProbe = FRAME_MS;`（`FRAME_MS` 从未定义），然后：<br>· `node --check frontend/js/speech.js` → **通过**（静态一片绿）<br>· 本项 → **FAIL**，实际值 `===== 结果：25 通过 / 0 失败 ===== ；【控制台】Uncaught \| Uncaught \| …`<br>★ 注意**回归的「25 通过 / 0 失败」照样全绿** —— 揪出它的只有「控制台 0 条报错」这一条。这就是为什么判据必须看控制台，不能看通过数 |
-| **已知局限** | 控制台那行打出来只有 `Uncaught`（来自 `regress.js:141` 的 `exceptionDetails.text`），**不含错误消息**，所以只能判「有没有报错」、不能告诉你「报了什么」。要更好用需改 `regress.js` 去读 `exceptionDetails.exception.description` —— **那要动既有开发工具，先问用户** |
+| **★ 已修（Day 25 当天）** | 原来控制台那行只打 `Uncaught`（`regress.js:141` 取的是 `exceptionDetails.text`，**它永远是「Uncaught」**），只能判「有没有报错」、不知道「报了什么」。已改成读 `exceptionDetails.exception.description` 第一行 + 位置，并**去重、最多留 3 条**（同一处错每页每断点都会重报，否则这行会被同一句话刷满）。<br>**实测对照**：改前 `【控制台】Uncaught \| Uncaught \| Uncaught \| …`；改后 `【控制台】ReferenceError: FRAME_MS is not defined @speech.js:459` |
 
 ### 4.2 内联 JS 的 `/*` 与 `*/` 配对
 
@@ -264,13 +264,22 @@
 所以「被跟踪的文件」要用 `--no-index` 问纯规则、「注释里的字样」要先剥注释。
 一句话：**判据要锚定到「行/规则/语法位置」，不要浮在「字符串出现过」这一层。**
 
+## 附 · 已定事项（不要再问）
+
+1. **不接 CI / 发布流水线**（Day 25 用户拍板）。
+   理由：20 项里有 **5 项要公网、2 项要 `tcb` 登录、1 项要本地服务**，
+   放进 CI 只能是残缺版；而且这份检查的重点是**人看「实际值」**，不是等一个绿勾。
+   定位就是**手工跑的发布前体检** —— 发布前跑一遍即可。
+
 ## 附 · 未定事项（碰到了问用户，不要自己定）
 
 1. `read` / `write` 的 `CLOUDBASE_API_KEY` 要不要也加 `checkEnv`（现在缺了报 `DB_AUTH_FAILED`，能定位但不够直白）。
 2. 5.4 的抓法对 `DUPLICATE` 这类「非字面量形式」的码仍抓不到 —— 值不值得为它写一个更重的 AST 级检查。
 3. 2.5 的拦截页触发条件只定性到 `Sec-Fetch-Mode: navigate`，**机制来源未查清**，换环境可能复发。
-4. 第 13 项打出来的控制台那行只有 `Uncaught`（`frontend/regress.js:141` 取的是 `exceptionDetails.text`），
-   **不含错误消息** → 只能判「有没有报错」，不能告诉你「报了什么」。
-   要更好用需改 `regress.js` 去读 `exceptionDetails.exception.description`，**那要动既有开发工具，先问用户**。
+4. ~~第 13 项的控制台行只有 `Uncaught`、没有错误消息~~ → **已解决（Day 25）**：
+   改成读 `exceptionDetails.exception.description` 第一行 + 位置，并去重、限 3 条。
+   实测：`【控制台】ReferenceError: FRAME_MS is not defined @speech.js:459`（见 4.1）。
 5. 第 19 项的抓法对「注释掉的错误码」会误报（注释里出现新码 → 双向 diff 不为空）。
    要不要也给它套 `strip-grep.py` 剥注释，等有真实案例再定。
+6. 行尾：仓库 `core.autocrlf = true`，已在根目录加 `.gitattributes`（`*.sh` / `*.py` / `*.sql` → `text eol=lf`）
+   把「checkout 出来必须是 LF」钉住。**未用 `* text=auto`**，避免动全仓库的规范化行为。

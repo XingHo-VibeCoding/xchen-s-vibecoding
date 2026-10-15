@@ -138,7 +138,21 @@ const PROBE_RECORDS = `(() => {
   let id = 0; const waiting = new Map(); const logs = [];
   ws.onMessage(m => {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
-    if (m.method === 'Runtime.exceptionThrown') logs.push(m.params.exceptionDetails.text || 'exc');
+    if (m.method === 'Runtime.exceptionThrown') {
+      /* ★ Day 25 修：原来只取 exceptionDetails.text，而它**永远是「Uncaught」**——
+         看输出只知道「有错」，不知道错在哪。真正的消息在 exception.description
+         的第一行（如 `ReferenceError: FRAME_MS is not defined`），位置在 url + lineNumber。
+         Day 25 故意弄坏验证时，【控制台】只打出一串 Uncaught，等于把最有用的一半丢了。 */
+      const d = m.params.exceptionDetails || {};
+      const raw = (d.exception && d.exception.description) || d.text || 'exc';
+      const msg = String(raw).split('\n')[0].trim();
+      const ln = (typeof d.lineNumber === 'number') ? d.lineNumber + 1 : '?';
+      const at = d.url ? ' @' + String(d.url).replace(/^.*\//, '') + ':' + ln : '';
+      /* 同一处错误「每页 × 每断点」都会重报一次，去重、最多留 3 条，
+         否则【控制台】那一行会被同一句话刷满。 */
+      const one = msg + at;
+      if (!logs.includes(one) && logs.length < 3) logs.push(one);
+    }
   });
   const cmd = (method, params) => new Promise(res => { const n = ++id; waiting.set(n, res); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
   await cmd('Runtime.enable'); await cmd('Page.enable');
