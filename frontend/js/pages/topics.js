@@ -24,10 +24,10 @@
    Day 20（第 3 周 · 板块 ②）：**首页概览的数据源从 mock 换成公网接口**。
     卡点概览三项（练过几次 / 累计问题条目 / 已收藏）改为现场从
     GET /api/sessions 与 GET /api/favorites 算，不再读 mock-sessions.json 的写死数字。
-    ★ 但**主题卡片上的「上次在这里卡过」标记仍读 mock-sessions.json 的 practicedTopics**：
-      今天只换概览三项（用户拍板的范围），stuckMap 需要的是「每个主题各错几条、
-      错在偏题还是逻辑」的**分项**，而 GET /api/sessions 只给合计的 errorCount，
-      拿不到分项 —— 那是 items 表全量查询的活，今天不扩到那里。
+   Day 27（清假数据）：**mock-sessions.json 已删除**，「上次在这里卡过」标记改为
+    从 GET /api/sessions 的 topicId + errorCount 现场算（某主题 errorCount > 0 即标）。
+    原注释担心的「sessions 只给合计、拿不到分项」不再是障碍 —— 卡片上只显示一枚标记，
+    不显示条数，合计够用，不必去查 items 全量。
    ------------------------------------------------------------- */
 
 (function () {
@@ -146,13 +146,17 @@
      将来改卡片样式只动组件，这里一个字不用改。 */
   var topicCard = window.Components && window.Components.topicCard;
 
-  function renderTopics(topics, mock) {
+  /* Day 27：第二个参数从 mock-sessions.json 换成**真实的 sessions 接口数据**。
+     判据：某主题在历次练习里出过问题条目（errorCount > 0）→ 卡片上标「上次在这里卡过」。
+     必须改的原因不是"想改"，是"不改就坏"：那份 json 已删除，再 fetch 会 404，
+     整个 Promise.all 会 reject，首页直接掉进错误态。 */
+  function renderTopics(topics, sessions) {
     // 组件没加载就直说原因，别让它变成一个看不懂的 "undefined is not a function"
     if (!topicCard) throw new Error('主题卡片组件没加载（js/components/topic-card.js）');
 
     var stuckMap = {};
-    ((mock && mock.practicedTopics) || []).forEach(function (p) {
-      if (p && p.issueCount > 0) stuckMap[p.topicId] = p;
+    (sessions || []).forEach(function (s) {
+      if (s && s.topicId && Number(s.errorCount) > 0) stuckMap[s.topicId] = s;
     });
 
     // 按分组归拢，组的先后顺序固定。
@@ -306,13 +310,13 @@
      为什么不在 handlePin 里重新 fetch：没必要为一次重排再打一次网络请求，
      而且重新 fetch 期间列表会闪一下骨架屏。 */
   var lastTopics = null;
-  var lastMock = null;
+  var lastSessions = null;   // Day 27：原为 lastMock（mock-sessions.json 已删）
 
   function reorderTopics() {
     if (!lastTopics) return;
     // 重排前记下当前滚动位置：重渲染会把视口弹回顶部，用户会以为页面跳走了
     var y = window.scrollY;
-    renderTopics(lastTopics, lastMock);
+    renderTopics(lastTopics, lastSessions);
     window.scrollTo(0, y);
   }
 
@@ -395,24 +399,21 @@
     return;
   }
 
-  /* Day 20：三份数据并着取。
-     ① topics.json      —— 主题清单，仍是本地静态文件（它是内容不是记录，本该进库但没做）
-     ② mock-sessions.json —— 只给主题卡片的「卡过」标记用（renderTopics 里的 stuckMap）
-     ③ /api/sessions + /api/favorites —— 概览三项的真实数字
+  /* Day 27：两份数据并着取（原先是三份，mock-sessions.json 已删除）。
+     ① topics.json —— 主题清单，仍是本地静态文件（它是**内容**不是记录）
+     ② /api/sessions + /api/favorites —— 概览三项数字 + 「卡过」标记，全部来自真数据
 
-     为什么②③要分开取而不是合成一次：②要的是**分项**（某主题错几条、错在哪类），
-     ③给的是**合计**（errorCount）。合成一份反而不诚实 —— 拿合计冒充分项，
-     卡上的标记就会显示错的数字。分开取，各用各的，注释写清就说得清。 */
+     为什么「卡过」也走 sessions：sessions 每行带 topicId 与 errorCount，
+     某主题只要出过问题条目就能标；原先那份写死的 practicedTopics 是假数据，
+     今天已随 mock-sessions.json 一起删除。 */
   Promise.all([
     fetchJSON('../../data/topics.json'),
-    fetchJSON('../../data/mock-sessions.json'),
     window.Api.getSessionsOrLocal({ limit: 100 }, []),
     window.Api.getFavoritesOrLocal({ limit: 100 }, [])
   ]).then(function (result) {
     var topics = result[0];
-    var mock = result[1];
-    var sess = result[2];
-    var fav = result[3];
+    var sess = result[1];
+    var fav = result[2];
 
     if (FORCED === 'error') throw new Error('演示用：强制错误状态');
     if (!Array.isArray(topics) || topics.length === 0 || FORCED === 'empty') {
@@ -422,9 +423,9 @@
 
     // 存住这两份数据：星标之后要重排列表，不必再 fetch 一次（见 reorderTopics）
     lastTopics = topics;
-    lastMock = mock;
+    lastSessions = sess.sessions || [];
 
-    renderTopics(topics, mock);
+    renderTopics(topics, lastSessions);
 
     /* 概览用真数据。两个接口**各自**判断降级：sessions 挂了但 favorites 好了，
        错误码该显示哪一个要看得见。这里合并时保留先失败的那个 code，

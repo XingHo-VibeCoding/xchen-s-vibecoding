@@ -488,6 +488,7 @@ bash verify.sh
   "ok": true,
   "data": {
     "aiText": "Finish it by when?",
+    "aiTextZh": "什么时候能做完？",
     "kind": "follow_up",
     "followUpType": "vague",
     "model": "deepseek-chat"
@@ -498,9 +499,24 @@ bash verify.sh
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `aiText` | string | AI 要说的那句话（前端同时出文字 + 朗读，B2）。**超 400 字会被截断** |
+| `aiTextZh` | string | **可选（Day 27 新增）**：`aiText` 的中文直译，给 A2–B2 学习者看。**只显示、不朗读**。模型没按格式返回时**整个字段缺失**（不是空串）——前端必须能处理它不存在 |
 | `kind` | string | `"normal"` / `"follow_up"` / `"nudge"`（催促）。**服务端校验过**，模型返回契约外的值会被兜底 |
 | `followUpType` | string | `kind="follow_up"` 时才有：`"too_short"` / `"vague"` / `"incomplete"` |
 | `model` | string | 实际用的模型名，排错用 |
+
+### ★ `aiTextZh` 怎么来的（Day 27）
+
+提示词末尾追加了一段「输出格式」：要求模型返回 `{"en":"…","zh":"…"}`，
+服务端 `parseReply()` 剥掉可能的 ```json 围栏、取最外层 `{}`、解析出两个字段。
+
+- **解析失败不报错**：整段当 `aiText` 用，`aiTextZh` 缺失。
+  理由：格式没守住只该「少一行中文」，不该「这场对话断了」。
+- ★ 踩过的坑：`buildMessages()` 的 user 消息末尾原本写着
+  「Reply with ONE short spoken English sentence only. **No JSON**, no quotes, no explanation.」
+  —— 那是 Day 23 为防模型把 JSON 漏到界面加的，但它挂在**最后一句**，权重比 system 里的格式说明高，
+  实测两次都拿到纯英文、`aiTextZh` 为空。已改成指向 system 里的格式定义。
+- **降级路径没有中文**：接口失败回落 `topics.json` 的固定台词时，没有 `aiTextZh`
+  （用户 Day 27 拍板 Q1A：不为这个少见状态写 45 条译文）。
 
 > **为什么 `kind` 要服务端兜底**：模型偶尔会返回契约没列出的值（比如把 `kind` 说成
 > `question`），前端 `switch` 会走进 `else` 显示奇怪内容。服务端白名单校验后统一纠正。

@@ -121,6 +121,12 @@ const PROBE_RECORDS = `(() => {
     /* ★ 是否有说清原因的错态（.state-error）—— 0 条时靠它区分
        「页面坏了」与「明确告诉你为什么没有」 */
     hasErrorState: !!document.querySelector('#all-list .state-error'),
+    /* ★ Day 27 补：**明确的空态**（.empty 但不是 .state-error）。
+       上面那段注释从 Day 19 起就写着「错态/空态两者之一就算过」，
+       但代码一直只认 .state-error —— 于是库真的被清空（Day 27 删假数据）之后，
+       5 个宽度全部报「一条都没有，且没有错态」，把**正确表现**判成了失败。
+       空态与错态的区别是「有没有取到数据」：取到了但确实为空 = 空态。 */
+    isEmptyState: !!document.querySelector('#all-list .empty:not(.state-error)'),
     /* 0 条时说明条必须给出原因，不能只是一句干巴巴的「没有记录」 */
     explainsWhy: text.indexOf('读不到') >= 0 || text.indexOf('不是') >= 0
   };
@@ -176,27 +182,23 @@ await sleep(pg === 'records' ? 9000 : 1600);
       if (v.overflow) issues.push('横向溢出 ' + v.overflow);
       if (v.small.length) issues.push('触控<44px ' + v.small.length + ' 处: ' + v.small.slice(0, 3).join(' / '));
 
-      // Day 17：记录页追加「数据源声明」判据（见上方 PROBE_RECORDS 注释）
+      // Day 17 建、Day 27 改：记录页判据（见上方 PROBE_RECORDS 注释）
       let recNote = '';
       if (pg === 'records') {
         const r2 = await cmd('Runtime.evaluate', { expression: PROBE_RECORDS, returnByValue: true });
         const rv = r2.result && r2.result.result && r2.result.result.value;
         if (!rv || rv.noBar) issues.push('找不到 #rec-mock 说明条');
-        else if (!rv.barText) issues.push('#rec-mock 是空的，没说明数据来源');
-        else if (rv.saysFake) recNote = ' · 数据源：本地假条目（已如实标注）';
-        else if (rv.itemCount > 0) recNote = ' · 数据源：后端真实数据';
-        else recNote = ' · 数据源：后端读不到（已如实标出错态）';
-        /* ★ 0 条不算失败 —— 但必须是**说清原因的错态**，不能是空白页。
-           mock 删掉之前这里要求「必须有条目」，那是拿假数据凑出来的通过；
-           现在守住的是诚实性：页面要讲明白为什么没有记录。 */
-        if (rv && rv.itemCount === 0) {
-          if (!rv.hasErrorState) {
-            issues.push('#all-list 一条都没有，且没有错态（说明：条数=' + rv.itemCount +
-              '，子节点数=' + rv.childCount + '，说明条=' + JSON.stringify((rv.barText || '').slice(0, 30)) + '）');
-          } else if (!rv.explainsWhy) {
-            issues.push('是错态，但 #rec-mock 没说明原因（用户会误以为自己没有记录）：' +
-              JSON.stringify((rv.barText || '').slice(0, 30)));
-          }
+        /* ★★ Day 27：**不再要求 #rec-mock 平时有文字**。
+           它已退化成「操作反馈条」——只有用户点了收藏/删除才有内容，
+           成功态 / 空态 / 错误态一律清空并 hidden（那些开发语言被删了，
+           原因写在 records.html 的 setBar() 上方）。
+           要守的诚实性换成这一条：**0 条时页面必须有能读的态**（空态或错态），
+           不能是一片什么都没说的空白。 */
+        if (rv && rv.itemCount === 0 && !rv.hasErrorState && !rv.isEmptyState) {
+          issues.push('#all-list 一条都没有，既不是空态也不是错态（子节点数=' + rv.childCount +
+            '，说明条=' + JSON.stringify((rv.barText || '').slice(0, 30)) + '）');
+        } else if (rv) {
+          recNote = ' · 条目 ' + rv.itemCount + ' 条';
         }
       }
 

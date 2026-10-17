@@ -460,6 +460,9 @@ return {
     }, CHAT_TIMEOUT_MS).then(function (data) {
       return {
         aiText: data.aiText,
+        /* ★ Day 27：这句的中文（可能没有 —— 模型没按格式给，或后端解析失败）。
+           页面只把它显示在英文下面，**不送进朗读**。 */
+        aiTextZh: data.aiTextZh || '',
         kind: data.kind,
         followUpType: data.followUpType,
         model: data.model

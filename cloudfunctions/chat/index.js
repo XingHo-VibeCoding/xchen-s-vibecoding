@@ -273,7 +273,7 @@ function systemPromptFor(topic) {
       '8. End with a question whenever you can. A question hands the floor back to them;',
       '   a statement leaves them nothing to answer, and they go quiet.',
       '9. If you have more than one thing you could ask, ask the SMALLEST one only.'
-    ].join('\n');
+    ].join('\n') + OUTPUT_FORMAT;
   }
 
   /* 8 主题：角色扮演 + 严格的追问边界 */
@@ -336,7 +336,7 @@ function systemPromptFor(topic) {
     '  If they say something vague or off-topic, press on the vagueness rather than changing',
     '  the subject yourself.'
   );
-  return lines.join('\n');
+  return lines.join('\n') + OUTPUT_FORMAT;
 }
 
 /* 沉默催促：单独一条 system，措辞与上面不同 —— 它要的是"把人拉回来"，
@@ -349,13 +349,13 @@ function nudgePrompt(topic) {
         'One short English sentence. Do not comment on the silence itself in a formal way,',
         'do not say "you have been quiet". Just naturally invite them to continue.',
         'Reply in English only.'
-      ].join('\n')
+      ].join('\n') + OUTPUT_FORMAT
     : [
         'You are role-playing as ' + (topic.role || 'a colleague') + '.',
         'The learner has gone quiet. Nudge them to speak, in character, naturally.',
         'One short English sentence. Do not lecture them about the silence.',
         'Stay inside the topic. Reply in English only.'
-      ].join('\n');
+      ].join('\n') + OUTPUT_FORMAT;
 }
 
 /* ---------- 组装 messages ---------- */
@@ -407,10 +407,18 @@ function buildMessages(topic, history, userText, silenceSeconds) {
     });
   }
 
+  /* ★★ Day 27：这一行原来是「(Reply with ONE short spoken English sentence only.
+     No JSON, no quotes, no explanation.)」—— Day 23 加它是为了防模型把 JSON 或引号
+     漏到界面上。
+     但今天反过来要求它返回 JSON（一句话 + 中文），这条就成了**唯一的挡路石**：
+     它挂在 user 消息里、是模型读到的最后一句，权重比 system 末尾的格式说明还高。
+     实测两次：aiText 都只有纯英文、aiTextZh 为空 —— 模型完全没理会 JSON 要求。
+     现在改成指向 system 里的格式定义，并明确 en / zh 各是什么。 */
   msgs.push({
     role: 'user',
     content: userText +
-      '\n\n(Reply with ONE short spoken English sentence only. No JSON, no quotes, no explanation.)'
+      '\n\n(Reply as the JSON object defined in the system prompt: ' +
+      '"en" = one short spoken English sentence, "zh" = its plain Chinese translation.)'
   });
 
   return msgs;
@@ -530,6 +538,53 @@ function cleanAiText(s) {
     .trim();
 }
 
+/* ---------- Day 27：输出格式（一句话 + 中文） ----------
+   用户反馈「AI 说的句子有单词和句子看不懂」。AI 的台词是**每次现场生成**的，
+   前端查表覆盖不了 → 只能让模型自己把中文一起给出来。
+   ★ 只追加"输出格式"这一段，上面那些硬约束（不评判 / 不简化 / ≤12 词 / 问句结尾）
+     一个字不动 —— 它们的优先级高于格式。 */
+const OUTPUT_FORMAT = [
+  '',
+  'Output format (packaging only — it does not relax any rule above):',
+  'The rule "Reply in English only" applies to the VALUE of "en", not to this JSON wrapper.',
+  'Return exactly one JSON object, with nothing before or after it:',
+  '{"en":"<the English sentence the learner hears>","zh":"<its plain Chinese translation>"}',
+  '- "en": English only. It still obeys the length limit, the style, and the question ending.',
+  '- "zh": REQUIRED and never empty. Plain colloquial Chinese, same length as "en".',
+  '  No pinyin, no explanation, no notes.',
+  'Do not answer with bare English text. Do not wrap the JSON in a markdown code fence.'
+].join('\n');
+
+/* ---------- 解析模型返回（Day 27 新增） ----------
+   ★ 解析失败**不报错**：整段当英文用，中文留空。
+     理由：格式没守住的后果应该是「少一行中文」，
+     绝不能是「这场对话断了」——chat 挂掉比没有翻译严重得多。 */
+function parseReply(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return { en: '', zh: '' };
+
+  let body = s;
+  /* 模型有时会包一层 ```json 围栏 */
+  const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) body = fence[1].trim();
+
+  /* 找最外层 {...}：前后可能还带一句客套话 */
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      const o = JSON.parse(body.slice(start, end + 1));
+      if (o && typeof o.en === 'string' && o.en.trim()) {
+        return {
+          en: o.en.trim(),
+          zh: (typeof o.zh === 'string') ? o.zh.trim() : ''
+        };
+      }
+    } catch (e) { /* 落到下面的兜底 */ }
+  }
+  return { en: s, zh: '' };
+}
+
 /* ---------- 请求体解析 ---------- */
 function readBody(req, limitBytes) {
   return new Promise((resolve, reject) => {
@@ -642,7 +697,11 @@ async function handleChat(req, res) {
       msgMap[code] || 'AI 调用失败', { gotPath: '/api/chat' });
   }
 
-  const aiText = cleanAiText(raw);
+  /* Day 27：先按 JSON 解析（en + zh）；解析不出来就整段当英文（见 parseReply） */
+  const parsed = parseReply(raw);
+  const aiText = cleanAiText(parsed.en);
+  /* 中文只用于展示，给个上限：模型偶尔会把整段解释塞进 zh */
+  const aiTextZh = String(parsed.zh || '').trim().slice(0, 200);
   if (!aiText) {
     return sendError(res, 200, 'LLM_BAD_RESPONSE',
       'AI 返回的内容去掉包装后是空的', { gotPath: '/api/chat' });
@@ -670,6 +729,9 @@ async function handleChat(req, res) {
     ok: true,
     data: {
       aiText: finalText,
+      /* ★ Day 27：这句话的中文。可能为空（模型没按格式给 / 降级路径）。
+         前端**只显示、不朗读** —— SpeechSynthesis 仍然只念 aiText。 */
+      aiTextZh: aiTextZh || undefined,
       kind: typeof kind === 'string' ? kind : kind.kind,
       followUpType: typeof kind === 'string' ? undefined : kind.followUpType,
       model: LLM_MODEL

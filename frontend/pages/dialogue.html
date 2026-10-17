@@ -92,7 +92,6 @@
       <div class="tr-list" id="tr-list" aria-live="polite">
         <p class="tr-empty" id="tr-empty">
           点「开始说话」之后，你说的话和 AI 的回应会逐句出现在这里。
-          直接开口就行，说完停一下系统会自动发出去。
         </p>
       </div>
     </section>
@@ -418,7 +417,15 @@
             也有「他不知道说完要停一下」这一层。
             ★ 明说「说完停一下」：这是语音交互的必需动作，
               不说的话用户会以为要手动点按钮。 */
-          hint: '直接说话就行，说完停一下（大约 2 秒），系统会自动发出去。想打字也可以用下面的框。',
+          /* ★ Day 27：这一格的常驻说明**已删除**。原话是
+             「直接说话就行，说完停一下（大约 2 秒），系统会自动发出去。想打字也可以用下面的框。」
+             为什么必须删：Day 27 起识别结果**不再自动提交**，那句话已经是**假的** ——
+             留着它，用户说完就一直等，然后以为页面坏了。
+             "什么时候发出去"改由识别回来的那句提示承担
+             （见 onSpeechResult 里的 noteSpeech）。
+             附：Day 23 写这句是为了解决「他不知道说完要停一下」，那个需求仍成立
+             （停一下才触发识别），但不能再附带「自动发」的承诺。 */
+          hint: '',
           talk: { show: false },
           pause: { text: '暂停', show: true }
         },
@@ -455,7 +462,11 @@
             ? (spoken ? v.textAfterSpeak : v.text)
             : v.text;
         }
-        el.recHint.textContent = v.hint;
+        /* Day 27：hint 为空时把整行隐藏。
+           只清 textContent 的话，这个 <p> 还占着 flex 行（flex: 1 1 260px），
+           会在计时器右边留一段说不上来的空白。 */
+        el.recHint.textContent = v.hint || '';
+        el.recHint.hidden = !v.hint;
 
         el.btnTalk.hidden = !v.talk.show;
         if (v.talk.text) el.btnTalk.textContent = v.talk.text;
@@ -532,7 +543,7 @@
                这不是某一处的特性，是 AI 台词的通性
            降级台词（本地句库）同样朗读 —— 用户听见的是同一句话，
            配合 noteDegraded 的说明，不会有「听到的和看到的不一样」。 */
-      function appendLine(who, text) {
+      function appendLine(who, text, zh) {
         // 第一条真发言到了，空态那句话就该退场
         if (el.trEmpty && el.trEmpty.parentNode) el.trEmpty.parentNode.removeChild(el.trEmpty);
 
@@ -563,6 +574,16 @@
 
         bubble.appendChild(byline);
         bubble.appendChild(line);
+        /* ★ Day 27：AI 的每一句下面附一行中文（用户反馈「有些单词和句子看不懂」）。
+           ★ 只显示、**不进朗读**：speakAiLine 拿的始终是 text（英文）；
+             中文行也不进 transcript、不送 analyze、不参与 chat 历史。
+           用户自己说的话不加 —— 那是他说出来的，不需要翻译。 */
+        if (who === 'ai' && zh) {
+          var sub = document.createElement('p');
+          sub.className = 'tr-zh';
+          sub.textContent = zh;
+          bubble.appendChild(sub);
+        }
         row.appendChild(bubble);
         el.trList.appendChild(row);
         // 新的一句永远留在视线内：记录区自己滚，不推着整页跑
@@ -723,7 +744,10 @@
         };
 
         return window.Api.chat(payload).then(function (r) {
-          return (r && r.aiText) ? r.aiText : null;
+          /* Day 27：返回 {text, zh} 而不是单个字符串 —— zh 要跟着这一句走到 bubbles 里。
+             null 仍然是「这轮没拿到模型回应」，与以前一致，调用方照旧走降级。 */
+          if (!r || !r.aiText) return null;
+          return { text: r.aiText, zh: r.aiTextZh || '' };
         }).catch(function (err) {
           /* 只记错误码，不把技术细节写给用户看。
              密钥、路径、厂商报错都不该出现在练习界面上。 */
@@ -824,11 +848,12 @@
             userText: (opts && opts.userText) || '',
             kind: name === 'open' ? 'open' : 'reply',
             silenceSeconds: isSilence ? Math.round(SILENCE_MS / 1000) : 0
-          }).then(function (aiText) {
+          }).then(function (reply) {
             CHAT_BUSY = false;
-            if (aiText) {
-              appendLine('ai', aiText);
+            if (reply) {
+              appendLine('ai', reply.text, reply.zh);
             } else {
+              /* 降级路径：固定台词没有中文（用户 Day 27 拍板 Q1A —— 不为这个少见状态写 45 条译文） */
               appendLine('ai', localLine(name));
               noteDegraded(lastChatError);
             }
@@ -854,10 +879,10 @@
         var next = pendingQueue.shift();
         CHAT_BUSY = true;
         askAi({ userText: next, kind: 'reply', silenceSeconds: 0 })
-          .then(function (aiText) {
+          .then(function (reply) {
             CHAT_BUSY = false;
-            if (aiText) {
-              appendLine('ai', aiText);
+            if (reply) {
+              appendLine('ai', reply.text, reply.zh);
             } else {
               appendLine('ai', localLine('reply'));
               noteDegraded(lastChatError);
@@ -900,7 +925,8 @@
 
          ★ 一句话说明这套东西改变了什么：
            **不再靠 8 秒倒计时判断「你说完了」，改用静音检测**。
-           你说完停一下（约 2.5 秒），系统自动识别并提交。
+           你说完停一下（约 2.5 秒），系统自动识别并把文字**填进输入框**；
+           提交由你点「我说完了」（Day 27 起不再自动提交 —— 原因见 onSpeechResult 上方）。
            倒计时逻辑（armSilence 等）**保留但降级为备用** ——
            浏览器不支持语音时（Firefox），整套体验回落到打字，
            那时它还得工作。这不是冗余，是降级路径。
@@ -1037,10 +1063,24 @@
       }
 
       /* ---------- 识别 → 提交 ---------- */
-      /* 转写完成后**不直接提交**，而是填进输入框 + 自动提交。
-         为什么自动提交而不是等你点：
-           语音的交互节奏是「说完→等回应」，中间插一个「点我说完了」
-           会把语音的优势全丢掉（那正是你今天遇到的问题）。
+      /* 转写完成后**只填进输入框，不替用户提交**（Day 27 修）。
+         ★ 为什么改：同伴实测「说到一半停顿约 3 秒，话就自己被交上去了」。
+           根因在这一行的上游 —— speech.js 的静音判定（SILENCE_END_MS = 2500ms）
+           把「说话中途的停顿」当成「说完了」，识别一回来这里就自动提交，
+           于是半句话变成一整句进入对话与判定（错误次数、精彩句子全跟着失真）。
+           拍板方案（Day 27 · A）：识别结果只填框，提交只走「我说完了」。
+
+         ★ 这与 Day 23 的决定相反，是有意的，代价也认了：
+           Day 23 从「手动」改成「自动」，为的是「说完卡住不动」那类抱怨；
+           代价就是今天这条 —— 录音端的 2.5 秒静音替用户做了「说完了」的判断。
+           两害相权：**数据对不对 > 顺不顺**。半句被当整句，后面判什么都是错的。
+           顺滑度改由「识别完立刻把焦点放回框 + 一句明确提示」补偿，不靠自动提交。
+
+         ★ 为什么用**拼接**而不是覆盖：
+           改手动之后，用户很可能在点提交之前又说了一段（每段静音后识别都会重启）。
+           覆盖会把前一段**静默吃掉** —— Day 23 修过同类问题（「不再丢用户说的话」）。
+           宁可让他手动删掉多出来的字，也不能吞。
+
          为什么仍然填进输入框：
            E3 —— 识别错了你要能改；而且填进去之后，
            即使识别失败，页面也留得住你这句话。 */
@@ -1049,20 +1089,27 @@
          换成服务端识别后没有中间结果了，叫 final 会误导。 */
       function onSpeechResult(text) {
         if (!text || !text.trim()) return;
-        el.sayInput.value = text.trim();
+        /* 拼接而不是覆盖（理由见上方注释最后一段）：先说话的那一段不能被吞。 */
+        var spoken = text.trim();
+        var already = (el.sayInput.value || '').trim();
+        el.sayInput.value = already ? (already + ' ' + spoken) : spoken;
         updateCount();
         /* 焦点进框：让用户能立刻改（E3），也让
            userIsTyping() 判true —— AI 不会在这期间催他。 */
         focusComposer();
         el.sayInput.focus();
-        /* 触发提交走同一个入口，不要另写一份提交逻辑 ——
-           两条路必须行为一致（入队、计数、转写、焦点处理全一样）。 */
-        submitSpeech();
+        /* ★ 这里**没有** submitSpeech()（Day 27 删除）。
+           提交的唯一入口是用户点「我说完了」（form 的 submit 监听）。
+           但必须当场说清「还没发出去」，否则他会以为已经说了、接着往下说，
+           最后一大段一起交上去 —— 那比截断更难改。 */
+        noteSpeech('听到了，还没发出去 —— 确认没问题就点「我说完了」。', 6000);
 
-        /* ★★ Day 23 第四次修订：提交后**立刻**恢复识别。
-           为什么要这一句：AI 回话要3–8 秒，这几秒里用户很可能已经在说
-           下一句了（真人对话就是这样）。不重启的话，那几秒说的话会被丢掉 ——
-           而且是**静默丢掉**，用户根本不知道。
+        /* ★★ Day 23 第四次修订（原意保留，措辞随 Day 27 调整）：填框后**立刻**恢复识别。
+           为什么要这一句：这一轮录音被静音判结束后，用户往往还没说完、
+           或者紧接着要补一句（真人说话就是这样）。不重启的话，
+           那几秒说的话会被丢掉 —— 而且是**静默丢掉**，用户根本不知道。
+           （Day 27 起文字不再自动提交，所以「接着说」的那几段会拼进同一个输入框，
+             由他最后一次点「我说完了」一起发出去。）
 
            为什么不会和AI 的朗读撞上：
              startListening 内部有 `if (speaking) return 'busy-speaking'`
@@ -1073,19 +1120,10 @@
         }
       }
 
-      /* 复用一个已有的提交按钮，避免「两条路径行为不一致」。 */
-      function submitSpeech() {
-        var form = document.getElementById('composer');
-        if (!form) return;
-        if (typeof form.requestSubmit === 'function') {
-          form.requestSubmit();
-        } else {
-          /* 老浏览器没有 requestSubmit：造一个 submit 事件。
-             ★ 要 cancelable，否则 submit 处理器里的 e.preventDefault()
-               在合成事件上可能不生效。 */
-          form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        }
-      }
+      /* ★ Day 27：原来的 submitSpeech() 已删除。
+         它只服务于「识别完自动提交」那一条路，改手动之后全仓无人调用 ——
+         留着就是一段永远不跑的死代码，还会让后来的人以为另有自动提交入口。
+         现在**提交只有一条路**：用户点「我说完了」→ form 的 submit 监听。 */
 
       /* 把 speech.js 的回调接到页面
          ★ Day 23 第七次修订：识别方案从「浏览器原生」换成「录音上传」，
@@ -1395,6 +1433,16 @@
         render();
       });
 
+      /* Day 27：把 JS 时间转成契约要的 ISO 8601（时区固定 +08:00）。
+         契约 §4之一「决定 3」：时区**只接受 `+08:00`**，`Z` 或其它偏移会被 400 拒掉。
+         用户机器就在东八区，所以直接取本地日期字段再硬写 +08:00，不做任何换算
+         —— 做换算反而容易错 8 小时且不易察觉。 */
+      function isoLocal(d) {
+        function p2(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) +
+          'T' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) + '+08:00';
+      }
+
       // 结束对话 → 完成这一轮练习。
       // 只有真的走过这一轮（点过「开始说话」）才把该主题的练习次数 +1，
       // 一进页面就直接点结束不算练过，避免次数虚高。
@@ -1437,6 +1485,13 @@
         if (topicId) q.push('topic=' + encodeURIComponent(topicId));
         q.push('turns=' + rounds);
         q.push('dur=' + elapsed);
+        /* ★ Day 27：写库要的两个时间点（契约 §4之一 必填 startedAt）。
+           用「现在 − 已练秒数」反推 startedAt，与 dur **自洽** ——
+           后端是按 endedAt − startedAt 算 durationSeconds 的，
+           这样存进库的时长就等于用户屏幕上看到的那个数，暂停的时间不会被算进去。 */
+        var nowMs = Date.now();
+        q.push('start=' + encodeURIComponent(isoLocal(new Date(nowMs - (elapsed || 0) * 1000))));
+        q.push('end=' + encodeURIComponent(isoLocal(new Date(nowMs))));
         /* 转写没存成的标记跟着走（只有一个短标记，不带内容）。
            结果页拿它把提示说清楚，而不是显示一句「没找到对话内容」。 */
         if (saveHint) q.push(saveHint);

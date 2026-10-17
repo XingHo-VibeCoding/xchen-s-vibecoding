@@ -1590,6 +1590,20 @@ body::before {
   font-style: italic;
 }
 
+/* ★ Day 27：AI 台词下面那行中文（**只显示，不朗读**）。
+   为什么用小字 + --text-muted：它是辅助，不是主体 ——
+   用户先读英文（那才是练习目标），卡住了才往下扫一眼；
+   一行中文不该和英文抢视线。
+   为什么用 --text-xs 而不是 --text-sm：中文比英文短，同样的字号会显得更"重"，
+   小一号才能维持"英文为主、中文为辅"的层次。
+   ★ 对比度：--text-muted 在 --bg-tint / 白底上满足 4.5（与 .tr-who 同一档）。 */
+.tr-zh {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
 .tr-text.en::before,
 .tr-text.en::after {
   /* 只在英文台词两侧各放一个，不做「连续引号」——

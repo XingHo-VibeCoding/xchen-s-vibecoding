@@ -64,6 +64,11 @@
       </div>
     </div>
 
+    <!-- Day 27：写库结果提示条（复用 .mock-bar 样式，不新增 CSS）。
+         放这里而不是问题清单卡片里：它说的是「整场练习有没有存下来」，
+         是整页级别的事，不属于某一块的说明。 -->
+    <div class="mock-bar" id="save-bar"></div>
+
     <!-- 问题清单：偏题（只提醒）与逻辑错误（提醒 + 纠正）两类
          注意：偏题条目在本页面上「没有纠正那一格」是设计，不是缺漏（PRD.md §6.2）
          Day 14（F6 · 第 4 步）：自由对话（?topic=FREE）下**这一类只剩逻辑错误** ——
@@ -345,17 +350,136 @@
         }
       }
 
+      /* ---------- Day 27：把这一场写进数据库 ----------
+         ★ 为什么写在结果页、而不是点「结束对话」的那一刻：
+           接口要的 `items` 来自 /api/analyze 的判断结果，而 analyze 是**这个页面**调的。
+           在对话页写，就只能先写空 items 再想办法补 —— 两次写、还可能补不上。
+           现在一次 POST 写全三张表（后端是「三步请求 + 补偿删除」，见契约 §4之一）。
+
+         ★ 为什么不会重复写：转写是 take（取出即删），刷新之后读不到转写，
+           render() 直接走「没有这一场的对话内容」，analyze 与写库都不会再跑；
+           再加 SAVED 这个一次性开关，挡住同页面内的并发触发。
+
+         ★ 写失败不阻塞看结果：条目照常显示，只提示「没存进库」。
+           用户已经练完了，不能因为落库失败就连结果都不给看。 */
+      var SAVED_ID = '';      // 首次生成后固定：重试沿用同一个 id，才能靠主键防重
+      var SAVING = false;
+
+      function newSessionId() {
+        var d = new Date();
+        function p2(n) { return (n < 10 ? '0' : '') + n; }
+        var stamp = '' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) +
+          p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+        /* 4 位随机后缀：同一秒连开两场也撞不上（真撞上会被主键拒，报 DUPLICATE） */
+        return 'S-' + stamp + '-' + Math.random().toString(36).slice(2, 6);
+      }
+
+      function saveBar(text, warn) {
+        var bar = document.getElementById('save-bar');
+        if (!bar) return;
+        bar.textContent = text;
+        if (warn) bar.classList.add('mock-bar-warn');
+        else bar.classList.remove('mock-bar-warn');
+      }
+
+      function saveSessionToDb(issues, goods) {
+        if (SAVING) return;
+        if (!pending || !pending.transcript || !pending.transcript.length) return;
+        if (!window.Api || typeof window.Api.writeSession !== 'function') {
+          saveBar('这一场没能存进数据库：页面脚本没加载成功（window.Api 缺失）。', true);
+          return;
+        }
+        var startedAt = params.get('start') || '';
+        var endedAt = params.get('end') || '';
+        if (!startedAt) {
+          /* 直接打开/老链接没有这两个参数。**不编一个时间糊过去** ——
+             后端会按假时间算时长，库里就多一条「根本没发生过」的场次。
+             所以直说为什么没存。 */
+          saveBar('这一场没有存进数据库：地址里缺开始时间（不是从对话页走过来的）。', true);
+          return;
+        }
+
+        if (!SAVED_ID) SAVED_ID = newSessionId();
+        SAVING = true;
+
+        window.Api.writeSession({
+          sessionId: SAVED_ID,
+          topicId: topicId || '',
+          nickname: '',
+          startedAt: startedAt,
+          endedAt: endedAt,
+          isComplete: true,
+          /* 只挑接口认的两个字段：transcript 里的 timestamp / askedFollowUp 不传 ——
+             少了不影响落库，多传了后端还要逐个校验。 */
+          transcript: pending.transcript.map(function (t) {
+            return { turn: t.turn, userText: t.userText, aiText: t.aiText || '' };
+          }),
+          /* items 映射：展示层用 quote / fix，接口要 type / reminder / correction。
+             ★ 不传原句 —— 契约 §4之一 决定 2：后端按 turn 从 transcript 取回，
+               前端塞的原句会被无视（B8「不编造原句」的保障就在这一层）。 */
+          items: issues.concat(goods || []).map(function (it) {
+            return {
+              turn: it.turn || 0,
+              type: it.type,
+              reminder: it.reminder || '',
+              correction: it.fix || ''
+            };
+          })
+        }).then(function (r) {
+          SAVING = false;
+          var dropped = r.itemsDropped ? ('，另有 ' + r.itemsDropped + ' 条被规则丢弃') : '';
+          saveBar('这一场已经存进数据库：' + r.turnsStored + ' 轮对话、' +
+            r.itemsStored + ' 条问题/精彩句子' + dropped + '。去「错误记录」页能看到。');
+          /* 把 sessionId 挂到地址上：刷新之后至少知道「哪一场存过」，
+             比再看到一句「没有这一场的对话内容」有用。 */
+          try {
+            var u = new URL(location.href);
+            u.searchParams.set('session', SAVED_ID);
+            history.replaceState(null, '', u.toString());
+          } catch (e) { /* 老浏览器没有 URL 构造器：不影响主流程 */ }
+        }).catch(function (err) {
+          SAVING = false;
+          var why = (window.Api && window.Api.friendlyOf)
+            ? window.Api.friendlyOf(err)
+            : (err && err.message ? err.message : '');
+          saveBar('这一场没能存进数据库：' + why +
+            '（结果还能看，但刷新后就没了，记录页也不会有这一场）', true);
+          /* 转写还在内存里，给一个重试入口；沿用同一个 sessionId，
+             万一第一次其实写成功了（只是响应丢了），重试会拿到 DUPLICATE 而不是写两行。 */
+          var bar = document.getElementById('save-bar');
+          if (bar) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'ic-btn';
+            btn.textContent = '重试保存';
+            btn.style.marginLeft = '8px';
+            btn.addEventListener('click', function () {
+              btn.remove();
+              saveSessionToDb(issues, goods);
+            });
+            bar.appendChild(btn);
+          }
+        });
+      }
+
       /* ---------- 取转写 → 调 analyze → 渲染 ---------- */
       function render() {
         renderLoading();
 
         /* ① 转写已在页面开头取过（**必须**在算 isFree 之前，见上面注释） */
         if (!pending) {
+          /* ★ Day 27：如果地址里带着 sessionId，说明这一场**已经存进库了** ——
+             刷新看不到条目是因为条目只在「刚练完」那一刻现算一次（转写 take 的语义），
+             不是数据丢了。这里必须把区别说清，否则用户会以为白练了。 */
+          var sessParam = params.get('session');
           renderError('没有这一场的对话内容',
-            NOT_SAVED
-              ? '这个浏览器没能保存下这一场说的话（无痕模式或存储空间满时会这样），' +
-                '所以没法判断。换一个窗口再练一次就好。'
-              : '本页要看的是你刚结束那一场说的话。请回到对话页练完再点「结束对话」。');
+            sessParam
+              ? '这一场（' + sessParam + '）已经存进数据库，刷新不会丢。' +
+                '本页看不到条目，是因为条目只在刚练完那一刻现算一次；去「错误记录」页就能看到它。'
+              : (NOT_SAVED
+                ? '这个浏览器没能保存下这一场说的话（无痕模式或存储空间满时会这样），' +
+                  '所以没法判断。换一个窗口再练一次就好。'
+                : '本页要看的是你刚结束那一场说的话。请回到对话页练完再点「结束对话」。'));
           return;
         }
 
@@ -375,6 +499,12 @@
               return !(isFree && it.type === 'offtopic');
             });
             paint(issues, r.goodSentences || []);
+
+            /* Day 27：条目算出来了 → 把这一场写进库（一次 POST 落三张表）。
+               放在 paint 之后：先让用户看到结果，落库慢一点不影响他阅读。
+               analyze 失败（degraded）时 issues 是空数组，但**照样写** ——
+               练习这件事确实发生了，sessions / turns 该留下，只是没有条目。 */
+            saveSessionToDb(issues, r.goodSentences || []);
 
             /* 失败兜底：analyzeOrLocal 只在失败时返回 degraded。
                真成功时不写任何提示条 —— 页面上的条目本来就是你真练出来的，

@@ -62,20 +62,18 @@
     <h2 class="section-title group-b">全部条目</h2>
     <div class="item-list" id="all-list" aria-live="polite"></div>
 
-    <div class="mock-bar" id="rec-mock"></div>
+    <!-- Day 27：初始就是 hidden。
+         它现在只在「操作反馈」时才有内容（收藏/删除结果），
+         不加 hidden 的话，从页面加载到首次 setBar() 之间会闪一条空色带
+         —— 以前里面有文字，所以没人看得出来。 -->
+    <div class="mock-bar" id="rec-mock" hidden></div>
 
-    <!-- 展开一条记录后应该看到什么，先写成静态说明，等人真的点开时再实现 -->
-    <div class="card card-spaced">
-      <h2>展开一条记录后应该看到什么</h2>
-      <p class="hint">下面列出这一块将来会包含的内容，功能接入后按此结构展示。</p>
-      <ul class="spec-list">
-        <li>条目本身：类型（偏题 / 逻辑错误）· 出现在第几轮 · 原句</li>
-        <li>提醒：偏题说明偏离了主题哪一点；逻辑错误说明哪里不成立</li>
-        <li>纠正：<b>只有逻辑错误条目有</b>，偏题条目没有这一格</li>
-        <li>所属那次会话：主题名 · 时间 · 对话时长 · 当次错误次数与精彩句子条数</li>
-        <li>收藏状态与备注内容</li>
-      </ul>
-    </div>
+    <!-- ★ Day 27：原来这里有一块「展开一条记录后应该看到什么」的静态说明卡
+         （5 条：条目本身 / 提醒 / 纠正 / 所属会话 / 收藏与备注）。
+         删掉的理由：它是**开发期的占位说明**，把内部规划直接摊给终端用户看，
+         而这个项目已经不是演示阶段了。
+         设计口径没丢 —— 那 5 条本来就在 `PRD.md` §7.3「展开一条记录后看到什么」（第 511 行），
+         PRD 才是口径的真源，页面上不该再放一份副本。 -->
 
     <footer class="page-foot">
       口语对话实战器 · 错误记录页
@@ -147,6 +145,26 @@
       var allList = document.getElementById('all-list');
       var countEl = document.getElementById('flt-count');
       var mockBar = document.getElementById('rec-mock');
+
+      /* ---------- Day 27：这条说明条退化成「操作反馈条」 ----------
+         ★ 删掉了什么（都是开发语言，不该出现在产品界面上）：
+           · 成功态：「以上 N 条来自后端数据库。收藏与删除都会写回数据库；…」
+           · 空态　：「空态：本页已经取到数据，只是数据里一条记录也没有。」
+           · 错误态：「错误态：…错误码 DB_XXX…；地址栏是 file://…看 F12 的 Network。」
+         ★ 为什么能删：
+           有/没数据，两块列表自己说得清（空态有「还没有任何记录」+ 一句怎么才会有的指引）；
+           读失败，renderError 那块已经写了原因还给了按钮。说明条再抄一遍是重复且更难懂。
+         ★ 保留什么：**操作反馈**（已收藏 / 已删除 / 没删掉）——
+           那是用户点了按钮之后必须知道的结果，不能没有。
+         ★ 排错信息去哪了：`console.warn`。需要它的人会开 F12，不需要的人不该看见。
+         ★ 统一走 setBar()：只清 textContent 不隐藏的话，空 div 仍占着那条色带的位置。 */
+      function setBar(text, warn) {
+        if (!mockBar) return;
+        mockBar.textContent = text || '';
+        mockBar.hidden = !text;
+        if (warn) mockBar.classList.add('mock-bar-warn');
+        else mockBar.classList.remove('mock-bar-warn');
+      }
 
       /* ---------- 加载中（Day 13新增） ----------
          用 P1 同款的骨架卡：.skeleton-grid / .skeleton-card / .bar.w40|w70|w100
@@ -311,19 +329,19 @@
             document.dispatchEvent(new CustomEvent('ic-sync'));
             // 收藏状态变了 → 两个列表都要重算（收藏区可能多一条、也可能少一条）
             if (CACHE.rows) paint(CACHE.rows);
-            mockBar.textContent = want
+            setBar(want
               ? '已收藏，这条的状态已写回数据库。'
-              : '已取消收藏，这条的状态已写回数据库。';
-            mockBar.classList.remove('mock-bar-warn');
+              : '已取消收藏，这条的状态已写回数据库。');
           }).catch(function (err) {
             /* 失败：库里的状态**没变**。页面也不该显示改过 —— 直接 reject，
                interact.js 会照数据源把按钮拨回原位，并把这句原因显示在卡片上。 */
             var why = (window.Api && window.Api.friendlyOf)
               ? window.Api.friendlyOf(err)
               : (err && err.message ? err.message : '');
-            mockBar.textContent = '收藏没保存上：' + why +
-              '（错误码 ' + ((err && err.code) || 'UNKNOWN') + '）';
-            mockBar.classList.add('mock-bar-warn');
+            if (window.console && console.warn) {
+              console.warn('[records] 收藏没存上', (err && err.code) || 'UNKNOWN');
+            }
+            setBar('收藏没保存上：' + why, true);
             api.reject('没能保存收藏：' + why);
           });
         }, FAV_DELAY_MS);
@@ -368,8 +386,7 @@
              恢复接口本期没做（只留了库里的口子），说了就是骗用户点一个不存在的功能。 */
       function handleDelete(item, btn) {
         if (!window.Api || typeof window.Api.deleteItem !== 'function') {
-          mockBar.textContent = '删除失败：页面脚本没加载成功（window.Api 缺失）。';
-          mockBar.classList.add('mock-bar-warn');
+            setBar('删除失败：页面脚本没加载成功（window.Api 缺失）。', true);
           return;
         }
         var quote = (item.quote || '').trim();
@@ -405,8 +422,7 @@
           }
           /* 只说做了什么，不解释后端返回了哪些字段 ——
              那份 data 是给排错用的，页面文案用不着（也不该依赖它的形状）。 */
-          mockBar.textContent = '已删掉 1 条记录，它不会再出现在记录里。';
-          mockBar.classList.remove('mock-bar-warn');
+          setBar('已删掉 1 条记录，它不会再出现在记录里。');
         }).catch(function (err) {
           /* ★★ 这里必须分两种失败说两句话（无头实测发现的原来那版是错的）。
              原来一律写「这条记录还在页面上，可以再试一次」——
@@ -434,9 +450,7 @@
             if (CACHE.rows) {
               if (CACHE.rows.length === 0) renderEmpty(); else paint(CACHE.rows);
             }
-            mockBar.textContent =
-              '这一条已经在库里没有了（可能刚才在别的页面删掉了），所以把它从列表里去掉了。';
-            mockBar.classList.remove('mock-bar-warn');
+            setBar('这一条已经在库里没有了（可能刚才在别的页面删掉了），所以把它从列表里去掉了。');
             return;
           }
 
@@ -444,12 +458,11 @@
              err.message 是接口层的原始原因，删一条不存在的条目时
              它可能是 `HTTP 404` 或 `INTERNAL_ERROR`，用户看不懂。
              现在走 Api.friendlyOf()拿中文人话。 */
-          mockBar.textContent = '没能删掉：' +
+          setBar('没能删掉：' +
             ((window.Api && window.Api.friendlyOf)
               ? window.Api.friendlyOf(err)
               : (err && err.message ? err.message : '出了点问题，请再试一次')) +
-            '　—— 这条记录还在，可以再试一次。';
-          mockBar.classList.add('mock-bar-warn');
+            '　—— 这条记录还在，可以再试一次。', true);
         });
       }
 
@@ -613,14 +626,9 @@
             CACHE.rows = rows;
             paint(rows);
 
-            /* 底部说明条：说清收藏状态存在哪。
-               页面上的数据来自后端数据库，这是真的；
-               ★ Day 22：写接口通了，收藏与删除都落在库里了，
-                 这句话原来写的「写库接口尚未接入」已经过时。 */
-            mockBar.textContent =
-              '以上 ' + rows.length + ' 条来自后端数据库。' +
-              '收藏与删除都会写回数据库；删掉的条目不会再出现在记录里。';
-            mockBar.classList.remove('mock-bar-warn');
+            /* Day 27：原来这里写「以上 N 条来自后端数据库。收藏与删除都会写回数据库…」——
+               数据从哪来是**实现细节**，用户不需要知道，删。 */
+            setBar('');
           })
           .catch(function (err) {
             /* ★ Day 23：原来直接显示 err.message（英文码裸奔）。 */
@@ -672,7 +680,10 @@
         allList.replaceChildren(emptyBox(
           '还没有任何记录', '完成一次练习之后，这里会按时间倒序列出你的问题条目。'));
         countEl.textContent = '共 0 条（收藏区 0 条）';
-        mockBar.textContent = '空态：本页已经取到数据，只是数据里一条记录也没有。';
+        /* Day 27：原来这里写「空态：本页已经取到数据，只是数据里一条记录也没有。」
+           ——「空态」是开发术语，而且上面两块已经各自写了「还没有任何记录」，
+           说明条再重复一遍只会更绕。 */
+        setBar('');
       }
 
       /* ---------- 错误态（Day 13 抽出，Day 19 扩成两种） ----------
@@ -741,13 +752,13 @@
         /* 这一条是**开发提示条**（#rec-mock），给排错用 —— 所以这里保留错误码：
            今天就是因为只剩一句「页面本身没问题」，把「CORS 拦了请求」这个真因
            完全盖住了。留一个码，打开控制台就知道往哪查。 */
-        mockBar.textContent = backendsDown
-          ? '错误态：后端数据库暂时读不到，所以这里没有任何条目——不是「你没有记录」。'
-          : '错误态：数据没读上来。错误码 ' + (o.code || 'UNKNOWN') +
-            (viaFile
-              ? '；地址栏是 file://，请用本地服务打开。'
-              : '；本页不是 file:// 打开的 —— 问题在请求那一段，看 F12 的 Network。');
-        mockBar.classList.add('mock-bar-warn');
+        /* ★ Day 27：界面上不再出现「错误态：…错误码 …；看 F12 的 Network」这类开发语言。
+           renderError 那块已经写清了原因（并给了「重新加载」/「回到主题列表」按钮），
+           这里不再重复。排错要的错误码走控制台。 */
+        if (window.console && console.warn) {
+          console.warn('[records] 记录读失败', o.code || 'UNKNOWN', detail || '');
+        }
+        setBar('', true);
       }
 
       // 筛选输入：改 KEY → 只重画，不重取。
