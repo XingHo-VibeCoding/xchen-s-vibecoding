@@ -231,7 +231,8 @@ grep -nE "https?://[a-zA-Z0-9.-]+" frontend/pages/*.html | grep -v "tcloudbaseap
 
 1. `tcb hosting deploy` **禁用** `--safe` / `--verify` / `--prune` / `--enable-git-ignore`
 2. 回退**不能整包重传快照**，要先 `--exclude='./__auth' --exclude='./cloud-admin'`
-3. **`tag v1.0` 指向 `15c75ac`，线上现在是 `e8ed427`** —— 别拿 tag 当线上基线
+3. **三个位置不同**：`tag v1.0` → `15c75ac`（Day 26 发布）／线上前端实际对应 `e8ed427`（Day 27）／HEAD `cd02b8b`（Day 28 仅文档）。
+   别拿 tag 当线上基线，也别把 HEAD 当线上内容
 
 **缺口（如实列出）**：
 
@@ -428,7 +429,7 @@ for i in 1 2 3; do curl -s --noproxy '*' -X POST "$B/api/sessions/write" \
 |---|---|---|---|
 | 公网地址 | 1 个域名，4 个产品页 | 腾讯云 CloudBase | 齐全 |
 | 提交历史 | **68 笔**，2026-09-17 → 2026-10-17 | `master` | 齐全 |
-| 版本标签 | `v1.0` → 提交 **`15c75ac`**（比 HEAD 少 2 笔） | git | 齐全，但**不等于线上内容** |
+| 版本标签 | `v1.0` → `15c75ac`（Day 26 发布）；`day28-final` → `cd02b8b`（Day 28 新增） | git | 齐全；两个都**不等于线上内容** |
 | 备份·代码 | 2 份快照 / **46 个文件** | `.deploy/snapshots/` | 齐全，但**不在 git** |
 | 备份·数据 | 6 个文件（3 份当前 + 3 份 `.bak-0916`） | `.deploy/backups/db/` | 齐全，但**不在 git** |
 
@@ -436,7 +437,7 @@ for i in 1 2 3; do curl -s --noproxy '*' -X POST "$B/api/sessions/write" \
 
 1. **`.deploy/` 全在 gitignore 里**（`.gitignore:85`）→ 快照与 DB 备份**只在你这一台电脑上**。
    仓库换台机器克隆下来，**没有回退弹药**。这是当前交付物的最大单点风险，比任何功能缺陷都实在。
-2. **`tag v1.0` 指向 `15c75ac`，线上是 `e8ed427`** —— 差 2 笔。标签是附注标签（`git cat-file -t v1.0` = `tag`），
+2. **`tag v1.0` 指向 `15c75ac`，线上是 `e8ed427`，HEAD 是 `cd02b8b`** —— 三个位置差 3 笔。标签是附注标签（`git cat-file -t v1.0` = `tag`），
    所以 `git rev-parse v1.0` 给的是**标签对象**的哈希 `2db3d2b`，**不是提交**；
    要拿提交必须写 `git rev-parse v1.0^{}`。比 tag 与 HEAD 的远近时踩这个坑会得出相反结论。
 3. **7 个一次性脚本留在根目录**（`.apply-*` `.count-*` `.probe-*` 等）——
@@ -451,8 +452,8 @@ for i in 1 2 3; do curl -s --noproxy '*' -X POST "$B/api/sessions/write" \
 | 1 | `docs/week4-acceptance.md §0` 写「`speech` 云函数当前不可用（路由是 SCF）」 | **已过期**。今天实测 `tcb routes list` 显示 `/api/speech-to-text` → **WEB_SCF**；POST 空 body 返回 `{"ok":true,"data":{"text":"","engine":"none","reason":"TOO_SHORT"}}`（进了函数，不是网关拒） | ✅ **已按 B 改写**（2026-10-17 19:45，用户拍板）：§0 标题与结论改成「已可用」，Day 23 的推理链保留作历史 |
 | 2 | `docs/api-contract.md §5` 仍写「预留（v1 不启用）」，状态栏标 🟡「1 个占位待实现」 | 与 §2 第 1 条同一件事的另一处过期记录 —— 语音已部署且可用 | ⚠️ **待你决定是否一并改**（改契约属文档口径，未擅自动手） |
 | 3 | 线上有 `/api/diag` 路由指向 `diag` 函数 | `cloudbaserc.json` 与 `cloudfunctions/` 里**没有** `diag` | 属部署残留；不影响演示，别在 `--only gateway` 收敛时误删其他路由 |
-| 4 | DB 备份停留在 09:17 | 之后新增 3 场（见 §1.8） | 收尾时重导一次（一条命令，见 `day27-资源与到期说明 §4`） |
-| 5 | `tag v1.0` = `15c75ac`，线上 = `e8ed427` | tag 落后 1 个提交 | 演示时别说"tag 就是线上" |
+| 4 | ~~DB 备份停留在 09:17~~ | **已解决**：19:54 重导（见 §1.8），现为 8 / 13 / 9，旧文件留 `.bak-0916` | — |
+| 5 | `tag v1.0` = `15c75ac`，线上 = `e8ed427`，HEAD = `cd02b8b` | 三者差 3 笔；已新增 `day28-final` 指向 HEAD，`v1.0` 保持不动 | 演示时别说"tag 就是线上" |
 | 6 | 检查台 / 错误提示对照页是否算"作品页面" | 检查台是**开发期工具页**，不在 PRD 页面清单；对照页**未上线** | 演示时说"4 个产品页 + 1 个排错用的检查台"，别说 6 个页面 |
 | 7 | CloudBase 控制台里请求日志的实际显示效果 | 五个云函数已加 `logReq` 并部署 | **需人眼确认**（今天没截图），演示时别把它说成"已验证" |
 
