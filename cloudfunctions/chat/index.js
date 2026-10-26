@@ -15,24 +15,61 @@
    不开temperature 之类 —— **即兴对话要的是稳定自然，不是花样**。
 
    -------------------------------------------------------------
-   二、提示词：三条硬约束 + 追问边界（不可放宽）
+   二、提示词：情感边界四层 + 轮型（Day 28 重写）
    -------------------------------------------------------------
-   写在文件里而不是散在代码里，是因为它们**每一条都会咬人**，
-   需要能一眼看到、一处修改：
+   ★ 起因：用户反馈「AI 讲话很人机」。查下来至少有两条是我们自己造成的：
+     ① 朗读用系统默认音色，代码里从没挑过（speech.js 全文没有 getVoices）；
+     ② 原硬约束③「不无条件肯定」被写成了「一律不许鼓励」——
+        比 PRD 严。PRD §6.1 原话是「不无条件肯定，**只针对内容本身回应**」，
+        即：禁的是空泛表扬，不是禁共情。代码比 PRD 严，是这轮要修的病根之一。
 
-   ① **不做偏题 / 逻辑判断**（B9）
-      判定是 /api/analyze 的职责，契约 §6.1 明确两条独立的路。
-      若提示词里带一句「如果他偏题就纠正」，对话中就会出现评判，
-      用户会分不清「他在陪我练」还是「他在给我打分」——B9 就破了。
+   现在按「对谁说 / 说什么」拆成四层，**只有第 4 层是永禁**：
 
-   ② **不主动降语速、不简化用词、不替用户补完**
-      这是本产品最核心的价值：A2–B2 的学习者能听懂但说不出来。
-      模型天然倾向说简单句、用同义词绕开难题、甚至替用户把句子说完——
-      那等于**把用户该练的部分练掉了**。
+     ① 共情（对**处境**）—— 不限，且主动用
+        "Oh no, that sounds rough." / "Ugh, two versions in one week."
+        用户含糊或卡住时尤其该给：他要的是被接住，不是被考。
+     ② 认可（对**内容**）—— 门控在「用户确实说清了」（!isVague）
+        "Yeah, that's a fair point."
+        ★ 它同时是**语言输入**：用户要能把这句搬去夸真人。
+          所以必须「真人会说 + 有具体指向」——"Nice!" 学不到任何东西。
+     ③ 看法（对**事**）—— 允许分歧，但必须带视角限定
+        "I'd worry about the timeline." / "For me the second one's safer."
+        禁第二人称判定："You're wrong." / "That doesn't make sense."
+        ★ B9 没被推翻：B9 禁的是**评判用户**，不是「AI 不许有态度」。
+          这两件事常被混成一件（见 docs/day27-反馈与优先级.md §6 第 4 条）。
+     ④ 评价（对**语言 / 人**）—— 永禁
+        "Good job." / "Your English is getting better." / "You explained that well."
+        B9（PRD §9.2，四条一票否决之一）+ 会提前关掉练习动机（用户满足了就不练了）。
 
-   ③ **不无条件肯定**
-      模型天然爱夸。若用户说得含糊就回 "Great job!"，用户立刻满足、练习结束。
-      所以明确要求：只有用户确实说清楚了才认可，否则**继续追问细节**。
+   甲、轮型：服务端强制，**不靠模型自觉**
+     用户拍板：「追问不能连续出现两次」，两个追问之间至少隔一句表态。
+
+     ★★ 计数单位是 **AI 台词序列**，不是「轮」——
+        开场白（8 主题的 "So, what's the status?"）与沉默催促都是 AI 台词，
+        但都发生在用户开口之前、不配任何一轮 →
+        `transcriptTurns` 会跳过它们（frontend/pages/dialogue.html 那段注释
+        写得很清楚「ai 在 pending 为空时直接跳过」）→ history 里根本没有它们。
+        只看 history，服务端会以为「上轮没问」而放行追问，
+        用户听到的却是连着两个问句 —— 正是要消除的那个现象。
+        所以前端要额外带一条 lastAiLine（最近一条 AI 台词，不论是否配对），
+        服务端用 buildAiSeq 拼成完整序列再数。
+
+     ① 尾部连续问句 >= 2  → 本轮禁问号（**豁免也不给**，机会用完了）
+     ② 尾部连续问句 == 1  → 默认禁问号；但 isVague(userText) 时豁免一次
+        （PRD §6.1 要求「说得含糊必须追问」，硬禁会把这条机制打死；
+          只豁免一次，正好覆盖「澄清通常要两步」：先问是什么，再问多具体）
+     ③ 尾部连续问句 == 0  → 自由，倾向问
+
+     词数分档：追问轮 <= 14 词；表态轮 <= 22 词。
+     ★ 2026-10-26 从 12/18 放宽（用户拍板）：情绪轮要同时说「接住情绪 +
+       一句站得住的话 + 自己的想法」，12 词里塞不下，硬塞就成模板句。
+       放宽只给了表态轮与情绪轮；追问轮仍是短句（14 词），
+       「手递话筒」这个性质没变。
+     ★ 情绪轮：hasEmotion(userText) 为真时，turnRule 改成强制三成分
+       （顺序不可换，见 turnRule）。纯事实陈述不触发 —— 每轮都鼓励会变成捧场。
+     ★ 表态轮必须留「钩子」：复述一个具体细节，或给出自己的态度。
+       只说 "Okay." 用户接不上；语音模式下沉默倒计时是关着的
+       （dialogue.html 的 armSilence 开头就 return），接不上就真冷场。
 
    ★ 追问边界：8 主题只能在该主题的 anchor / followUps 范围内问，
      FREE 无此约束（F6 不判偏题，见 PRD §6.3）。
@@ -47,7 +84,8 @@
    follow_up —— 用户没说清，追问细节（带 followUpType）
    nudge     —— 用户沉默太久，催一句（契约 §3 的 silenceSeconds）
 
-   ★ 判定交给模型，但**必须在服务端做合理性校验**（see pickKind）：
+   ★ 判定交给模型，但**必须在服务端做合理性校验**（see deriveKind；Day 28 起
+     干脆不再让模型报 kind —— 轮型是服务端算的，比模型的自我报告可靠）：
    模型偶尔会返回契约没列出的值，前端拿到会走进else 分支显示成奇怪的东西。
      ——「模型说什么都照单全收」是这类系统最常见的线上事故。
    -------------------------------------------------------------------- */
@@ -240,39 +278,70 @@ function statusToCode(httpStatus) {
 }
 
 /* ---------- 提示词 ---------- */
+/* ---------- 提示词 ---------- */
+/* ★ Day 28：FREE 的人设拼成一行。
+   字段是 {who, job, fact}，全部可选 —— 缺了也能跑，只是 AI 没有身份。
+   ★ 为什么标签用英文：这段是直接拼进英文 system 的，
+     中文标签会让模型在英文句子里"换算"一次，容易走形。
+   ★ 为什么只给三个标签：要给的是**立场**，不是**履历**。
+     标签越多，模型越会每轮引用它（"as a designer I..."），
+     既占词数又比不问更假。7 天内不需要一个完整的人生。 */
+function personaLine(persona) {
+  const p = (persona && typeof persona === 'object') ? persona : {};
+  const parts = [p.who, p.job, p.fact]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean);
+  return parts.join(' / ');
+}
+
 /* 8 主题的「不迁就」取向：角色 + 追问边界。 */
 function systemPromptFor(topic) {
   const isFree = !topic || !topic.topicId || topic.topicId === 'FREE';
 
   if (isFree) {
+    /* ★ Day 28：FREE 有了人设（整场一个人、跨场轮换，前端挑并随请求带上）。
+       没有身份时模型说 "I'd probably..." 是空的 —— 那个 "I" 没有东西可依，
+       于是只能说 "I think it depends" 这种谁都能说的话，比不问更假。
+       ★ 但人设只给「立场」，不给「履历」：见下面 "Never invent your own past"。
+         原因是模型拿到背景就会疯狂消费它（每轮提猫、提通勤），
+         既占掉词数，又比不问更假。 */
+    const pl = personaLine(topic && topic.persona);
     return [
-      'You are the other person in a casual English conversation practice session.',
+      'You are chatting with someone in a casual English conversation practice session.',
       '',
-      'Your job: respond like a real person would, in ONE short spoken sentence (or two at most).',
+      'Who you are in this conversation:',
+      '  ' + (pl || '(no fixed identity - stay neutral, do not invent one)'),
+      'Stay this person for the whole session. Never mention that you are an AI.',
       '',
-      'Hard rules:',
-      '1. Never evaluate, never judge, never conclude. Do not encourage or motivate the learner.',
-      '   You are chatting, not coaching. No "that\'s great!", no advice, no summarizing their life.',
-      '2. Do not simplify your vocabulary or slow down your speech for them.',
-      '   They understand more than they can say; that gap is exactly what they are practising.',
-      '3. Never finish their sentence for them. Never complete a thought they left open.',
-      '4. React to what they actually said. Ask something that follows from their words,',
-      '   not from a prepared list. If they go off topic, just follow wherever they went.',
-      '5. Keep it natural and conversational, like a colleague chatting between meetings.',
-      '   Vary your sentence length and phrasing. Do not reuse the same opening word twice in a row.',
-      '6. Reply in English only. Even if they switch to Chinese, stay in English.',
+      'What you say:',
+      '1. React to what they actually said - one specific detail, not a generic "interesting".',
+      '   Reactions are always welcome: "Oh no, that sounds rough." "Ugh, that commute."',
+      '2. Say what YOU think when you have a view. Always as a view, never as a verdict:',
+      '   "I\'d hate that." / "For me, mornings are the worst."',
+      '   Never: "You\'re wrong." / "That doesn\'t make sense." / "That\'s not right."',
+      '3. If they said something clear and specific, you may acknowledge it:',
+      '   "Yeah, that\'s a fair point." Keep it reusable - something a real person',
+      '   could say to another real person. "Nice!" teaches them nothing.',
+      '4. Ask when you genuinely need something, not as a reflex.',
       '',
-      'Turn length (this matters more than it looks):',
-      /* ★ Day 23 新增。同伴反馈「AI 一直讲，他没办法说话」——加语音之后
-         这条从「优化」变成「必需」：AI 出声时15 词要说 7–10 秒，
-         而用户组织一句A2 英语要 15–30 秒。AI 每多说一句，
-         用户能开口的窗口就少一截。数字定 12 而不是 15：
-         口头追问 12 词左右足够，问句本来就不长。 */
-      '7. Keep every turn under 12 words. One short question or one short remark.',
-      '   Never two sentences. Never a paragraph. Never a list.',
-      '8. End with a question whenever you can. A question hands the floor back to them;',
-      '   a statement leaves them nothing to answer, and they go quiet.',
-      '9. If you have more than one thing you could ask, ask the SMALLEST one only.'
+      'What you must NOT do:',
+      '- Never comment on their English. No "your English", "you explained that well",',
+      '  "clearly", "good job", "well done". You are not a teacher.',
+      '- Never invent your own past. You have no memories to draw on:',
+      '  no "last week I...", "when I was in college...", "I used to...".',
+      '  The identity above is all you are.',
+      '- Do not simplify your vocabulary or dodge difficulty with easier synonyms.',
+      '  They understand more than they can say; that gap is what they are practising.',
+      '- Never finish their sentence. If they trail off, wait or ask.',
+      '- If they go off topic, just follow wherever they went.',
+      '- Reply in English only. Even if they switch to Chinese, stay in English.',
+      '',
+      'Vary your phrasing. Do not open two turns in a row with the same word',
+      'or the same construction.'
+      /* ★ Day 28：原来这里有一段 Turn length（含 "End with a question whenever you can"），
+         已移出提示词 —— 它和「表态轮不许问」是直接冲突的两条，
+         放在同一份 system 里模型只会挑自己爱听的那条执行。
+         现在词数与问句由 buildMessages 按实际轮型追加一条 system 下发（见 turnRule）。 */
     ].join('\n') + OUTPUT_FORMAT;
   }
 
@@ -286,30 +355,35 @@ function systemPromptFor(topic) {
   const lines = [
     'You are role-playing as ' + role + ' in a workplace English conversation practice session.',
     '',
-    'Your job: respond like that person would, in ONE short spoken sentence (or two at most).',
+    'What you say:',
+    '1. React to what they actually said - one specific detail, not a generic "interesting".',
+    '   "Oh no, two versions in one week." / "Ugh, that sounds like a long day."',
+    '2. Say what YOU think when you have a view. Always as a view, never as a verdict:',
+    '   "I\'d worry about the timeline." / "Honestly, I\'d go with the second one."',
+    '   Never: "You\'re wrong." / "That doesn\'t make sense." / "That\'s not right."',
+    '3. If they said something clear and specific, you may acknowledge it:',
+    '   "Yeah, that\'s a fair point." Keep it reusable - something a real colleague',
+    '   could actually say to you later. "Nice!" teaches them nothing.',
+    '4. Ask when you genuinely need something. You do not have to ask every turn.',
     '',
-    'Hard rules:',
-    '1. Do NOT judge whether they are off topic, and do NOT correct their grammar or logic.',
-    '   That is a separate system\'s job. Your job is only to keep the conversation going.',
-    '2. Do not simplify your vocabulary, do not slow down, and do not use simpler',
-    '   synonyms to dodge difficulty. They understand more than they can say;',
-    '   that gap is exactly what they are practising.',
-    '3. Never finish their sentence for them. If they trail off, ask - do not complete it.',
-    '4. Do not praise them unconditionally. Only acknowledge when they actually got',
-    '   something clear and specific. Vague answers get a follow-up question, not a compliment.',
-    '5. Stay strictly inside this topic\'s scope. Reply in English only.',
+    'What you must NOT do:',
+    '- Never judge whether they are off topic, and never correct their grammar or logic.',
+    '  That is a separate system\'s job. Your job is only to keep the conversation going.',
+    '- Never comment on their English: no "your English", "you explained that well",',
+    '  "clearly", "good job". You are not a teacher.',
+    '- Do not simplify your vocabulary, do not slow down, and do not use simpler',
+    '  synonyms to dodge difficulty. They understand more than they can say;',
+    '  that gap is exactly what they are practising.',
+    '- Never finish their sentence. If they trail off, ask - do not complete it.',
+    '- Stay strictly inside this topic\'s scope. Reply in English only.',
     '',
-    /* ★ Day 23 新增。数字定 12 词而非 15 —— 与同伴反馈直接相关：
-       他说「AI 一直讲，我没办法说话」。加语音之后 AI 每多说一句，
-       用户的开口窗口就少 7–10 秒。追问本来就不需要长句，
-       12 词够把一个具体的东西问清楚。 */
-    'Turn length (this matters more than it looks):',
-    '6. Keep every turn under 12 words. One short question. Never two sentences,',
-    '   never a paragraph, never a list of questions.',
-    '7. End with a question. A question hands the floor back to them; a statement',
-    '   leaves them nothing to answer, and they go quiet.',
-    '8. Ask the SMALLEST thing you are unsure about - not everything you are unsure about.',
-    ''
+    'Vary your phrasing. Do not open two turns in a row with the same word',
+    'or the same construction.'
+    /* ★ Day 28：原第 4 条「Do not praise them unconditionally ... not a compliment」
+       已并入上面第 1/3 条的四层边界 —— 那条的本意（禁空泛表扬）保住了，
+       但它连带把「共情」也禁了，用户体感是"冷冰冰、只会追问"。
+       ★ 原「Turn length / End with a question」整段移出：
+         与「表态轮不许问」直接冲突，见 turnRule。 */
   ];
 
   if (anchor) {
@@ -331,39 +405,71 @@ function systemPromptFor(topic) {
 
   lines.push(
     'Naturalness:',
-    '  React to what they actually said. Ask something that follows from their words,',
-    '  not from a prepared script. Vary sentence length and phrasing.',
-    '  If they say something vague or off-topic, press on the vagueness rather than changing',
-    '  the subject yourself.'
+    '  React to what they actually said, not to a prepared script.',
+    '  If they are vague or off-topic, press on the vagueness rather than changing',
+    '  the subject yourself - unless this turn tells you not to ask.'
   );
   return lines.join('\n') + OUTPUT_FORMAT;
 }
 
 /* 沉默催促：单独一条 system，措辞与上面不同 —— 它要的是"把人拉回来"，
-   不是"继续聊天"。混进systemPrompt 会让模型分不清。 */
-function nudgePrompt(topic) {
+   不是"继续聊天"。混进systemPrompt 会让模型分不清。
+   ★ Day 28：加 questionRun 参数。原因：催促本身也是一句「AI 开口」，
+     如果上一句已经是问句，再用问句催他，就是连着两个问句 ——
+     正是用户拍板要消除的那个现象。所以轮型在这里也要生效。 */
+function nudgePrompt(topic, questionRun) {
   const isFree = !topic || !topic.topicId || topic.topicId === 'FREE';
+  /* ★ Day 28：FREE 的第一句**就走这里**（静默 5 秒 AI 先开口，不是 open 路径），
+     所以人设必须带上 —— 否则第一句是「没有身份的人」说的，
+     从第二句起突然有了身份，用户一眼就看出是两个人。 */
+  const pl = isFree ? personaLine(topic && topic.persona) : '';
+
+  const invite = Number(questionRun) >= 1
+    ? [
+        'Do NOT ask a question this time - you already asked one.',
+        'Say something that keeps the door open instead: a short encouraging remark,',
+        'a small piece of your own thought, or "Take your time". No question mark.'
+      ].join('\n  ')
+    : 'Say one short natural question or invitation to get them talking again.';
+
   return isFree
     ? [
-        'The other person has gone quiet. Say something natural to get them talking again.',
+        pl ? 'You are: ' + pl : 'You are the other person in this conversation.',
+        'They have gone quiet. Say something natural to get them talking again.',
+        invite,
         'One short English sentence. Do not comment on the silence itself in a formal way,',
-        'do not say "you have been quiet". Just naturally invite them to continue.',
-        'Reply in English only.'
+        'do not say "you have been quiet". Reply in English only.'
       ].join('\n') + OUTPUT_FORMAT
     : [
         'You are role-playing as ' + (topic.role || 'a colleague') + '.',
         'The learner has gone quiet. Nudge them to speak, in character, naturally.',
+        invite,
         'One short English sentence. Do not lecture them about the silence.',
         'Stay inside the topic. Reply in English only.'
       ].join('\n') + OUTPUT_FORMAT;
 }
 
 /* ---------- 组装 messages ---------- */
-function buildMessages(topic, history, userText, silenceSeconds) {
+/* ★ Day 28：轮型判定收拢到 decideTurn **一处**，buildMessages 只消费结果。
+
+   ★ 为什么必须收拢：同一条判据（这一轮能不能问）现在有两个用途 ——
+     ① 写进提示词（turnRule）；② 决定回给前端的 kind（deriveKind）。
+     如果两处各算一遍，条件改一处就会分叉，而分叉的表现是
+     "AI 明明没问，却回报 follow_up" 这种没人会去查的静默错误。
+
+   ★ 参数 turn 由调用方（handleChat）算好传进来：
+     { run, vague, blocked }。沉默路径也用 turn.run —— 催促本身
+     也是一句 AI 开口，上一句是问句时不能再用问句催。 */
+function buildMessages(topic, history, userText, silenceSeconds, turn) {
+  /* 只带最近 MAX_HISTORY 轮：prompt tokens 直接等于钱，
+     且历史越长模型越容易"越说越套路"。 */
+  const recent = (Array.isArray(history) ? history : []).slice(-MAX_HISTORY);
+  const t = turn || { run: 0, vague: isVague(userText), blocked: false };
+
   /* 沉默催促：history 里没有本轮发言，走独立提示词。 */
   if (silenceSeconds > 0) {
     return [
-      { role: 'system', content: nudgePrompt(topic) },
+      { role: 'system', content: nudgePrompt(topic, t.run) },
       /* 带最近几轮让它知道在聊什么，但用 summary 角色说明"这些是背景"，
          避免模型把对话当成自己的发言记录来续写。 */
       { role: 'user', content: '(The conversation so far: ' + summarizeHistory(history) + ')' }
@@ -372,9 +478,6 @@ function buildMessages(topic, history, userText, silenceSeconds) {
 
   const msgs = [{ role: 'system', content: systemPromptFor(topic) }];
 
-  /* 只带最近 MAX_HISTORY 轮：prompt tokens 直接等于钱，
-     且历史越长模型越容易"越说越套路"。 */
-  const recent = (Array.isArray(history) ? history : []).slice(-MAX_HISTORY);
   recent.forEach((h) => {
     if (h && typeof h.userText === 'string' && h.userText) {
       msgs.push({ role: 'user', content: h.userText });
@@ -384,28 +487,15 @@ function buildMessages(topic, history, userText, silenceSeconds) {
     }
   });
 
-  /* ★★ Day 23 新增：把「上一轮他没说明白」这件事带进本轮提示词。
-     为什么需要：pickKind 一直在算 kind（含 follow_up / too_short），
-     但它**只被回传给前端**，而前端 dialogue.html 只取 aiText，
-     kind 走到那里就被丢了 —— 于是「模型知道他说得含糊」这个信息
-     从来没被用上。提示词里那两句硬约束（不许无条件肯定、
-     说得含糊就追问）没有具体抓手，模型看到含糊就习惯性连问两层。
+  /* ★★ Day 28：把「本轮能不能问」和「能说多长」合成**一条** system 下发。
+     为什么合成一条而不是两条：两条会互相打架 ——
+     一条说「说得含糊就追问」，另一条说「本轮不许问」，
+     模型只会挑自己爱听的那条执行（Day 27 那次 `No JSON` 挡住格式要求，
+     就是"两条指令打架、权重高的赢"的现成例子）。
 
-     同伴反馈「AI 一直讲，我没办法说话」在这里有一份：
-     被连问两层的人答不上来 → 更沉默 → 更被催。
-     现在把 kind 变成**下一句的约束**而不是一个没人看的返回值。 */
-  const lastUser = recent.length ? recent[recent.length - 1] : null;
-  if (lastUser && isVague(lastUser.userText)) {
-    msgs.push({
-      role: 'system',
-      content: [
-        'Their last answer was too short or too vague to build on.',
-        'Ask ONE very small, very concrete follow-up question - a single word answer',
-        'would be enough. Do NOT ask a second question. Do NOT restate what they said.',
-        'Keep it under 8 words.'
-      ].join('\n')
-    });
-  }
+     ★ 这里取代了 Day 23 的那段「上一轮他说得含糊 → 追问一下」：
+       含糊不再是独立条件，而是轮型判定里的**豁免项**（见 turnRule）。 */
+  msgs.push({ role: 'system', content: turnRule(t.run, t.vague, t.emotion) });
 
   /* ★★ Day 27：这一行原来是「(Reply with ONE short spoken English sentence only.
      No JSON, no quotes, no explanation.)」—— Day 23 加它是为了防模型把 JSON 或引号
@@ -422,6 +512,184 @@ function buildMessages(topic, history, userText, silenceSeconds) {
   });
 
   return msgs;
+}
+
+/* ---------- Day 28：轮型 ---------- */
+
+/* AI 台词序列：history 里所有 aiText（按时间序）+ 末尾补一条 lastAiLine。
+   ★ 为什么需要 lastAiLine：开场白（8 主题的 "So, what's the status?"）
+     与沉默催促都发生在用户开口之前，没有配对的用户发言 →
+     transcriptTurns 会把它们跳过（frontend/pages/dialogue.html 里那段注释
+     写得很清楚：「ai 在 pending 为空时直接跳过 —— 没有对应的用户发言，
+     它不是任何一轮的回应」）→ history 里根本没有它们。
+     只看 history，服务端会以为"上轮没问"从而放行追问，
+     用户听到的却是连着两个问句。
+   ★ 去重：正常一轮之后 lastAiLine 必然等于 history 最后一条 aiText，
+     相同就不重复追加，否则一次问句会被数成两条。 */
+function buildAiSeq(history, lastAiLine) {
+  const seq = [];
+  (Array.isArray(history) ? history : []).forEach((h) => {
+    if (h && typeof h.aiText === 'string' && h.aiText.trim()) seq.push(h.aiText.trim());
+  });
+  const tail = String(lastAiLine || '').trim();
+  if (tail && seq[seq.length - 1] !== tail) seq.push(tail);
+  return seq;
+}
+
+/* 是否以问号结尾。
+   ★ 允许问号后面跟闭引号/括号：模型常把整句包在引号里（"What kind?"），
+     只判最后一个字符会漏掉这一类。 */
+function endsWithQuestion(text) {
+  return /\?["'”’)\]]*\s*$/.test(String(text || '').trim());
+}
+
+/* 末尾连续问句的条数：从后往前数，遇到第一句非问句就停。
+   ★ 用户拍板的口径是「追问不能连续出现两次」，所以真正要看的是
+     **连了几个**，而不是「上一句是不是问句」—— 后者数不出连问两层。 */
+function trailingQuestionRun(aiSeq) {
+  let n = 0;
+  const arr = Array.isArray(aiSeq) ? aiSeq : [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (!endsWithQuestion(arr[i])) break;
+    n++;
+  }
+  return n;
+}
+
+/* 本轮指令：问不问 + 多长。三种形态，**互斥**，一次只下发一条。
+     run >= 2      连问上限已用完 → 强制表态，豁免也不给
+     run == 1      默认表态；isVague 时豁免一次（PRD §6.1 要求含糊必须追问）
+     run == 0      自由，倾向追问
+
+   ★ 表态轮为什么必须点明「不许有问号」而不是只说「别问」：
+     模型会把「别问太多」理解成「问一个就好」，实测里这种指令基本无效。
+     用可机械检查的形式（不许出现 ?）它才真的不写问号。
+   ★ 表态轮为什么要「钩子」：只说 "Okay." 用户接不上；
+     而语音模式下沉默倒计时是关着的（armSilence 开头就 return），
+     接不上就真冷场，没有催促兜底。 */
+function turnRule(questionRun, vague, emotion) {
+  const run = Number(questionRun) || 0;
+  const blocked = run >= 2 || (run === 1 && !vague);
+
+  /* ★ 2026-10-26：情绪轮的固定三成分，顺序不可换。
+     用户要求的原话是「既要有他的想法，也要有特定语境下对用户负面情绪的鼓励」——
+     三者缺一都不成立：只有鼓励是无脑捧场，只有想法是冷冰冰，
+     只有共情是没有内容。
+     ★ 第一行只写「三部分、按这个顺序」，不复述「他听起来很累」——
+       各分支的引导句已经说过一次，重复一遍模型容易把开头写两遍。 */
+  const WARM = [
+    'Three parts, in this order:',
+    '1. Name the specific strain they just showed, using their own detail.',
+    '   Not "I understand", not "I know how you feel".',
+    '2. One line that holds up: "I\'d feel the same." / "That would wear anyone down."',
+    '   It is a shared reaction, not a grade. Never "great job", "well done",',
+    '   "you\'re doing great", "don\'t worry", "cheer up".',
+    '3. Then your own view, as a view: "I\'d still raise it early." / "I\'d say it\'s worth it."'
+  ].join('\n');
+
+  /* ★ 2026-10-26：格式提醒补在**每一条**轮型指令的末尾。
+     原因见 chat 与 8 主题两条 system 末尾的 OUTPUT_FORMAT —— 那条 system 排在最前面，
+     而这条 turnRule 是模型读到的最后一条 system（紧挨用户发言），
+     它整段都是内容指令、不提格式，模型偶尔就整轮忘了包 JSON。
+     不重复整段 OUTPUT_FORMAT（两条格式说明会互相稀释），只指回去。 */
+  const FORMAT_NOTE = 'Format: the same {"en","zh"} JSON object as defined above.';
+
+  if (blocked) {
+    return [
+      'THIS TURN: do not ask anything. There must be no question mark at all.',
+      emotion ? WARM : [
+        'React instead - either pick one specific detail they just said and respond to it,',
+        'or state your own view on it.'
+      ].join('\n'),
+      'Under 22 words. One sentence, or two very short ones.',
+      'Leave them something to pick up: the detail you echoed, or a view they can push back on.',
+      FORMAT_NOTE
+    ].join('\n');
+  }
+
+  /* 情绪优先于含糊：含糊也可能是「说不出来就是因为累」，
+     这时逼他澄清细节，比先接住情绪更不近人情。 */
+  if (emotion) {
+    return [
+      'THIS TURN: they sound worn down - answer that before anything else.',
+      WARM,
+      'You may end with one short question if it comes naturally - it is optional,',
+      'and there must be at most one question mark.',
+      'Under 22 words.',
+      FORMAT_NOTE
+    ].join('\n');
+  }
+
+  if (vague) {
+    return [
+      'THIS TURN: their answer was too short or too vague to build on.',
+      'Ask ONE very small, very concrete question - a single word answer would be enough.',
+      'Do not ask a second question. Do not restate what they said.',
+      'Under 14 words.',
+      FORMAT_NOTE
+    ].join('\n');
+  }
+
+  return [
+    'THIS TURN: under 14 words. One question, and let it be the last thing you say.',
+    'Ask the smallest thing you are still unsure about - not everything.',
+    FORMAT_NOTE
+  ].join('\n');
+}
+
+/* 轮型判定的**唯一入口**。返回 { run, vague, blocked }：
+     run     —— 尾部已连了几个问句
+     vague   —— 用户这句是否撑不起追问
+     blocked —— 本轮是否禁止问号
+
+   ★ blocked 的优先级要说清（用户拍板的口径）：
+     ① run >= 2：连问上限已经用完，**即使含糊也不豁免** ——
+        否则一直含糊就能一直连问，退回 Day 23 那个
+        「连问两层 → 答不上来 → 更沉默 → 被催」的死循环。
+     ② run == 1 且含糊：豁免一次。PRD §6.1 要求「说得含糊必须追问」，
+        硬禁会把这条核心机制打死；只豁免一次，正好覆盖
+        「澄清通常要两步」（先问是什么，再问多具体）。
+     ③ 其余：允许问。 */
+function decideTurn(history, userText, lastAiLine) {
+  const recent = (Array.isArray(history) ? history : []).slice(-MAX_HISTORY);
+  const aiSeq = buildAiSeq(recent, lastAiLine);
+  const run = trailingQuestionRun(aiSeq);
+  const vague = isVague(userText);
+  const emotion = hasEmotion(userText);
+  const blocked = run >= 2 || (run === 1 && !vague);
+  return { run: run, vague: vague, emotion: emotion, blocked: blocked };
+}
+
+/* 回给前端的 kind（契约 §3：normal / follow_up / nudge）。
+
+   ★★ Day 28 重写。原实现 pickKind(raw, userText) 是从**模型返回的纯文本**里
+      找 "normal" / "follow_up" 这两个词。但 Day 27 之后模型回的是
+      `{"en":"...","zh":"..."}` —— 开头永远是 `{`，
+      所以 `^\s*normal` 和 `^\s*nudge` 永远匹配不到、`follow_up` 只能靠
+      撞巧出现在正文里。整段判据实际上是死代码，
+      kind 一直在走最后的「按长度兜底」，等于没判。
+
+      现在改成**由轮型推出**：我们自己知道这一轮有没有问、用户是不是含糊，
+      不需要再问模型一遍。少一次猜测，也不会两处判据分叉。
+
+   ★ 口径：AI 只表态不问 → normal（正常接话，没追问）；
+           用户含糊但被豁免允许追问 → follow_up（带类型）；
+           用户说清了、AI 追问了 → normal（不是「因为你说得不清楚」才问的）。 */
+function deriveKind(turn, userText) {
+  const t = turn || {};
+  /* ★ 用户还没开口（8 主题开场白 kind="open"）：没有「他说得含糊」这回事。
+     不加这一条的话 isVague('') 返回真 → 开场白会被标成 follow_up/too_short，
+     而那句话明明是 AI 自己开的话题。实测（Day 28）踩到过。 */
+  if (!String(userText || '').trim()) return 'normal';
+  if (t.blocked) return 'normal';
+  if (!t.vague) return 'normal';
+
+  /* too_short 与 vague 的区分沿用原判据的边界（3 词以内算太短），
+     只是搬到这里，让 followUpType 与契约 §3 的枚举对得上。
+     （incomplete「说到一半停住」没被回传：模型不再报告它，
+       而 isVague 也判不出「句子没说完」，硬猜会误报。） */
+  const words = String(userText || '').trim().split(/\s+/).filter(Boolean);
+  return { kind: 'follow_up', followUpType: words.length <= 3 ? 'too_short' : 'vague' };
 }
 
 /* 「这句话含糊到撑不起下一轮」的判据。
@@ -453,6 +721,42 @@ function isVague(text) {
   return fillers / words.length > 0.5;
 }
 
+/* 「这句话里有负面情绪」的判据（2026-10-26 · 用户要求「多带鼓励」）。
+   turnRule 靠它决定这一轮要不要走「接住情绪 + 站得住的话 + 自己的想法」三成分。
+
+   ★ 为什么用关键词表，而不是让模型自己判要不要鼓励：
+     模型判这个会飘 —— 同一句话两次结果不同；而且它倾向**每轮都夸**，
+     那就成了捧场。纯函数判，行为可测、可复现、可回放。
+   ★ 为什么宁可多报也不要漏：
+     用户的原话是「特定语境下对用户负面情绪的鼓励」——
+     漏掉情绪等于这次改动没做；多鼓励一次只是稍微热络，用户不会觉得假。
+   ★ 但要排掉「假阴性反转」：
+     "It's not that hard." / "I'm not tired." 不是负面情绪，
+     所以看命中词前面 18 个字符里有没有否定词。
+   ★ 已知边界（写在这里，免得以后当 bug 修）：
+     - "not sure I can do it" → 命中 not sure ✓
+     - "It's not the first time it's been hard." → 否定词离 "hard" 太远，
+       会误报。接受：多给一次鼓励，比漏掉真实情绪便宜。 */
+const EMOTION_WORDS = /\b(tired|exhausted|drained|worn out|worn down|long day|slammed|swamped|busy week|nervous|anxious|worried|worry|stressed|stress|pressure|scared|afraid|panic|overwhelmed|struggling|struggle|stuck|behind|failing|failed|a mess|hard|tough|difficult|impossible|hopeless|sick of|fed up|give up|whatever|not sure|no idea|don'?t know|can'?t|couldn'?t)\b/i;
+
+const NEGATION_BEFORE = /\b(not|never|isn'?t|wasn'?t|aren'?t|don'?t|doesn'?t|didn'?t)\b(\s+\w+){0,2}\s*$/i;
+
+function hasEmotion(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  /* ★ 必须逐个命中词检查，不能只看第一个：
+     "I'm not stressed, but it's hard." 的第一个命中（stressed）被否定排除，
+     但后面还有真的情绪（hard）。只看第一个就会把整句判成"没情绪"。 */
+  const re = new RegExp(EMOTION_WORDS.source, 'gi');
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const before = s.slice(Math.max(0, m.index - 18), m.index);
+    if (!NEGATION_BEFORE.test(before)) return true;
+    if (m.index === re.lastIndex) re.lastIndex++;   // 防零宽匹配死循环
+  }
+  return false;
+}
+
 function summarizeHistory(history) {
   const recent = (Array.isArray(history) ? history : []).slice(-MAX_HISTORY);
   if (!recent.length) return '(nothing yet)';
@@ -463,30 +767,10 @@ function summarizeHistory(history) {
 }
 
 /* ---------- 服务端校验模型输出 ---------- */
-/* ★ 为什么要校验：模型偶尔会返回契约里没列出的值（比如把 kind 说成"question"）。
-   前端拿它去 switch 会走进 else，显示成奇怪的东西。
-   ——「模型说什么都照单全收」是这类系统最常见的线上事故。 */
-function pickKind(raw, userText) {
-  const text = String(raw || '').toLowerCase();
-
-  if (/^\s*nudge\b|^\s*催/.test(text)) return 'nudge';
-  if (/follow[_ -]?up|追问/.test(text)) {
-    /* follow_up 必须带类型，缺了就按"说得含糊"处理：
-       这是最常见的一种，也是最该追问的一种。 */
-    const m = text.match(/(too[_ -]?short|vague|incomplete)/);
-    const sub = m ? m[1].replace(/[_ ]/g, '') : 'vague';
-    return { kind: 'follow_up', followUpType: sub };
-  }
-  if (/^\s*normal\b|正常/.test(text)) return 'normal';
-
-  /* 模型没给可识别的值时，按用户这句话的实际情况兜底：
-     明显短 → too_short，否则当 normal（宁可少追问，不要逼问）。 */
-  const words = String(userText || '').trim().split(/\s+/).filter(Boolean);
-  if (words.length > 0 && words.length <= 3) {
-    return { kind: 'follow_up', followUpType: 'too_short' };
-  }
-  return 'normal';
-}
+/* ★ Day 28：原 pickKind(raw, userText) 已删除，改为 deriveKind(turn, userText)
+   （见上面「轮型」一节）。删它的理由不是它写错了，而是**它的输入已经不存在了** ——
+   Day 27 起模型回的是 JSON，不再是 "normal / follow_up" 这种纯文本标签。
+   留着它会一直匹配不到，而"看起来在工作、其实永远走兜底"是最难发现的一类问题。 */
 
 /* 把超过上限的回复截到**最后一个完整的句子**上。
    ★ 为什么按句子边界而不是按字符（Day 23）：
@@ -549,7 +833,9 @@ const OUTPUT_FORMAT = [
   'The rule "Reply in English only" applies to the VALUE of "en", not to this JSON wrapper.',
   'Return exactly one JSON object, with nothing before or after it:',
   '{"en":"<the English sentence the learner hears>","zh":"<its plain Chinese translation>"}',
-  '- "en": English only. It still obeys the length limit, the style, and the question ending.',
+  '- "en": English only. It still obeys the length limit, the style,',
+  '  and whatever THIS TURN tells you about asking a question.',
+  '  (Some turns ask for one question; some forbid any question mark. Follow this turn.)',
   '- "zh": REQUIRED and never empty. Plain colloquial Chinese, same length as "en".',
   '  No pinyin, no explanation, no notes.',
   'Do not answer with bare English text. Do not wrap the JSON in a markdown code fence.'
@@ -561,7 +847,7 @@ const OUTPUT_FORMAT = [
      绝不能是「这场对话断了」——chat 挂掉比没有翻译严重得多。 */
 function parseReply(raw) {
   const s = String(raw || '').trim();
-  if (!s) return { en: '', zh: '' };
+  if (!s) return { en: '', zh: '', fellBack: true };
 
   let body = s;
   /* 模型有时会包一层 ```json 围栏 */
@@ -577,12 +863,16 @@ function parseReply(raw) {
       if (o && typeof o.en === 'string' && o.en.trim()) {
         return {
           en: o.en.trim(),
-          zh: (typeof o.zh === 'string') ? o.zh.trim() : ''
+          zh: (typeof o.zh === 'string') ? o.zh.trim() : '',
+          /* ★ 2026-10-26：fellBack 用来区分「解析失败」与「解析成功但模型没给 zh」。
+             这两种都会让卡片背面显示「这句没拿到译文」，但修法完全不同 ——
+             前者是格式约束不够，后者是 zh 字段被模型漏写。日志靠它定位。 */
+          fellBack: false
         };
       }
     } catch (e) { /* 落到下面的兜底 */ }
   }
-  return { en: s, zh: '' };
+  return { en: s, zh: '', fellBack: true };
 }
 
 /* ---------- 请求体解析 ---------- */
@@ -664,15 +954,31 @@ async function handleChat(req, res) {
     topicId: topicId,
     role: typeof body.role === 'string' ? body.role : '',
     anchor: typeof body.anchor === 'string' ? body.anchor : '',
-    followUps: Array.isArray(body.followUps) ? body.followUps : []
+    followUps: Array.isArray(body.followUps) ? body.followUps : [],
+    /* ★ Day 28：FREE 的人设。**整场一个人、跨场轮换**，由前端从
+       topics.json 的人设池里挑好、每轮随请求带上（云函数无状态，
+       它自己随机的话，一场对话里会换好几次人）。
+       这里只做字段裁剪，不做校验 —— 缺了就是「没有身份」，不报错。 */
+    persona: (body.persona && typeof body.persona === 'object') ? {
+      who: typeof body.persona.who === 'string' ? body.persona.who : '',
+      job: typeof body.persona.job === 'string' ? body.persona.job : '',
+      fact: typeof body.persona.fact === 'string' ? body.persona.fact : ''
+    } : null
   };
 
   /* silenceSeconds 已在上面的参数校验里声明，这里不重复声明。
      （重复 const 声明在严格模式下是 SyntaxError —— Day 18 踩过一次） */
   const userText = String(body.userText || '').trim();
   const history = Array.isArray(body.history) ? body.history : [];
+  /* ★ Day 28：最近一条 AI 台词，可能不属于任何一轮（开场白 / 沉默催促）。
+     不带它，「不许连问」就数不准，见 buildAiSeq。 */
+  const lastAiLine = typeof body.lastAiLine === 'string' ? body.lastAiLine : '';
 
-  const messages = buildMessages(topic, history, userText, silenceSeconds);
+  /* ★ Day 28：轮型只算一次，两处消费（提示词 turnRule / 回给前端的 kind）。
+     分开算会让两个判据慢慢分叉，而分叉的表现是静默的（见 decideTurn 注释）。 */
+  const turn = decideTurn(history, userText, lastAiLine);
+
+  const messages = buildMessages(topic, history, userText, silenceSeconds, turn);
 
   let raw;
   try {
@@ -702,6 +1008,17 @@ async function handleChat(req, res) {
   const aiText = cleanAiText(parsed.en);
   /* 中文只用于展示，给个上限：模型偶尔会把整段解释塞进 zh */
   const aiTextZh = String(parsed.zh || '').trim().slice(0, 200);
+
+  /* ★ 2026-10-26：缺译文时留一条现场证据。
+     用户实测遇到过「卡片背面显示这句没拿到译文」，但我压测 47 次一次没复现，
+     光靠猜分不清是「模型没包 JSON」还是「包了但漏了 zh」。
+     这行日志只在缺译文时打，正常请求不产生日志噪音。
+     raw 只截 400 字符，模型输出里没有密钥，进了云函数日志也不会泄露用户数据。 */
+  if (!aiTextZh) {
+    console.warn('[chat][zh-missing] fellBack=' + parsed.fellBack +
+      ' en=' + JSON.stringify(String(aiText || '').slice(0, 120)) +
+      ' raw=' + JSON.stringify(String(raw || '').slice(0, 400)));
+  }
   if (!aiText) {
     return sendError(res, 200, 'LLM_BAD_RESPONSE',
       'AI 返回的内容去掉包装后是空的', { gotPath: '/api/chat' });
@@ -722,8 +1039,10 @@ async function handleChat(req, res) {
      ★ 前端 dialogue.html 目前只取 aiText，kind 走到那里会被丢 ——
        那是前端的事，本轮不动（契约 §3 的字段仍然保留）。 */
 
-  const kindRaw = silenceSeconds > 0 ? 'nudge' : null;
-  const kind = kindRaw || pickKind(raw, userText);
+  /* ★★ Day 28：kind 不再由模型说了算，改由轮型推出（deriveKind）。
+     见 pickKind 删除处的注释 —— 模型回 JSON 之后，原判据的输入已经不存在。
+     ★ silenceSeconds > 0 仍然是 nudge，这一点没变：催促不可能是别的东西。 */
+  const kind = silenceSeconds > 0 ? 'nudge' : deriveKind(turn, userText);
 
   sendJSON(res, 200, {
     ok: true,
