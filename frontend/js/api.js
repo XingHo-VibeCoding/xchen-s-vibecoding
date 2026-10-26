@@ -456,7 +456,14 @@ return {
       kind: params.kind || 'reply',
       role: params.role || '',
       anchor: params.anchor || '',
-      followUps: params.followUps || []
+      followUps: params.followUps || [],
+      /* ★ Day 28：FREE 的人设（{who, job, fact}），整场同一个。
+         缺了就是「没有身份」，云函数会退化成中性人格，不报错。 */
+      persona: params.persona || null,
+      /* ★ Day 28：最近一条 AI 台词，**不论有没有配成一轮**。
+         开场白与沉默催促不属于任何一轮，history 里没有它们；
+         不单独带上去，云函数的「不许连问」会漏数这两类。 */
+      lastAiLine: params.lastAiLine || ''
     }, CHAT_TIMEOUT_MS).then(function (data) {
       return {
         aiText: data.aiText,

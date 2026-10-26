@@ -1604,6 +1604,200 @@ body::before {
   color: var(--text-muted);
 }
 
+/* ============================================================
+   2026-10-26 · AI 台词翻卡（正面英文 / 背面中文）
+   ------------------------------------------------------------
+   为什么做成卡片而不是「点一下在下面展开中文」：
+     中文一直挂着，人会先扫中文再读英文，这个产品就没意义了。
+     藏起来才逼人先读英文，读不懂再主动翻。
+   为什么背面还留着英文（压成小字）：
+     纯替换等于读完中文就把原句弄丢了，而卡片的价值正是「对照」。
+
+   ★ 三个实现要点，改之前先读：
+     ① 覆盖全局 `button` 样式必须用 `.tr-row.is-ai button.tr-card` 这一串 ——
+        全局的 `button:hover:not(:disabled)` 是 (0,2,1)，只写 `.tr-card` 压不住，
+        表现是悬停时卡片被涂成 --surface-soft 浅色（深底上直接花掉）。
+     ② 两面用 grid 叠在同一格里（grid-area: 1/1），容器尺寸自动取较高的那一面
+        → 翻面时卡片的宽高都不变，按行布局不会抖。
+        3D 转到 90° 时可视宽度趋近 0，宽度若由内容撑开，整段对话会左右跳；
+        这正是套一层固定网格的原因。
+     ③ perspective 放在 .tr-card（父）、preserve-3d 放在 .tr-flip，
+        缺一个的话两个面会变成平铺拼接而不是翻转。
+   ★ 动效时长 360ms；系统开启「减少动态效果」时由文件末尾的全局规则
+     把 transition/animation 压到 0.01ms，翻面变成瞬时切换，无需另写一份。
+   ============================================================ */
+.tr-row.is-ai button.tr-card,
+.tr-row.is-ai button.tr-card:hover:not(:disabled),
+.tr-row.is-ai button.tr-card:active:not(:disabled) {
+  position: relative;
+  max-width: 78%;
+  padding: 0;
+  border: 0;
+  background: none;
+  transform: none;
+  text-align: left;
+  font-weight: 400;
+  perspective: 900px;
+  /* 全局 button 有 `transition: all`，留着会让悬停位移作用到按钮本身、
+     与内部 3D 翻转叠加出重影。翻卡的所有过渡都在子元素上各自声明。 */
+  transition: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 高光：翻面时扫一道弱光。用 background-position 移动而不是平移元素 ——
+   平移会溢出圆角，而 .tr-flip 不能加 overflow:hidden（会压平 3D 上下文）。 */
+.tr-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 240, 220, 0.22) 50%, transparent 58%);
+  background-size: 220% 100%;
+  background-position: 130% 0;
+  opacity: 0;
+}
+
+.tr-card.is-flipping::before {
+  animation: cardSheen 380ms ease-out;
+}
+
+@keyframes cardSheen {
+  0%   { opacity: 1; background-position: 130% 0; }
+  100% { opacity: 0; background-position: -30% 0; }
+}
+
+.tr-flip {
+  display: grid;
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 200ms var(--ease-soft);
+}
+
+/* 悬停整卡轻抬 2px：只做位移，不动尺寸 —— 位移不会影响 grid 的高度计算 */
+.tr-card:hover .tr-flip {
+  transform: translateY(-2px);
+}
+
+.tr-face {
+  grid-area: 1 / 1;
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--night-edge);
+  border-radius: var(--radius-lg);
+  background: var(--night-raised);
+  color: var(--night-text);
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transition: transform 360ms var(--ease-soft), border-color 200ms var(--ease-soft);
+}
+
+.tr-front { transform: rotateY(0deg); }
+.tr-back  { transform: rotateY(180deg); }
+
+.tr-card[aria-pressed="true"] .tr-front { transform: rotateY(-180deg); }
+.tr-card[aria-pressed="true"] .tr-back  { transform: rotateY(0deg); }
+
+.tr-card:hover .tr-face {
+  border-color: #6B5240;
+}
+
+/* 右下折角：静置暗棕暗示「可以翻」，悬停变蜜橘 */
+.tr-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  background: #6B5240;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  transition: background-color 200ms var(--ease-soft);
+}
+
+.tr-card:hover .tr-corner {
+  background: var(--primary);
+}
+
+/* 「点一下看中文」：右内边距留给折角，别让字压在三角上 */
+.tr-afford {
+  display: block;
+  margin-top: var(--space-2);
+  padding-right: 18px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--night-muted);
+  transition: color 200ms var(--ease-soft);
+}
+
+.tr-card:hover .tr-afford {
+  color: var(--night-accent);
+}
+
+/* 背面：左侧蜜橘竖条 = 「这一面是中文」的物理暗示 */
+.tr-back {
+  padding-left: calc(var(--space-4) + 6px);
+}
+
+.tr-back::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+/* 背面顶上的小字英文：保留对照，但不许抢中文的视线 */
+.tr-back-en {
+  display: block;
+  font-family: var(--font-en);
+  font-style: italic;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--night-muted);
+}
+
+/* 背面中文：这里要**盖掉**上面 .tr-zh 的「附注小字」设定 ——
+   同一行中文，在附注位置是配角，翻到背面它就是主角。 */
+.tr-back .tr-zh {
+  display: block;
+  margin-top: var(--space-2);
+  padding-right: 34px;          /* 让开右下角的 EN 键 */
+  font-size: var(--text-base);
+  line-height: 1.75;
+  color: var(--night-text);
+}
+
+/* 缺译文（模型没按 {en,zh} 返回，或走了降级台词）。
+   用次一级色 + 不加粗：它是说明，不是这句台词的内容。 */
+.tr-back .tr-zh-missing {
+  color: var(--night-2nd);
+  font-size: var(--text-sm);
+}
+
+/* 右下 EN 回翻键：不是真按钮（整张卡都是按钮），只是提示还能翻回去 */
+.tr-en-key {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--night-edge);
+  border-radius: 5px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--night-muted);
+  transition: color 200ms var(--ease-soft), border-color 200ms var(--ease-soft);
+}
+
+.tr-card:hover .tr-en-key {
+  color: var(--night-accent);
+  border-color: var(--night-accent);
+}
+
 .tr-text.en::before,
 .tr-text.en::after {
   /* 只在英文台词两侧各放一个，不做「连续引号」——
@@ -1795,6 +1989,15 @@ body::before {
 
   /* 气泡占宽放宽：窄屏上再留 22% 空白，一句英文要折成三行 */
   .tr-bubble {
+    max-width: 88%;
+  }
+
+  /* ★ 翻卡也必须跟着放宽：上面那条卡片规则是 `.tr-row.is-ai button.tr-card`
+     （0,3,1），比这里的 `.tr-bubble`（0,1,0）高 —— 不显式覆盖的话，
+     手机上卡片仍卡在 78%，比用户气泡窄一截。 */
+  .tr-row.is-ai button.tr-card,
+  .tr-row.is-ai button.tr-card:hover:not(:disabled),
+  .tr-row.is-ai button.tr-card:active:not(:disabled) {
     max-width: 88%;
   }
 }

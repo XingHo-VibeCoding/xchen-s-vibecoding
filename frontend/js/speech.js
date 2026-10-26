@@ -64,9 +64,18 @@
   /* ---------- 参数（每个都有理由，不是随手填的） ---------- */
 
   /* 连续静音多久算「你说完了」（毫秒）。
-     ★ 定 2.5 秒：英语句间停顿典型值 0.5–1.5 秒，
-       2.5 秒既能接住换气与思考，又不会让人干等。 */
-  var SILENCE_END_MS = 2500;
+     ★ 2026-10-26 两轮调整，最终定 3.5 秒：
+       ① 原值 2.5 秒 → 用户报「句子讲完只录到两个单词」：
+          目标用户是「一开口就卡住的人」，说到一半停下想词 3 秒太常见，
+          2.5 秒就判他"说完了"，后半句根本没进去。
+       ② 先拉到 5 秒 → 用户立刻报「反应太慢，说完还要等好一会」。
+          实测等待 = 静音 + 识别，识别只占 1 秒，剩下全是这里。
+       ③ 折中 3.5 秒。★ 为什么 3.5 能同时成立：
+          「说完了」不再只靠这一个判据 —— 用户点「我说完了」会**立刻**收尾
+          （见 dialogue.html 的 submit 处理：空框 + 录音中 = 催识别并自动提交）。
+          所以想快的人点一下，1 秒就出字；卡壳的人不用点，3.5 秒兜底。
+       3.5 秒 ≈ 英语换气/思考的上限，再短就回到误截断。 */
+  var SILENCE_END_MS = 3500;
 
   /* 音量阈值：低于这个值算「没在说」。
      ★ 为什么不是 0：环境噪音、空调、键盘声都会让音量不为零，
@@ -102,8 +111,17 @@
   var spoke = false;        /* 这一轮里说过话没有（决定能否靠静音收尾） */
   var speaking = false;     /* AI 是否正在朗读 */
   var recording = false;    /* 是否正在录 */
+  /* ★ 2026-10-26：这一轮是「静音收尾」还是「用户主动停」。
+     静音收尾要**立刻重新开录**（见 finishRecording）——
+     否则上传识别那 1–3 秒里麦克风是关的，用户接着说的一句话会凭空消失。
+     这正是「只能说两个词」的另一半原因：前两个词录到了，
+     停顿后的后半句正好落在识别窗口里，全丢。 */
+  var autoRestartPending = false;
   var timerId = null;       /* 最长录音计时器 */
-  var token = 0;            /* 每轮录音的代号，防止旧回调污染新一轮 */
+  var token = 0;            /* 每轮录音的代号（2026-10-26 起不再用于丢弃识别结果，
+                               改用 sessionGen —— 连续分段时 token 每段都变，
+                               会把上一段在途的结果误判成过期） */
+  var sessionGen = 0;       /* 整场会话代号：只有用户主动结束对话才作废在途识别 */
   var buf = null;           /* 音量采样缓冲，依赖 analyser.fftSize，建ctx 时才 new */
 
   /* ---------- 事件回调（由 dialogue.html 注入） ----------
@@ -336,6 +354,8 @@
          否则用户还没开口就因为环境安静被判为「说完」，
          得到一个空录音、弹一次「没听清」—— 纯属骚扰。 */
       if (spoke && quietMs >= SILENCE_END_MS) {
+        /* ★ 标成「静音收尾」= 收完立刻重新开录，不等识别结果 */
+        autoRestartPending = true;
         stopRecording();
         return;
       }
@@ -349,16 +369,25 @@
 
   /* ---------- 录音结束 → 上传识别 ---------- */
   function finishRecording() {
+    /* ★ 2026-10-26：这三样必须在 release() 之前取 —— 它会把 recorder 置 null。
+       原来 mime 在 release 之后取，永远拿到空，于是所有音频一律兜底成 audio/mp4，
+       与浏览器实际录出来的 webm 对不上（服务端按 mp4 解析，识别质量受影响）。 */
+    var hadVoice = spoke;
+    var shouldRestart = autoRestartPending && hadVoice && chunks.length > 0;
+    autoRestartPending = false;
+    var mime = (recorder && recorder.mimeType) || '';
+
     release();
 
     if (!chunks.length) {
+      if (shouldRestart) restartRecording();
       hooks.onEmpty();
       return;
     }
-    var mime = (recorder && recorder.mimeType) || '';
     var blob = new Blob(chunks, { type: mime || 'audio/mp4' });
     chunks = [];
     if (!blob.size) {
+      if (shouldRestart) restartRecording();
       hooks.onEmpty();
       return;
     }
@@ -368,20 +397,52 @@
        会以为又不灵了，于是重复说话 → 被当成两句。 */
     hooks.onStateChange('transcribing');
 
+    /* ★★ 2026-10-26（三修之二）：**停的那一刻就重新开录，不等识别结果**。
+       改之前是「识别回来再重启」（页面 onSpeechResult 里那句），
+       中间隔着上传 + 腾讯云识别的 1–3 秒，这段麦克风是关的。
+       用户停顿后被截断，接着说的后半句正好落在这段聋区里，
+       于是框里只剩前两个词 —— 这就是「只录到两个单词」的另一半原因。
+       ★ 为什么不会串账：重启前这一轮的 stream 已经 release，chunks 是新数组；
+         识别结果回来时页面按「拼接」处理，两段按顺序接上。
+       ★ 为什么放在 onStateChange('transcribing') 之后：让页面先知道"在识别"，
+         再收到"又开始录了"，合成出「识别中，但你可以接着说」这一句。 */
+    if (shouldRestart) restartRecording();
+
     if (!global.Api || !global.Api.speechToText) {
       hooks.onError('no-api');
+      /* ★ 这条早退也必须在"识别中"计数上还一次，否则页面的
+         「正在识别」永远挂着（页面按 transcribing / transcribed 配对计数）。 */
+      hooks.onStateChange('transcribed');
       return;
     }
-    var myToken = token;
+    /* ★★ 2026-10-26（三修之三）：这里原来用 `token`（每轮录音的代号）判断
+       "结果是不是过期的"。现在录音会**连续分段**：一段在识别、下一段已经在录，
+       而每次重启都会 ++token —— 于是前一段的识别结果回来时被判成"过期"直接丢掉，
+       两段都成了「没听清」。把判据换成**整场会话**的代号：
+       只有用户真的结束这场对话（stopListening）才作废在途结果。 */
+    var myGen = sessionGen;
     global.Api.speechToText(blob).then(function (r) {
-      if (myToken !== token) return;
+      if (myGen !== sessionGen) return;
       var text = (r && r.text) ? String(r.text).trim() : '';
       if (r && r.degraded && r.code) hooks.onError(r.code);
       if (!text) hooks.onEmpty();
       else hooks.onResult(text);
     }).catch(function (err) {
-      if (myToken !== token) return;
+      if (myGen !== sessionGen) return;
       hooks.onError((err && err.code) || 'UNKNOWN');
+    }).then(function () {
+      /* ★ 2026-10-26：识别收尾必须回报一次，否则页面的「正在识别」永远挂着。
+         因为录音在识别期间是继续的，页面不能靠「下一个 recording 事件」推断识别结束 ——
+         那个事件在识别**开始之前**就已经到了。 */
+      hooks.onStateChange('transcribed');
+    });
+  }
+
+  /* 静音收尾后重新开录。失败不重试 —— 硬重试会形成死循环，
+     等页面下一次触发（用户点开始说话 / 说完一轮）即可。 */
+  function restartRecording() {
+    startRecording().then(function (r) {
+      if (r !== 'ok') { /* busy-speaking / 权限被收走等：什么都不做 */ }
     });
   }
 
@@ -394,11 +455,126 @@
     return !!synth && typeof global.SpeechSynthesisUtterance === 'function';
   }
 
+  /* ---------- Day 28：挑音色 ----------
+     背景：Day 23 至今**一次都没调用过 getVoices()**，一直用浏览器默认音色。
+     同一份代码在三个环境里拿到的嗓子完全不同：
+
+       Edge 桌面   Microsoft Aria Online (Natural)   接近真人
+       Chrome 桌面 Microsoft David / Zira            导航播报
+       安卓 Chrome  系统 TTS                          中等
+
+     也就是说"AI 讲话很人机"里有一大块根本不是提示词的问题，
+     只是用 Chrome 打开了。这里挑一下就能白拿一个代际的改善。
+
+     ★ getVoices() 的坑：Chrome 首次调用常常返回**空数组**，
+       要等 voiceschanged 事件之后才有值。所以
+         ① 模块加载时先调一次把它叫醒；
+         ② **每次朗读前都挑**，不做一次性缓存 ——
+            空列表时退回默认音色，等列表到了下一句自然就用上了。
+     ★ 为什么按名字打分而不是按 localService：
+       最好的那些（Natural / Google）恰恰是在线音色，
+       按"本地优先"会把它们全排到最后。 */
+
+  var badVoices = {};        /* 朗读报错过的音色，本页内不再选它 */
+  var voiceLogged = false;
+
+  function scoreVoice(v) {
+    if (!v || !v.lang) return -1;
+    var lang = String(v.lang).toLowerCase();
+    if (lang.indexOf('en') !== 0) return -1;   /* 只要英语 */
+
+    var name = String(v.name || '').toLowerCase();
+    var s = 0;
+    if (name.indexOf('natural') >= 0 || name.indexOf('neural') >= 0) s += 100;
+    if (name.indexOf('google') >= 0) s += 80;
+    if (/(samantha|aria|jenny|guy|ava|allison|serena|karen|moira|daniel)/.test(name)) s += 60;
+    if (name.indexOf('online') >= 0) s += 10;
+
+    if (lang === 'en-us') s += 30;
+    else if (lang === 'en-gb') s += 20;
+    else s += 10;
+
+    /* 老 SAPI 音色（David / Zira / Mark / Hazel）名字平平无奇，
+       光靠 en-US +30 会被排到前面去 —— 明确扣分，它们是机械感的本体。 */
+    if (/(david|zira|mark|hazel|george)/.test(name) && s < 100) s -= 40;
+    return s;
+  }
+
+  function listVoices() {
+    if (!synth || typeof synth.getVoices !== 'function') return [];
+    try { return synth.getVoices() || []; } catch (e) { return []; }
+  }
+
+  function pickVoice() {
+    var all = listVoices();
+    if (!all.length) return null;
+    var best = null;
+    var bestScore = 0;      /* >0 才算数：全都不合格时退回浏览器默认 */
+    for (var i = 0; i < all.length; i++) {
+      var v = all[i];
+      var key = v.voiceURI || v.name;
+      if (badVoices[key]) continue;
+      var s = scoreVoice(v);
+      if (s > bestScore) { bestScore = s; best = v; }
+    }
+    return best;
+  }
+
+  /* 音色档次，给界面用（"要不要提示换个浏览器"）。
+     natural / google / online 都不提示；**generic 才提示**。
+     ★ 不能拿 pickVoice() 的结果来判档：David / Zira 那种老音色会被打分扣到
+       负数，pickVoice() 返回 null，判出来是 'none' —— 而那一档恰恰是
+       最该提示的情况。所以这里独立扫一遍列表，只看"有没有更好的"。 */
+  function voiceTier() {
+    var all = listVoices();
+    var best = 'none';
+    for (var i = 0; i < all.length; i++) {
+      var v = all[i] || {};
+      var lang = String(v.lang || '').toLowerCase();
+      if (lang.indexOf('en') !== 0) continue;
+      var n = String(v.name || '').toLowerCase();
+      if (n.indexOf('natural') >= 0 || n.indexOf('neural') >= 0) return 'natural';
+      if (n.indexOf('google') >= 0) return 'google';
+      if (n.indexOf('online') >= 0) { if (best === 'none') best = 'online'; continue; }
+      if (best === 'none') best = 'generic';
+    }
+    return best;
+  }
+
+  function voiceName() {
+    var v = pickVoice();
+    return v ? String(v.name || '') : '';
+  }
+
+  function logVoiceOnce(v) {
+    if (voiceLogged) return;
+    voiceLogged = true;
+    try {
+      console.log('[speech] 朗读音色 = ' +
+        (v ? (v.name + ' (' + v.lang + ')') : '浏览器默认（getVoices 还空着）'));
+    } catch (e) { /* 日志失败不影响朗读 */ }
+  }
+
+  /* 把语音列表叫醒（Chrome 首调用返回空，触发后才会陆续填上）。 */
+  if (synth) { try { listVoices(); } catch (e) {} }
+
   function speak(text, opts) {
     opts = opts || {};
     if (!canSpeak() || !text) return Promise.resolve(false);
-    var u = new SpeechSynthesisUtterance(String(text));
-    u.lang = (opts.lang) || 'en-US';
+    return speakOnce(String(text), opts, 0);
+  }
+
+  /* ★ Day 28：拆出 speakOnce 只为**换一把音色重试一次**。
+     attempt 只允许 0 → 1：在线音色（Natural / Google）拿不到时
+     （网络不通、语音包缺失）会立刻 onerror，那时换本地的再念一遍，
+     比整句没声音好。但不做无限重试 —— 每次都是一次真实合成尝试。 */
+  function speakOnce(text, opts, attempt) {
+    var voice = pickVoice();
+    var u = new global.SpeechSynthesisUtterance(text);
+    /* ★ 先设 voice 再设 lang：部分实现里 lang 会把 voice 覆盖掉，
+       顺序反了会出现"挑了 Aria，念出来还是 David"。 */
+    if (voice) u.voice = voice;
+    u.lang = voice ? voice.lang : ((opts.lang) || 'en-US');
     u.rate = SPEECH_RATE;
     u.pitch = SPEECH_PITCH;
 
@@ -410,21 +586,38 @@
         speaking = false;
         resolve(ok);
       }
+      function retryOrFail() {
+        if (voice && attempt === 0) {
+          /* 记下坏音色，本页内不再选它；然后换一把重来。 */
+          badVoices[voice.voiceURI || voice.name] = true;
+          settled = true;                 /* 别让下面那个 capMs 再结一次 */
+          speaking = false;
+          resolve(speakOnce(text, opts, 1));
+          return true;
+        }
+        return false;
+      }
+
       u.onend = function () { done(true); };
       /* E10：朗读失败不阻塞对话，文字照常显示。
          这里保证 onend 一定会被调用 → Promise 一定要结掉，
          否则页面的「正在听」状态会永远卡住。 */
-      u.onerror = function () { done(false); };
+      u.onerror = function () {
+        if (retryOrFail()) return;
+        done(false);
+      };
       speaking = true;
       try {
         synth.cancel();          /* 打断上一句，防止排队堆积 */
         synth.speak(u);
+        logVoiceOnce(voice);
       } catch (e) {
+        if (retryOrFail()) return;
         done(false);
       }
       /* 兜底：某些浏览器 onend 不触发（切标签页时尤其明显）。
          按字数估一个上限，宁可提前放行也不能卡死对话。 */
-      var capMs = Math.min(20000, 2500 + String(text).split(/\s+/).length * 450);
+      var capMs = Math.min(20000, 2500 + text.split(/\s+/).length * 450);
       setTimeout(function () { done(true); }, capMs);
     });
   }
@@ -445,9 +638,19 @@
     canRecord: canRecord,
     canSpeak: canSpeak,
     startListening: startRecording,   /* 名字沿用，省得页面全改 */
+    /* ★ 2026-10-26：停止录音**不再顺带作废在途识别**。
+       暂停时用户可能刚说完一句、识别还在路上，那正是他要留的话 ——
+       作废掉等于「一按暂停就丢一句」。 */
     stopListening: stopRecording,
+    /* 真正结束这场对话（跳结果页 / 换主题）才作废在途识别，
+       防止结果回填到已经结束的对话里。 */
+    endSession: function () { sessionGen++; stopRecording(); },
     speak: speak,
     stopSpeaking: stopSpeaking,
+    /* Day 28：给界面判断"要不要提示换个浏览器"用。
+       voiceTier() 返回 natural / google / generic / none。 */
+    voiceTier: voiceTier,
+    voiceName: voiceName,
     isListening: function () { return recording; },
     isSpeaking: function () { return speaking; },
     on: function (name, fn) {

@@ -65,6 +65,7 @@
   var KEY_PINNED = NS + '.pinnedTopics';       // Day 11 新增（临时）
   var KEY_FAVORITE = NS + '.favoriteItems';    // Day 11 新增（临时）
   var KEY_PENDING = NS + '.pendingTranscript'; // Day 19 新增（临时，读完即删）
+  var KEY_PERSONA = NS + '.personaIndex';      // Day 28 新增（FREE 人设轮换游标）
   var SCHEMA_VERSION = 1;
 
   /* localStorage 在某些环境会直接抛错（Safari 无痕模式访问 setItem），
@@ -311,6 +312,31 @@
     }
   }
 
+  /* ============================================================
+     Day 28：FREE 的人设轮换游标
+     ------------------------------------------------------------
+     用途：FREE 每场换一个对话对象（用户拍板），**整场固定不变**。
+
+     ★ 为什么用轮换而不是 Math.random：
+       随机不可复现 —— 用户报「刚才 AI 那句很怪」，我不知道那场是谁。
+       轮换后看游标就知道。效果上「每场都是不同的人」完全一样。
+     ★ 为什么存「第几次」而不是「哪个 id」：人设池会增删，
+       存游标取模，池子改了也不会错位。
+     ★ 读写失败（无痕 / 配额满）返回 0：退化成「永远第一个人」，
+       比抛错好 —— 人设拿不到不该让对话开不起来。 */
+  function nextPersonaIndex(total) {
+    var n = parseInt(total, 10);
+    if (!n || n <= 0) return 0;
+    var ls = store();
+    if (!ls) return 0;
+    var cur = 0;
+    try { cur = parseInt(ls.getItem(KEY_PERSONA), 10); } catch (e) { cur = 0; }
+    if (isNaN(cur) || cur < 0) cur = 0;
+    var idx = cur % n;
+    try { ls.setItem(KEY_PERSONA, String(cur + 1)); } catch (e) { /* 写不进去，下次还用它 */ }
+    return idx;
+  }
+
   window.Storage = {
     practiceCount: practiceCount,
     bumpPracticeCount: bumpPracticeCount,
@@ -324,6 +350,8 @@
     toggleFavorite: toggleFavorite,
     // Day 19 新增（临时）
     savePendingTranscript: savePendingTranscript,
-    takePendingTranscript: takePendingTranscript
+    takePendingTranscript: takePendingTranscript,
+    // Day 28 新增
+    nextPersonaIndex: nextPersonaIndex
   };
 })();

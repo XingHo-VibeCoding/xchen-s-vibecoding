@@ -278,6 +278,7 @@
         trCount: document.getElementById('tr-count'),
         composer: document.getElementById('composer'),
         sayInput: document.getElementById('say-input'),
+        btnSay: document.getElementById('btn-say'),
         /* Day 23：排队提示（AI 还在回，用户又说了几句时的状态） */
         queueNote: document.getElementById('queue-note'),
         /* Day 23：语音提示行 + 跳过朗读按钮 */
@@ -322,7 +323,7 @@
          ★ Day 18 新增用途：这三个字段是**随请求带给 /api/chat 的**——
            云函数读不到静态目录里的 topics.json，缺了它们追问会跑出主题外。
            「拿到约束数据」和「拿到兜底台词」是同一次 fetch 的两处用途。 */
-      var TOPIC = { role: '', anchor: '', followUps: [] };
+      var TOPIC = { role: '', anchor: '', followUps: [], persona: null };
 
       /* 本场对话的完整往来，供送给后端当history。
          结构刻意是扁平的 [{who, text}, ...] 而不是 {userText, aiText} 成对 ——
@@ -543,6 +544,109 @@
                这不是某一处的特性，是 AI 台词的通性
            降级台词（本地句库）同样朗读 —— 用户听见的是同一句话，
            配合 noteDegraded 的说明，不会有「听到的和看到的不一样」。 */
+      /* ---------- AI 台词卡片（2026-10-26） ----------
+         正面英文、点一下翻到背面中文。用户拍板的四个视觉状态：
+         折角、悬停上浮、360ms 翻转 + 一次高光、背面左侧蜜橘条 + EN 回翻键。
+
+         ★ 为什么不是「点一下把中文加在下面」：
+           中文一直挂着，用户会先扫中文再读英文，练习就废了；
+           藏起来才逼他先读英文，读不懂再主动翻 —— 那是真需求。
+         ★ 背面保留英文（压成小字）：纯替换会让他读完中文就丢了对照，
+           而卡片的价值正是「对照着看懂这一句」。
+
+         ★ 读屏：两个面都在 DOM 里，用 aria-hidden 切换哪一面可读，
+           button 的 aria-pressed 表达「已翻到背面」。 */
+      function buildAiCard(text, zh) {
+        var card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'tr-bubble tr-card';
+        card.setAttribute('aria-pressed', 'false');
+
+        var flip = document.createElement('span');
+        flip.className = 'tr-flip';
+
+        /* 正面：英文 */
+        var front = document.createElement('span');
+        front.className = 'tr-face tr-front';
+
+        var who1 = document.createElement('span');
+        who1.className = 'tr-who';
+        who1.textContent = 'AI';
+
+        var line = document.createElement('span');
+        line.className = 'tr-text';
+        /* 整行都是 ASCII 才套衬线斜体（判据与改动前一致，理由见下方注释） */
+        if (/^[\x20-\x7E]+$/.test(text)) line.className += ' en';
+        line.textContent = text;
+
+        var afford = document.createElement('span');
+        afford.className = 'tr-afford';
+        afford.textContent = '点一下看中文';
+
+        var corner = document.createElement('span');
+        corner.className = 'tr-corner';
+        corner.setAttribute('aria-hidden', 'true');
+
+        front.appendChild(who1);
+        front.appendChild(line);
+        front.appendChild(afford);
+        front.appendChild(corner);
+
+        /* 背面：小字英文 + 中文 */
+        var back = document.createElement('span');
+        back.className = 'tr-face tr-back';
+        back.setAttribute('aria-hidden', 'true');
+
+        var who2 = document.createElement('span');
+        who2.className = 'tr-who';
+        who2.textContent = 'AI';
+
+        var backEn = document.createElement('span');
+        backEn.className = 'tr-back-en';
+        backEn.textContent = text;
+
+        back.appendChild(who2);
+        back.appendChild(backEn);
+
+        if (zh) {
+          var zhEl = document.createElement('span');
+          zhEl.className = 'tr-zh';
+          zhEl.textContent = zh;
+          back.appendChild(zhEl);
+        } else {
+          /* 缺译文照样能翻 —— 卡片点不动会让人以为它坏了。
+             文案不提技术原因：用户不需要知道是模型没按格式返回。 */
+          var miss = document.createElement('span');
+          miss.className = 'tr-zh tr-zh-missing';
+          miss.textContent = '这句没拿到译文';
+          back.appendChild(miss);
+        }
+
+        var enKey = document.createElement('span');
+        enKey.className = 'tr-en-key';
+        enKey.setAttribute('aria-hidden', 'true');
+        enKey.textContent = 'EN';
+        back.appendChild(enKey);
+
+        flip.appendChild(front);
+        flip.appendChild(back);
+        card.appendChild(flip);
+
+        card.addEventListener('click', function () {
+          var on = card.getAttribute('aria-pressed') === 'true';
+          card.setAttribute('aria-pressed', on ? 'false' : 'true');
+          front.setAttribute('aria-hidden', on ? 'false' : 'true');
+          back.setAttribute('aria-hidden', on ? 'true' : 'false');
+          /* 高光只扫一次：摘类 → 强制重排 → 再加回，否则第二次点击不重放动画 */
+          card.classList.remove('is-flipping');
+          void card.offsetWidth;
+          card.classList.add('is-flipping');
+          setTimeout(function () { card.classList.remove('is-flipping'); }, 400);
+        });
+
+        return card;
+      }
+
       function appendLine(who, text, zh) {
         // 第一条真发言到了，空态那句话就该退场
         if (el.trEmpty && el.trEmpty.parentNode) el.trEmpty.parentNode.removeChild(el.trEmpty);
@@ -553,6 +657,16 @@
 
         var row = document.createElement('div');
         row.className = 'tr-row' + (who === 'ai' ? ' is-ai' : '');
+
+        /* ★ 2026-10-26：AI 那句话走可翻卡片，用户的话保持原样。
+           用户自己说的不需要翻译，也不该能点。 */
+        if (who === 'ai') {
+          row.appendChild(buildAiCard(text, zh));
+          el.trList.appendChild(row);
+          el.trList.scrollTop = el.trList.scrollHeight;
+          speakAiLine(text);
+          return;
+        }
 
         var bubble = document.createElement('div');
         bubble.className = 'tr-bubble';
@@ -589,12 +703,9 @@
         // 新的一句永远留在视线内：记录区自己滚，不推着整页跑
         el.trList.scrollTop = el.trList.scrollHeight;
 
-        /* ★ Day 23：AI 的台词上屏之后朗读一遍。
-           为什么放在这里而不是四个调用点：见上面那段注释 ——
-           「凡是上了屏的 AI 台词就该能听」，在这一个函数里写一次就够。
-           speakAiLine 内部会判canSpeak()，朗读不可用时静默跳过（E10），
-           文字照常显示、对话不阻塞。 */
-        if (who === 'ai') speakAiLine(text);
+        /* ★ Day 23 那条「AI 台词上屏后朗读一遍」已移到上面的 AI 分支 ——
+           AI 现在走卡片路径并在分支里 return，不会走到这里。
+           朗读仍然只在上屏时发生一次：**翻面不朗读**，中文永远不出声。 */
       }
 
       /* ---------- 沉默计时：轮到用户说的时候才走 ----------
@@ -663,7 +774,7 @@
         // 没在对话（未开始 / 已暂停）就不计时 —— 停表要连沉默一起停
         if (state !== 'recording') return;
         /* ★★ Day 23 第三次修订：语音模式下**不排定倒计时**。
-           语音里「你说完了」由静音检测（speech.js 的 1.2 秒）负责，
+           语音里「你说完了」由静音检测（speech.js 的 5 秒）负责，
            已经有第二套计时器了 —— 两个计时器同时跑必然打架：
              静音检测在等你说完，沉默倒计时在等你开口。
              谁先到谁先生效，于是「停顿久一点AI 就自己说自己的」。
@@ -740,7 +851,15 @@
           kind: opts.silenceSeconds > 0 ? 'silence' : (opts.kind || 'reply'),
           role: TOPIC.role || '',
           anchor: TOPIC.anchor || '',
-          followUps: TOPIC.followUps || []
+          followUps: TOPIC.followUps || [],
+          /* ★ Day 28：本场的人设（整场同一个，见 topics.json 装配处）。
+             云函数无状态，不带上它就等于没有身份。 */
+          persona: TOPIC.persona || null,
+          /* ★ Day 28：最近一条 AI 台词，**不论有没有配成一轮**。
+             云函数靠它数「上一句是不是问句」——不传的话，
+             8 主题开场白和沉默催促在服务端是看不见的，
+             「不许连问」就会漏掉它们，用户听到连着两个问句。 */
+          lastAiLine: lastAiText()
         };
 
         return window.Api.chat(payload).then(function (r) {
@@ -760,6 +879,28 @@
          ★ 只带已完成的往返，不带 aiSay 正在等的那句（那还没上屏）。 */
       function historyForApi() {
         return transcriptTurns(6);      // 与云函数 MAX_HISTORY 一致，两边都截
+      }
+
+      /* ★★ Day 28：最近一条 AI 台词，**不论它有没有配成一轮**。
+
+         为什么不能从 historyForApi() 里取：
+         history 走 transcriptTurns，而它明确会把「没有配对用户发言的 AI 台词」
+         跳过（见下面那段注释：「ai 在 pending 为空时直接跳过」）。
+         8 主题的开场白（"So, what's the status?"）和 FREE 的沉默催促
+         恰好都落在这类里 —— 于是云函数看到的 history 里，AI 从来没开过口。
+
+         后果很具体：开场白本身是问句，云函数却以为"上轮没问"，
+         于是一进对话就放行追问 → 用户连着听到两个问句，
+         正是用户拍板要消掉的那个现象。
+
+         ★ 直接读 transcript（扁平的全量记录）而不是转成轮，
+           就不会漏；顺序天然是时间序，倒着找第一条 who==='ai' 即可。 */
+      function lastAiText() {
+        for (var i = transcript.length - 1; i >= 0; i--) {
+          var it = transcript[i];
+          if (it && it.who === 'ai' && it.text) return it.text;
+        }
+        return '';
       }
 
       /* 转成 {turn, userText, aiText} 的共用转换。
@@ -925,7 +1066,7 @@
 
          ★ 一句话说明这套东西改变了什么：
            **不再靠 8 秒倒计时判断「你说完了」，改用静音检测**。
-           你说完停一下（约 2.5 秒），系统自动识别并把文字**填进输入框**；
+           你说完停一下（约 5 秒），系统自动识别并把文字**填进输入框**；
            提交由你点「我说完了」（Day 27 起不再自动提交 —— 原因见 onSpeechResult 上方）。
            倒计时逻辑（armSilence 等）**保留但降级为备用** ——
            浏览器不支持语音时（Firefox），整套体验回落到打字，
@@ -942,6 +1083,42 @@
          ★ 迟滞（hysteresis）：开口要求 ≥6、停下要求 <3，中间地带保持不动。
            用同一个阈值的话，麦克风底噪会让数值在阈值上下反复横跳 → 文字闪烁。 */
       var recTextVoiced = null;
+      /* ★ 2026-10-26：录音状态拆成两个布尔，不再靠「最后到达的那个事件」决定文案。
+         原因：静音收尾后会**立刻重新开录**，而识别还在后台跑 ——
+         这时"正在录音"和"正在识别"同时为真，谁后到就显示谁是错的。
+         现在由 renderRecText() 合成。 */
+      var stRecording = false;
+      var transcribingCount = 0;   /* 可能有多段识别同时在途，用计数而不是布尔 */
+
+      /* ★ 2026-10-26（B 方案）：用户点「我说完了」催出来的那次识别，结果回来后要自动提交。
+         为什么这次可以自动提交、而 Day 27 否掉的那种不行：
+           Day 27 否的是**静音判定替用户决定**说完了 —— 半句被当整句提交，
+           错误次数和精彩句子全跟着失真。
+           这里是用户**自己点按钮**说他讲完了，语义完全相反。
+         ★ 只在框里是空的时候走这条路；框里有字仍然按原来的提交处理。 */
+      var pendingAutoSubmit = false;
+      var autoSubmitTimer = null;   /* 兜底：识别一直不回来时把按钮放出来 */
+
+      function renderRecText() {
+        if (!el.recText) return;
+        if (transcribingCount > 0 && stRecording) {
+          el.recText.textContent = '正在识别刚才那句，你可以接着说';
+        } else if (transcribingCount > 0) {
+          el.recText.textContent = '听到了，正在识别……';
+        } else if (stRecording) {
+          el.recText.textContent = recTextVoiced
+            ? '正在听……（说完停一下就好）'
+            : '等你开口……';
+        }
+      }
+
+      /* 「我说完了」的忙碌态。禁用是为了防连点 ——
+         连点会让第二次 submit 在识别还没回来时又触发一次收尾。 */
+      function setSayBusy(on) {
+        if (!el.btnSay) return;
+        el.btnSay.disabled = !!on;
+        el.btnSay.textContent = on ? '识别中…' : '我说完了';
+      }
       var VOICE_ON_PCT = 6;
       var VOICE_OFF_PCT = 3;
 
@@ -1065,7 +1242,8 @@
       /* ---------- 识别 → 提交 ---------- */
       /* 转写完成后**只填进输入框，不替用户提交**（Day 27 修）。
          ★ 为什么改：同伴实测「说到一半停顿约 3 秒，话就自己被交上去了」。
-           根因在这一行的上游 —— speech.js 的静音判定（SILENCE_END_MS = 2500ms）
+           根因在这一行的上游 —— speech.js 的静音判定（当时 SILENCE_END_MS = 2500ms，
+           2026-10-26 已改成 5000ms，见 speech.js 顶部那段）
            把「说话中途的停顿」当成「说完了」，识别一回来这里就自动提交，
            于是半句话变成一整句进入对话与判定（错误次数、精彩句子全跟着失真）。
            拍板方案（Day 27 · A）：识别结果只填框，提交只走「我说完了」。
@@ -1102,6 +1280,19 @@
            提交的唯一入口是用户点「我说完了」（form 的 submit 监听）。
            但必须当场说清「还没发出去」，否则他会以为已经说了、接着往下说，
            最后一大段一起交上去 —— 那比截断更难改。 */
+        /* ★★ 2026-10-26（B 方案）：如果这次识别是用户点「我说完了」催出来的，
+           填完框就直接提交 —— 他已经明确表示讲完了，不该让他再点一次。
+           放在 noteSpeech 之前：否则会先弹出「还没发出去」，紧接着就发出去了，
+           自相矛盾。 */
+        if (pendingAutoSubmit) {
+          pendingAutoSubmit = false;
+          clearTimeout(autoSubmitTimer);
+          autoSubmitTimer = null;
+          setSayBusy(false);
+          el.composer.requestSubmit();
+          return;   /* 不重启录音：提交后 AI 要开口，它说完那一侧会自己开麦 */
+        }
+
         noteSpeech('听到了，还没发出去 —— 确认没问题就点「我说完了」。', 6000);
 
         /* ★★ Day 23 第四次修订（原意保留，措辞随 Day 27 调整）：填框后**立刻**恢复识别。
@@ -1173,9 +1364,7 @@
           else if (pct < VOICE_OFF_PCT) voiced = false;
           if (voiced === recTextVoiced) return;   /* 没翻转 → 一个字都不碰 */
           recTextVoiced = voiced;
-          el.recText.textContent = voiced
-            ? '正在听……（说完停一下就好）'
-            : '等你开口……';
+          renderRecText();
         });
 
         /* 录音态变化：'recording' / 'transcribing' / 'idle' */
@@ -1183,13 +1372,26 @@
           if (st === 'transcribing') {
             /* ★ 这一句很重要：上传 + 腾讯云识别要 1–3 秒，
                不说的话用户看到「停住了，什么都没发生」，
-               会以为又不灵了，然后重复说话 → 被当成两句。 */
-            if (el.recText) el.recText.textContent = '听到了，正在识别……';
-            noteSpeech('听到了，正在识别（第一次会稍慢一点）。', 3000);
+               会以为又不灵了，然后重复说话 → 被当成两句。
+               ★ 2026-10-26：录音会在识别期间**继续**（见 speech.js 的 restartRecording），
+                 所以这里由 renderRecText 合成，如果同时在录就改成「你可以接着说」。
+                 原来那句「先别说话」的说法已经不对了 —— 现在接着说是能被录到的。 */
+            transcribingCount++;
+            renderRecText();
+            noteSpeech('听到了，正在识别刚才那段 —— 你可以接着说，不用等。', 4000);
+          } else if (st === 'transcribed') {
+            /* 一段识别收尾（成功 / 空 / 失败都会走到这里）。
+               录音这时通常已经重新开了，所以文案会回到「正在听」。 */
+            transcribingCount = Math.max(0, transcribingCount - 1);
+            renderRecText();
           } else if (st === 'idle') {
+            stRecording = false;
+            transcribingCount = 0;
+            renderRecText();
             if (el.recMeter) { el.recMeter.style.setProperty('--voice', '0%'); el.recMeter.style.opacity = '0'; }
           } else if (st === 'recording') {
-            if (el.recText) el.recText.textContent = '正在听……（说完停一下就好）';
+            stRecording = true;
+            renderRecText();
           }
         });
 
@@ -1198,15 +1400,44 @@
 
         /* 没听清：重开录音，用户不需要做任何事 */
         window.Speech.on('onEmpty', function () {
+          /* ★ B：这次空结果是「我说完了」催出来的 → 必须明确告诉他没听清，
+             不能因为等自动提交而静默（静默会被理解成页面坏了）。
+             ★ 加 transcribingCount <= 1 是为了避开并发分段：
+               多段在途时，前一段的空结果不该清掉还在等的那次。 */
+          if (pendingAutoSubmit && transcribingCount <= 1) {
+            pendingAutoSubmit = false;
+            clearTimeout(autoSubmitTimer);
+            autoSubmitTimer = null;
+            setSayBusy(false);
+            noteSpeech('没听清刚才那句。再说一次，或者直接打字。', 8000);
+            renderRecText();
+            /* ★ 录音是被「我说完了」停掉的，现在还没开。
+               提示里既然说了「再说一次」，就必须真的能听 ——
+               否则那句话是空头支票：他接着说了，页面一声不响。 */
+            if (SPEECH_OK && state === 'recording') window.Speech.startListening();
+            return;
+          }
           noteSpeech('这句没听清，再说一次好吗。', 4000);
-          if (el.recText) el.recText.textContent = '等你开口……';
+          /* 文案交给 renderRecText：这时录音通常已经自动重启，
+             直接写「等你开口」会把「正在识别 / 正在听」的合成状态冲掉。 */
+          renderRecText();
           if (SPEECH_OK && state === 'recording') {
+            /* 自动重启已经做过了，这里返回 'already' —— 留着当兜底：
+               万一那次重启失败（AI 正在朗读等），这一句能补上。 */
             window.Speech.startListening();
           }
         });
 
         /* 错误（E1 麦克风未授权、密钥没配、网络不通等） */
         window.Speech.on('onError', function (code) {
+          /* ★ B：识别失败也要把「我说完了」的等待状态收掉，
+             否则按钮会一直停在「识别中…」且禁用。 */
+          if (pendingAutoSubmit) {
+            pendingAutoSubmit = false;
+            clearTimeout(autoSubmitTimer);
+            autoSubmitTimer = null;
+            setSayBusy(false);
+          }
           if (code === 'not-allowed' || code === 'denied') {
             degradeToText('麦克风没有授权。请点浏览器地址栏的小锁允许使用麦克风。');
           } else if (code === 'audio-capture' || code === 'mic-failed') {
@@ -1460,7 +1691,11 @@
            这两个都必须在 location.href **之前**做——
            跳转之后代码就不会执行了。 */
         if (window.Speech) {
-          window.Speech.stopListening();
+          /* ★ 2026-10-26：跳转用 endSession —— 顺手作废在途识别，
+             免得结果回填到这场已经结束的对话里。
+             （暂停那处仍用 stopListening：他要留的那句话不能丢。） */
+          if (window.Speech.endSession) window.Speech.endSession();
+          else window.Speech.stopListening();
           window.Speech.stopSpeaking();
         }
         if (el.btnSkipSpeech) el.btnSkipSpeech.hidden = true;
@@ -1516,7 +1751,36 @@
       el.composer.addEventListener('submit', function (e) {
         e.preventDefault();
         var text = (el.sayInput.value || '').trim();
-        if (!text) return;               // 空的一句不算发言，也不重置沉默计时
+
+        /* ★★ 2026-10-26（B 方案）：框里是空的时候点「我说完了」，
+           原来这里的 `return` 什么都不做、也不给任何反馈 ——
+           而语音用户恰恰会在「话已说完、文字还没出来」这段时间里点它，
+           点了没反应，只能干等静音判定（5 秒）+ 识别（1 秒）。
+
+           现在这条路径的含义变成「我讲完了，别等了」：
+             立刻停录音 → 走识别（约 1 秒）→ 结果回来填框并自动提交。
+           ★ 为什么不违反 Day 27 那条「不许自动提交」：
+             那条否的是**静音判定替用户决定**说完了（半句被当整句，错误次数失真）；
+             这里是他**自己点的按钮**，语义正好相反。
+           ★ 框里有字时完全走老路 —— 他是在补充或修改文字，不是催识别。 */
+        if (!text) {
+          if (SPEECH_OK && state === 'recording' && !pendingAutoSubmit) {
+            pendingAutoSubmit = true;
+            setSayBusy(true);
+            noteSpeech('好，正在识别你刚说的那句……', 6000);
+            /* 还在录 → 立刻收尾；已经在识别（静音刚收尾）→ 什么都不用做，等结果 */
+            if (window.Speech.isListening()) window.Speech.stopListening();
+            /* 兜底：网络挂住时不能让按钮一直禁用 */
+            clearTimeout(autoSubmitTimer);
+            autoSubmitTimer = setTimeout(function () {
+              if (!pendingAutoSubmit) return;
+              pendingAutoSubmit = false;
+              setSayBusy(false);
+              noteSpeech('这次识别太慢了。再点一次「开始说话」，或者直接打字。', 8000);
+            }, 15000);
+          }
+          return;               // 空的一句不算发言，也不重置沉默计时
+        }
 
         clearSilence();                  // 用户开口了，沉默计时停
         appendLine('user', text);
@@ -1586,6 +1850,22 @@
             TOPIC.anchor = hit.anchor || '';
             TOPIC.followUps = hit.followUps || [];
 
+            /* ★★ Day 28：FREE 每场换一个对话对象，**整场固定**。
+               ★ 为什么必须在这里挑一次、存进 TOPIC，而不是在 askAi 里挑：
+                 askAi 每轮都调，在那里挑就成了"每轮换一个人" ——
+                 用户会听到 AI 第 2 轮是邻居、第 4 轮变甲方，前后身份打架。
+               ★ 为什么用轮换不用 Math.random：随机不可复现，
+                 用户报"刚才那句很怪"时无法还原那场是谁（见 storage.js）。
+               ★ 拿不到人设（无痕模式 / 数据缺失）就是 null，
+                 云函数那边会退化成"没有身份"，对话照常能开。 */
+            if (isFree) {
+              var personaList = Array.isArray(hit.personas) ? hit.personas : [];
+              var pIdx = (window.Storage && personaList.length)
+                ? window.Storage.nextPersonaIndex(personaList.length)
+                : 0;
+              TOPIC.persona = personaList[pIdx] || null;
+            }
+
             if (isFree) {
               pools.silence.lines = [hit.opening].concat(hit.openerPool || []).filter(Boolean);
               pools.reply.lines = (hit.replyPool || []).slice();
@@ -1623,6 +1903,35 @@
            有了这个钩子，测试能重新接线，不必改被测代码。 */
       bindSpeech();
       window.__rebind = bindSpeech;
+
+      /* ★ Day 28：音色档次偏机械时，给一句"换个浏览器"的提示。
+
+         ★ 为什么只提示、不自动处理：代码没法替用户换浏览器，
+           也没法在 Chrome 里凭空造出一把 Natural 嗓子。
+         ★ 为什么只在 generic 时提示：natural / google 已经够自然，
+           再弹一句就是噪音。
+         ★ 为什么要挂 voiceschanged：Chrome 的 getVoices() 首调用常常
+           返回空数组（voiceTier() 会给 'none'），列表是异步填的。
+           只看第一眼会永远判成 none，提示就永远不出现。 */
+      (function hintVoice() {
+        if (!window.Speech || typeof window.Speech.voiceTier !== 'function') return;
+        var shown = false;
+
+        function check() {
+          if (shown) return;
+          var tier = 'none';
+          try { tier = window.Speech.voiceTier(); } catch (e) { return; }
+          if (tier !== 'generic') return;
+          shown = true;
+          noteSpeech('声音偏机械的话，用 Edge 打开这个链接，AI 的声音会自然很多。', 8000);
+        }
+
+        check();
+        if (window.speechSynthesis &&
+            typeof window.speechSynthesis.addEventListener === 'function') {
+          window.speechSynthesis.addEventListener('voiceschanged', check);
+        }
+      })();
 
       /* ★ Day 23 二次修订：把三道闸挂上（focus / input / blur）。
          必须在函数定义之后、首次 render 之前调用。 */

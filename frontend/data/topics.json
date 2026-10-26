@@ -133,6 +133,56 @@
     "name": "自由对话",
     "summary": "说说你这一天——发生了什么、感觉怎么样。AI 会接着聊，不打断、不评判。",
     "durationLabel": "不限",
+    "personas": [
+      {
+        "id": "P1",
+        "who": "a neighbour in your building",
+        "job": "works shifts at a hospital",
+        "fact": "has a dog that barks at the lift"
+      },
+      {
+        "id": "P2",
+        "who": "your landlord",
+        "job": "rents out two flats in the building",
+        "fact": "answers messages fast but fixes things slowly"
+      },
+      {
+        "id": "P3",
+        "who": "someone you keep running into at the gym",
+        "job": "does sales for a small company",
+        "fact": "goes hiking most weekends"
+      },
+      {
+        "id": "P4",
+        "who": "a regular at the cafe downstairs",
+        "job": "studies part-time for a certificate",
+        "fact": "always takes the table by the window"
+      },
+      {
+        "id": "P5",
+        "who": "the person who runs the parcel pickup downstairs",
+        "job": "runs the small shop with a family member",
+        "fact": "knows everyone in the building by name"
+      },
+      {
+        "id": "P6",
+        "who": "someone from your building's group chat",
+        "job": "works from home as a translator",
+        "fact": "organises the group orders for the whole building"
+      },
+      {
+        "id": "P7",
+        "who": "a colleague from another team",
+        "job": "project manager, three projects at once",
+        "fact": "was asked to deliver a week early"
+      },
+      {
+        "id": "P8",
+        "who": "the client contact on your project",
+        "job": "handles acceptance and sign-off",
+        "fact": "has changed the requirements twice this week"
+      }
+    ],
     "opening": "How was your day?",
     "openerPool": [
       "Did anything interesting happen today?",
