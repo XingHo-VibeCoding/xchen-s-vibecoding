@@ -91,6 +91,25 @@
   /* 最长录音：防止一直占着麦克风。 */
   var MAX_RECORD_MS = 30000;
 
+  /* ★★★ 2026-10-26：自适应的音量阈值 + 硬兜底。
+     起因：iPhone 在**微信里**打开这个网址，音量条明明在动，
+     状态却永远停在「正在听……」不结束 —— 也就是永远判不出「说完了」。
+
+     根因：阈值写死 0.02，而手机麦克风（尤其微信内置内核 + AGC 自动增益）
+     有持续底噪，音量一直高于 0.02 → `quietMs` 每帧都被归零 → 永远等不到静音。
+     桌面 Chrome 的麦克风干净得多，所以这个坑只在手机上炸。
+
+     改法：
+       ① 开机先量 NOISE_CALIB_MS 的环境底噪，阈值取「底噪 × NOISE_RATIO」，
+          夹在 [VOLUME_THRESHOLD, THRESHOLD_MAX] 之间 —— 每台设备用自己的尺子。
+       ② FORCE_STOP_MS 硬兜底：这么久还没判出「说完了」，强制切一段送去识别。
+          宁可多切一刀，也不能让人对着「正在听」干等 —— 任何阈值都可能失灵，
+          但「永远卡住」是不能接受的失败方式。 */
+  var NOISE_CALIB_MS = 600;      /* 标定底噪的时长 */
+  var NOISE_RATIO = 2.2;         /* 阈值 = 底噪 × 这个倍数 */
+  var THRESHOLD_MAX = 0.12;      /* 上限：再高就听不见正常说话了 */
+  var FORCE_STOP_MS = 15000;     /* 硬兜底，15 秒必切一刀 */
+
   /* 朗读速度。1.0 是默认，0.95 略慢一点点。
      ★ 为什么不要更慢（如 0.8）：PRD §6.6 要求「不主动降语速」。
        这个产品的前提是「你听得懂但说不出来」，
@@ -109,6 +128,13 @@
   var voiceFrames = 0;      /* 连续「有声音」的帧数 */
   var quietMs = 0;          /* 已经静音多久 */
   var spoke = false;        /* 这一轮里说过话没有（决定能否靠静音收尾） */
+
+  /* ★ 2026-10-26：底噪标定与自适应阈值（理由见上面 NOISE_CALIB_MS 那段） */
+  var noiseSum = 0;         /* 标定期间的音量累加 */
+  var noiseSamples = 0;     /* 标定期间的帧数 */
+  var noiseDone = false;    /* 标定完了没有 */
+  var effThreshold = VOLUME_THRESHOLD;  /* 这一次录音实际用的阈值 */
+  var recordStartTs = 0;    /* 标定结束的时刻，硬兜底从这里开始算 */
   var speaking = false;     /* AI 是否正在朗读 */
   var recording = false;    /* 是否正在录 */
   /* ★ 2026-10-26：这一轮是「静音收尾」还是「用户主动停」。
@@ -208,6 +234,13 @@
           voiceFrames = 0;
           quietMs = 0;
           lastTs = 0;
+          /* ★ 2026-10-26：每一轮录音都重新标定底噪 —— 换设备、换房间、
+             或者用户刚好在噪音变大的时候重开，都要按当时的环境来。 */
+          noiseSum = 0;
+          noiseSamples = 0;
+          noiseDone = false;
+          effThreshold = VOLUME_THRESHOLD;
+          recordStartTs = 0;
           hooks.onStateChange('recording');
           startVolumeWatch();
           clearTimeout(timerId);
@@ -270,6 +303,13 @@
       var AC = global.AudioContext || global.webkitAudioContext;
       if (!AC || !stream) return;
       audioCtx = new AC();
+      /* ★ 2026-10-26：iOS Safari 和微信内置内核会把它创建成 suspended，
+         挂起时 getByteTimeDomainData 读出来恒为 0 —— 音量条不动、也永远判不出说完了。
+         桌面 Chrome 默认就是 running，所以这一行在电脑上测不出来。
+         （resume 是异步的，失败不抛出去：拿不到就退回原来的固定阈值。） */
+      if (audioCtx.state === 'suspended' && audioCtx.resume) {
+        try { audioCtx.resume(); } catch (e) { /* 老浏览器没有 resume */ }
+      }
       var src = audioCtx.createMediaStreamSource(stream);
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
@@ -343,8 +383,35 @@
          用真实时间差则在 60fps 和 1fps 两种情况下都算得对。 */
     var dt = (lastTs && ts > lastTs) ? (ts - lastTs) : 0;
     lastTs = ts;
+    if (!recordStartTs) recordStartTs = ts;
 
-    if (level > VOLUME_THRESHOLD) {
+    /* ★ 2026-10-26：开机先量底噪，定出这台设备自己的阈值。
+       标定期间既不判「在说话」也不累计静音 —— 否则手机底噪会被当成他开口了，
+       一标完就立刻满足「说过话 + 静音」→ 秒收尾，录到一片空。 */
+    if (!noiseDone) {
+      noiseSum += level;
+      noiseSamples++;
+      if (noiseSamples >= 40) {          /* ≈ 0.6 秒（60fps） */
+        var floor = noiseSum / noiseSamples;
+        effThreshold = Math.min(THRESHOLD_MAX,
+          Math.max(VOLUME_THRESHOLD, floor * NOISE_RATIO));
+        noiseDone = true;
+        recordStartTs = ts;              /* 硬兜底从标定结束才算 */
+      }
+      rafId = requestAnimationFrame(tickVolume);
+      return;
+    }
+
+    /* ★ 硬兜底：15 秒还没判出「说完了」，说明音量判定失灵了
+       （阈值高于底噪、或一直有持续声音盖着 —— 微信里就是这样）。
+       强制切一段送去识别：宁可多切一刀，也不能让人对着「正在听」干等。 */
+    if (ts - recordStartTs > FORCE_STOP_MS) {
+      autoRestartPending = true;         /* 切完继续听，别把后面的话也堵死 */
+      stopRecording();
+      return;
+    }
+
+    if (level > effThreshold) {
       voiceFrames++;
       quietMs = 0;
       spoke = true;
@@ -653,6 +720,9 @@
     voiceName: voiceName,
     isListening: function () { return recording; },
     isSpeaking: function () { return speaking; },
+    /* 当前这一轮实际用的音量阈值（每台设备标定出来的不一样）。
+       排查「说完不结束」时看它：如果接近 THRESHOLD_MAX，说明环境底噪很高。 */
+    currentThreshold: function () { return effThreshold; },
     on: function (name, fn) {
       if (hooks[name] && typeof fn === 'function') hooks[name] = fn;
     },

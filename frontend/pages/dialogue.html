@@ -1211,6 +1211,15 @@
           noteDiag('这个浏览器没有麦克风接口（device=无）');
           return;
         }
+        /* ★ 2026-10-26：微信内置浏览器（X5 / 微信 iOS 内核）自带两个坑 ——
+           ① 朗读基本没声音（诊断行那句「能朗读=否」就是它）
+           ② 麦克风有持续底噪，音量一直高于阈值 → 永远判不出「说完了」
+              （iPhone 实测就是这样：音量条在动，状态停在「正在听」）
+           不拦着用，但必须告诉他换个浏览器能立刻好，否则会被当成产品坏了。 */
+        if (/MicroMessenger/i.test(navigator.userAgent || '')) {
+          noteDiag('在微信里打开：朗读会没声音、语音还容易卡在「正在听」。' +
+            '点右上角「···」→ 用浏览器打开。');
+        }
         /* 不 await：诊断不能挡住对话流程。 */
         navigator.mediaDevices.getUserMedia({ audio: true })
           .then(function (stream) {
