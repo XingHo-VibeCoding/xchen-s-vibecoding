@@ -516,10 +516,39 @@
   /* ---------- AI 朗读（B2 / E10） ----------
      ★ 这一段没有换方案：SpeechSynthesis 是**真本地**的
        （用操作系统语音），不需要网络，所以从一开始就是对的。 */
-  var synth = global.speechSynthesis || null;
+  /* ★★ 2026-10-26：**不缓存** speechSynthesis。
+     用户报「没声音」，诊断行显示「能朗读=否」—— 而那是 iPhone Safari。
+     原因就在这里：iOS Safari 上这个对象有时是**页面脚本执行完之后**
+     才挂到 window 上的，模块顶层取一次拿到 null，于是
+       ① canSpeak() 永远 false → 一句都不念
+       ② 音色列表永远是空
+     桌面 Chrome 一开始就有，所以这个坑只在 iOS 上出现。
+     改成每次现取：取不到就当没这功能，能取到时下一句自然就响了。 */
+  function synthNow() { return global.speechSynthesis || null; }
+
+  /* iOS 的朗读解锁：必须在**用户手势的调用栈里**先合成一次，
+     之后异步回调里的 speak() 才不会被静默忽略。
+     用极短、零音量的一个字符去解锁 —— 不占时间也不出声。
+     ★ 只做一次（unlocked）：每次点都合成会干扰朗读队列，
+       而且第一次解锁之后本页就一直有效。 */
+  var unlocked = false;
+  function unlockAudio() {
+    if (unlocked) return true;
+    var s = synthNow();
+    if (!s || typeof global.SpeechSynthesisUtterance !== 'function') return false;
+    try {
+      var u = new global.SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 1;
+      u.lang = 'en-US';
+      s.speak(u);
+      unlocked = true;
+      return true;
+    } catch (e) { return false; }
+  }
 
   function canSpeak() {
-    return !!synth && typeof global.SpeechSynthesisUtterance === 'function';
+    return !!synthNow() && typeof global.SpeechSynthesisUtterance === 'function';
   }
 
   /* ---------- Day 28：挑音色 ----------
@@ -568,8 +597,9 @@
   }
 
   function listVoices() {
-    if (!synth || typeof synth.getVoices !== 'function') return [];
-    try { return synth.getVoices() || []; } catch (e) { return []; }
+    var s = synthNow();
+    if (!s || typeof s.getVoices !== 'function') return [];
+    try { return s.getVoices() || []; } catch (e) { return []; }
   }
 
   function pickVoice() {
@@ -623,7 +653,7 @@
   }
 
   /* 把语音列表叫醒（Chrome 首调用返回空，触发后才会陆续填上）。 */
-  if (synth) { try { listVoices(); } catch (e) {} }
+  if (synthNow()) { try { listVoices(); } catch (e) {} }
 
   function speak(text, opts) {
     opts = opts || {};
@@ -675,8 +705,10 @@
       };
       speaking = true;
       try {
-        synth.cancel();          /* 打断上一句，防止排队堆积 */
-        synth.speak(u);
+        var ss = synthNow();
+        if (!ss) { done(false); return; }
+        ss.cancel();             /* 打断上一句，防止排队堆积 */
+        ss.speak(u);
         logVoiceOnce(voice);
       } catch (e) {
         if (retryOrFail()) return;
@@ -693,7 +725,8 @@
      ★ 为什么不做「一开口就打断」：没有回声消除，
        外放的声音会被麦克风拾到，音量判定必然误判自己。 */
   function stopSpeaking() {
-    if (synth) { try { synth.cancel(); } catch (e) {} }
+    var ss = synthNow();
+    if (ss) { try { ss.cancel(); } catch (e) {} }
     speaking = false;
   }
 
@@ -714,6 +747,9 @@
     endSession: function () { sessionGen++; stopRecording(); },
     speak: speak,
     stopSpeaking: stopSpeaking,
+    /* iOS 朗读解锁：必须在用户点击的**同步调用栈**里调一次，
+       否则之后异步回调里的 speak() 会被 Safari 静默忽略（一句都不响）。 */
+    unlockAudio: unlockAudio,
     /* Day 28：给界面判断"要不要提示换个浏览器"用。
        voiceTier() 返回 natural / google / generic / none。 */
     voiceTier: voiceTier,
